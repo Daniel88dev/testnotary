@@ -5,8 +5,12 @@ Testnotary lets CI skip its test job for a commit whose tests already passed on 
 ## Language
 
 **Run**:
-One local execution of the repo's test command, on a laptop or in a cloud agent sandbox.
+One invocation of Testnotary on a laptop or in a cloud agent sandbox to test the repo's tree with its declared test command. Every run has an outcome, even one that never started the command.
 _Avoid_: Test result, execution, job
+
+**Outcome**:
+How a run ended: *passed*, *failed* or *refused*. A refused run is one Testnotary would not attest, such as a run on a dirty tree, and it may never have started the command. Only a passed run yields an attestation.
+_Avoid_: Status, result, verdict, refusal
 
 **Environment**:
 The OS, architecture, runtime and tool versions a run or a CI job executed with. It is recorded to explain results, never to decide whether CI skips.
