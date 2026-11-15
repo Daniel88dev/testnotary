@@ -19,7 +19,8 @@ import { createMachine, type Machine, type MachineOptions } from "./machine.ts";
 import { createClock, type WorldClock } from "./clock.ts";
 import { configToEnv, withServiceConfig, type LogEntry, type ServiceConfig } from "@testnotary/web/config";
 import { closeDatabase, database } from "@testnotary/web/db";
-import { issueSandboxToken } from "@testnotary/web/tokens";
+import { blockLaptopToken, revokeRepoSandboxToken, tokenIdOf } from "@testnotary/web/revocations";
+import { issueSandboxToken, rememberAccount } from "@testnotary/web/tokens";
 import type { FakeAccount } from "./github/app.ts";
 import { WORLD_AUDIT_MASTER_KEY, worldAudits, type WorldAudits } from "./audits.ts";
 import { makeSshKey, type SshKeyPair, type SshKeyType } from "./ssh-keys.ts";
@@ -130,6 +131,19 @@ export interface World {
    */
   sandboxToken(options: { creator: FakeAccount; repo: FakeRepo; name?: string; days?: number }): Promise<string>;
   /**
+   * A repo admin's Revoke on one of the repo's sandbox tokens (by its value), as the dashboard does
+   * once GitHub says `admin` is an admin of `repo` (the browser tests revoke through the dashboard).
+   * Throws when the fake GitHub does not make `admin` an admin. False when the service refuses: the
+   * token is not a sandbox token of `repo`.
+   */
+  revokeSandboxToken(options: { admin: FakeAccount; repo: FakeRepo; token: string }): Promise<boolean>;
+  /**
+   * A repo admin blocks a laptop token (by its value) on `repo`, as the People section does once
+   * GitHub says `admin` is an admin. Throws when the fake GitHub does not make `admin` an admin.
+   * False when the service refuses: the token is not a laptop token that ran on `repo`.
+   */
+  blockLaptopToken(options: { admin: FakeAccount; repo: FakeRepo; token: string; note?: string }): Promise<boolean>;
+  /**
    * A fresh SSH key pair made with the real `ssh-keygen` (Ed25519 unless `type` says otherwise, no
    * passphrase) in the world's temp directory. Never one from `~/.ssh` or an ssh-agent.
    */
@@ -239,8 +253,22 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     cleanups.push(() => service.close());
     github.app.webhookUrl = `${service.url}/api/v1/github/webhooks`;
 
-    // The `next` service has its own connections; this process opens one only for `sandboxToken`.
+    // The `next` service has its own connections; this process opens one only for `sandboxToken`
+    // and an admin's revocations and blocks.
     let sandboxTokensUsed = false;
+    const ownConnection = () => {
+      if (options.service === "next" && !sandboxTokensUsed) {
+        sandboxTokensUsed = true;
+        cleanups.push(() => closeDatabase(config.databaseUrl));
+      }
+    };
+    /** Runs `act` as the dashboard's admin-only actions do, after GitHub says `admin` is an admin of `repo`. */
+    const asAdmin = async <T,>(admin: FakeAccount, repo: FakeRepo, act: (db: ReturnType<typeof database>, by: { id: number; login: string }) => Promise<T>) => {
+      if (github.state.permission(repo, admin) !== "admin") throw new Error(`${admin.login} is not an admin of ${repo.fullName} on the fake GitHub`);
+      ownConnection();
+      await withServiceConfig(config, () => rememberAccount(database(), { id: admin.id, login: admin.login }));
+      return withServiceConfig(config, () => act(database(), { id: admin.id, login: admin.login }));
+    };
     const repos: FixtureRepo[] = [];
     cleanups.push(async () => {
       await Promise.all(repos.map((repo) => repo.remove()));
@@ -284,14 +312,23 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
         return createMachine(tmp, machineOptions);
       },
       async sandboxToken({ creator, repo, name = "agent sandbox", days = 90 }) {
-        if (options.service === "next" && !sandboxTokensUsed) {
-          sandboxTokensUsed = true;
-          cleanups.push(() => closeDatabase(config.databaseUrl));
-        }
+        ownConnection();
         const issued = await withServiceConfig(config, () =>
           issueSandboxToken(database(), { creator: { id: creator.id, login: creator.login }, repoId: repo.id, name, days }),
         );
         return issued.value;
+      },
+      async revokeSandboxToken({ admin, repo, token }) {
+        return asAdmin(admin, repo, async (db, by) => {
+          const tokenId = await tokenIdOf(db, token);
+          return tokenId ? revokeRepoSandboxToken(db, { tokenId, repoId: repo.id, by }) : false;
+        });
+      },
+      async blockLaptopToken({ admin, repo, token, note }) {
+        return asAdmin(admin, repo, async (db, by) => {
+          const tokenId = await tokenIdOf(db, token);
+          return tokenId ? blockLaptopToken(db, { tokenId, repoId: repo.id, by, note }) : false;
+        });
       },
       sshKey(keyOptions) {
         return makeSshKey(tmp, keyOptions);

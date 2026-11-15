@@ -12,7 +12,7 @@ export const repositoryName = z.string().max(200).regex(/^[A-Za-z0-9](?:[A-Za-z0
 
 /** The answers the preflight and the upload give as a clear no: the run is refused. */
 export const SERVICE_REFUSALS = {
-  /** 401: the token is unknown, revoked or expired. Never says which. */
+  /** 401: the token is unknown, revoked or expired, or an admin blocked it on this repo. Never says which. */
   token_rejected: 401,
   /** 404: no installation of the App covers the repo (or it is suspended). */
   repo_not_installed: 404,

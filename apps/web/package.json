@@ -12,6 +12,7 @@
     "./config": "./src/server/config.ts",
     "./db": "./src/db/client.ts",
     "./tokens": "./src/server/tokens.ts",
+    "./revocations": "./src/server/revocations.ts",
     "./migrate": "./src/db/migrate.ts",
     "./package.json": "./package.json"
   },

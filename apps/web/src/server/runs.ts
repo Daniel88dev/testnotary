@@ -17,6 +17,7 @@ import { now } from "./config.ts";
 import { GitHubDenied, GitHubNotConfigured, GitHubUnavailable, installationToken, sshSigningKeys, userById } from "./github.ts";
 import { apiError } from "./http.ts";
 import { installedRepoByName, latestRepoState, type RepoView } from "./installations.ts";
+import { isBlocked } from "./revocations.ts";
 import { accountLogin, authenticate, type Authenticated } from "./tokens.ts";
 import { hasWriteAccess } from "./write-access.ts";
 
@@ -33,7 +34,8 @@ export function serviceRefusal(code: ServiceRefusal): Response {
 
 /**
  * What the preflight and the upload both check, in this order: the token (`token_rejected`), the
- * repo named by `owner/name` has the App installed (`repo_not_installed`), and the token's
+ * repo named by `owner/name` has the App installed (`repo_not_installed`), the token is not
+ * blocked on that repo by an admin (`token_rejected` again, without saying why), and the token's
  * account, live on GitHub, has `admin` or `write` (`no_write_access`). A sandbox token reaches
  * only its own repo. GitHub errors propagate (wrap the handler in `withGitHubErrors`).
  */
@@ -42,6 +44,8 @@ export async function gate(db: Database, request: Request, repository: string): 
   if (!auth) return { response: serviceRefusal("token_rejected") };
   const repo = await installedRepoByName(db, repository);
   if (!repo) return { response: serviceRefusal("repo_not_installed") };
+  // A token an admin blocked on this repo is rejected here, and only here.
+  if (await isBlocked(db, auth.token.id, repo.id)) return { response: serviceRefusal("token_rejected") };
   if (auth.token.kind === "sandbox" && auth.token.repoId !== repo.id) return { response: serviceRefusal("no_write_access") };
   if (!(await hasWriteAccess(db, repo, auth.account.id))) return { response: serviceRefusal("no_write_access") };
   return { auth, repo };
