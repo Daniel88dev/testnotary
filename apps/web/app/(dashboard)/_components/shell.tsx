@@ -1,5 +1,4 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 import type { Viewer } from "../../../src/server/sessions.ts";
 import { Avatar } from "./avatar.tsx";
 import { RailLinks, SectionSelect } from "./client.tsx";
@@ -95,16 +94,13 @@ export function Rail({ viewer }: { viewer: Viewer | undefined }) {
  */
 export function MobileBar({
   title,
-  sections,
-  current,
+  repo,
   viewer,
-  children,
 }: {
   title: string;
-  sections?: { href: string; label: string }[];
-  current?: string;
+  /** In a repo: its name and the sections to pick from. */
+  repo?: { fullName: string; sections: { href: string; label: string }[] };
   viewer: Viewer | undefined;
-  children?: ReactNode;
 }) {
   return (
     <div className="dash-mob">
@@ -112,9 +108,8 @@ export function MobileBar({
         <Mark />
         {title}
       </Link>
-      {sections && current !== undefined ? <SectionSelect options={sections} current={current} /> : null}
-      {children}
-      {!sections && viewer ? (
+      {repo ? <SectionSelect options={repo.sections} fullName={repo.fullName} /> : null}
+      {!repo && viewer ? (
         <details className="menu acts">
           <summary className="btn" aria-label="Account menu">
             <Avatar accountId={viewer.account.id} size={20} />@{viewer.account.login}

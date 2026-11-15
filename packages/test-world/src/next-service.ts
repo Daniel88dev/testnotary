@@ -53,6 +53,11 @@ export async function startNextService(env: Record<string, string>, port?: numbe
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  // Compile a page before any route handler. When `next dev` (16.4, Turbopack) compiles a route
+  // handler first, every page it compiles afterwards keeps reloading itself in the browser
+  // ("[Fast Refresh] rebuilding" in a loop), so a test that seeds through a webhook before its
+  // first page view would never get a stable page.
+  await fetch(`${url}/`).then((response) => response.arrayBuffer()).catch(() => undefined);
   return { url, close: stop };
 }
 

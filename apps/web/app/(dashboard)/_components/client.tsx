@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { repoHref, sectionOf } from "../_lib/sections.ts";
 
 // The dashboard's few client parts: links that know they are current, closing open menus, the
 // phone section picker and a copy button. Everything else renders on the server.
@@ -81,8 +82,9 @@ export function MenuCloser() {
 }
 
 /** The phone and tablet section picker: a `<select>` that navigates. */
-export function SectionSelect({ options, current }: { options: { href: string; label: string }[]; current: string }) {
+export function SectionSelect({ options, fullName }: { options: { href: string; label: string }[]; fullName: string }) {
   const router = useRouter();
+  const current = repoHref(fullName, sectionOf(usePathname(), fullName));
   return (
     <select className="sel" aria-label="Section" value={current} onChange={(event) => router.push(event.target.value)}>
       {options.map((option) => (
