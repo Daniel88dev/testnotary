@@ -96,6 +96,20 @@ export function SectionSelect({ options, fullName }: { options: { href: string; 
   );
 }
 
+/** A filter `<select>` whose options are URLs: choosing one navigates there (Verifications' reason and suite). */
+export function NavSelect({ label, value, options }: { label: string; value: string; options: { href: string; label: string }[] }) {
+  const router = useRouter();
+  return (
+    <select className="sel" aria-label={label} value={value} onChange={(event) => router.push(event.target.value)}>
+      {options.map((option) => (
+        <option key={option.href} value={option.href}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** A "Copy" button for a command line. */
 export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);

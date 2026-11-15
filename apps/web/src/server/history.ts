@@ -6,6 +6,7 @@ import { attestations, jobReports, mismatches, runs, tokens, verifications } fro
 import { accountsAsOf, type ShownAccount } from "./accounts.ts";
 import { now } from "./config.ts";
 import type { Executor } from "./installations.ts";
+import { behindBy, commitAuthor, installationToken, type CommitAuthor } from "./github.ts";
 import { currentNames } from "./tokens.ts";
 
 // What the dashboard reads about a repo's runs and verifications: the Verifications and Runs
@@ -225,6 +226,52 @@ export async function listVerifications(
 /** Every verification of one commit CI built, newest first. */
 export async function commitVerifications(db: Executor, repoId: number, commit: string): Promise<VerificationShown[]> {
   return verificationRows(db, and(eq(verifications.repoId, repoId), eq(verifications.commit, commit)));
+}
+
+/** What the commit page asks GitHub: who wrote the commit, and for audits and mismatches whether the base moved. */
+export interface CommitFacts {
+  /** The commit's author; for GitHub's test merge commit on a pull request, the pull request head's. Undefined when GitHub could not be asked. */
+  author: (CommitAuthor & { ofHead: boolean }) | undefined;
+  /** By verification id, for audits and mismatches: CI's base had commits the attested commit lacked. Undefined when GitHub could not be asked. */
+  baseMoved: Map<string, boolean | undefined>;
+}
+
+/**
+ * The commit page's GitHub facts, asked live with the installation token (Contents read). GitHub
+ * trouble never breaks the page: what can't be asked reads as unknown.
+ */
+export async function commitFacts(repo: { installationId: number; fullName: string }, commit: string, shown: VerificationShown[]): Promise<CommitFacts> {
+  const facts: CommitFacts = { author: undefined, baseMoved: new Map() };
+  let token: string;
+  let built: CommitAuthor | undefined;
+  try {
+    token = await installationToken(repo.installationId);
+    built = await commitAuthor(token, repo.fullName, commit);
+  } catch {
+    return facts;
+  }
+  if (!built) return facts;
+  try {
+    const head = built.parents.length === 2 && shown.some((verification) => verification.event === "pull_request") ? built.parents[1] : undefined;
+    const author = head ? await commitAuthor(token, repo.fullName, head) : built;
+    facts.author = author ? { ...author, ofHead: head !== undefined } : undefined;
+  } catch {
+    facts.author = undefined;
+  }
+  const base = built.parents[0];
+  for (const verification of shown) {
+    if (!(verification.result === "audit" || verification.mismatch) || !verification.attestation) continue;
+    if (!base) {
+      facts.baseMoved.set(verification.id, false);
+      continue;
+    }
+    try {
+      facts.baseMoved.set(verification.id, (await behindBy(token, repo.fullName, base, verification.attestation.commit)) > 0);
+    } catch {
+      facts.baseMoved.set(verification.id, undefined);
+    }
+  }
+  return facts;
 }
 
 /** Each suite's latest verification in the window, by suite name: the repo column's Suites. */
