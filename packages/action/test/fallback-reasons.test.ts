@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { installLibrary, type ActionResult, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine, type RunActionOptions } from "@testnotary/test-world";
+import { fromJob, githubError, installLibrary, type ActionResult, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine, type RunActionOptions } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
 import { FALLBACK_REASONS, type FallbackReason } from "@testnotary/core";
 
@@ -99,7 +99,75 @@ const CASES: Partial<Record<FallbackReason, Case>> = {
       return s.ci({ idToken: false });
     },
   },
+  service_unreachable: {
+    async run() {
+      const s = await scene();
+      await s.attest();
+      return s.ci({ env: { TESTNOTARY_URL: "http://127.0.0.1:9" } });
+    },
+  },
+  service_error: {
+    async run() {
+      const s = await scene();
+      await s.attest();
+      return during(world.service.override("POST", "/api/v1/verifications", () => Response.json({ error: "internal" }, { status: 500 })), () => s.ci());
+    },
+  },
+  timeout: {
+    async run() {
+      const s = await scene();
+      await s.attest();
+      return during(
+        world.service.override("POST", "/api/v1/verifications", async (request) => {
+          await world.service.stall(request);
+          return "drop" as const;
+        }),
+        () => s.ci(),
+      );
+    },
+  },
+  repo_not_installed: {
+    async run() {
+      const s = await scene({ install: false });
+      return s.ci();
+    },
+  },
+  token_rejected: {
+    async run() {
+      const s = await scene();
+      await s.attest();
+      // An issuer with two segments after the root: no enterprise slug, so not GitHub's.
+      return s.ci({ enterpriseSlug: "acme/extra" });
+    },
+  },
+  github_denied: {
+    async run() {
+      const s = await scene();
+      await s.attest();
+      return during(denyByIpAllowList(s.repo), () => s.ci());
+    },
+    detail: /an IP allow list blocks the service/,
+  },
 };
+
+/** Runs `body` with an override in place, then removes it. */
+async function during<T>(remove: () => void, body: () => Promise<T>): Promise<T> {
+  try {
+    return await body();
+  } finally {
+    remove();
+  }
+}
+
+/** GitHub's 403 for an organization's IP allow list, on the service's commit lookups only. */
+function denyByIpAllowList(repo: FakeRepo): () => void {
+  return world.github.override(
+    "GET",
+    `/repos/${repo.owner}/${repo.name}/git/commits/:sha`,
+    () => githubError(403, `Although you appear to have the correct authorization credentials, the \`${repo.owner}\` organization has an IP allow list enabled, and your IP address is not permitted to access this resource.`),
+    { when: (request) => !fromJob(request) },
+  );
+}
 
 /** Calls that left the runner for the service or for an OIDC token, from here on. */
 function callsFrom(): () => { service: number; tokens: number } {
@@ -107,6 +175,69 @@ function callsFrom(): () => { service: number; tokens: number } {
   const tokens = world.github.requestsTo("GET", "/oidc/_request").length;
   return () => ({ service: world.service.requests.length - service, tokens: world.github.requestsTo("GET", "/oidc/_request").length - tokens });
 }
+
+/** The bold line of the job summary: the PR line. */
+function line(summary: string): string {
+  return summary.split("\n").find((text) => text.startsWith("**"))!.slice(2, -2);
+}
+
+describe("identity and GitHub", () => {
+  test("token_rejected doesn't say which check failed; the service logs it", async () => {
+    const s = await scene();
+    await s.attest();
+    const logs = world.service.logs.length;
+
+    const result = await s.ci({ enterpriseSlug: "acme/extra" });
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "token_rejected", ran: "true" });
+    expect(line(result.summary)).toMatch(/^Fell back: token_rejected, the service did not accept the job's OIDC token · the tests passed in /);
+    expect(result.summary).not.toMatch(/\biss\b|issuer|claim/);
+    expect(world.service.logs.slice(logs)).toContainEqual(expect.objectContaining({ event: "token_rejected", reason: "claim_iss" }));
+  });
+
+  test("github_denied from an IP allow list says so in the line, passes GitHub's message and links Limits in v1", async () => {
+    const s = await scene();
+    await s.attest();
+    world.clock.set(new Date());
+
+    const result = await during(denyByIpAllowList(s.repo), () => s.ci()).finally(() => world.clock.reset());
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "github_denied", ran: "true" });
+    const [check] = world.github.checkRuns(s.repo);
+    expect(check!.output.title).toMatch(/^Fell back: github_denied \(an IP allow list blocks the service\), GitHub refused the service's request · the tests passed in /);
+    expect(check!.output.summary).toContain(`the \\\`${s.repo.owner}\\\` organization has an IP allow list enabled`);
+    expect(check!.output.summary).toContain("[Limits in v1](https://testnotary.dev/docs/limits#github-enterprise)");
+    expect(result.summary).toContain(check!.output.title);
+    expect(result.summary).toContain("[Limits in v1](https://testnotary.dev/docs/limits#github-enterprise)");
+  });
+
+  test("github_denied for another reason names no allow list and passes no message", async () => {
+    const s = await scene();
+    await s.attest();
+    world.clock.set(new Date());
+    const deny = world.github.override(
+      "GET",
+      `/repos/${s.repo.owner}/${s.repo.name}/git/commits/:sha`,
+      () => githubError(403, "Resource not accessible by integration"),
+      { when: (request) => !fromJob(request) },
+    );
+
+    const result = await during(deny, () => s.ci()).finally(() => world.clock.reset());
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "github_denied", ran: "true" });
+    expect(line(result.summary)).toMatch(/^Fell back: github_denied, GitHub refused the service's request · /);
+    expect(result.summary).not.toMatch(/Resource not accessible|Limits in v1/);
+  });
+
+  test("repo_not_installed: the App isn't on the repo, and the tests run", async () => {
+    const s = await scene({ install: false });
+
+    const result = await s.ci();
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "repo_not_installed", ran: "true" });
+    expect(line(result.summary)).toMatch(/^Fell back: repo_not_installed, the Testnotary GitHub App is not installed on this repo · /);
+  });
+});
 
 describe("before the service", () => {
   test("TESTNOTARY_DISABLED=true falls back with disabled, fetching no token and calling no service", async () => {
@@ -190,7 +321,14 @@ describe("before the service", () => {
 
 describe("every fallback reason code runs the tests and names the code", () => {
   test.each(Object.entries(CASES) as [FallbackReason, Case][])("%s", async (code, { run, detail }) => {
-    const result = await run();
+    // The world clock stands still, so a retry's pause or a stalled service takes no real time.
+    world.clock.set(new Date());
+    let result: Awaited<ReturnType<Case["run"]>>;
+    try {
+      result = await run();
+    } finally {
+      world.clock.reset();
+    }
 
     expect(result.exitCode).toBe(0);
     expect(existsSync(join(result.workspace, "ran.txt"))).toBe(true);

@@ -17,6 +17,11 @@ export interface Verdict {
    * `guarded_file_changed` or the failed condition of a signature check. Null when nothing.
    */
   detail: string | null;
+  /**
+   * GitHub's own words, for `github_denied` caused by an IP allow list only: the service passes
+   * GitHub's message on, and the job summary quotes it.
+   */
+  githubMessage?: string;
   /** The verification as the service recorded it; null when there is none (a fallback before or around the service). */
   record: Verification | null;
 }
@@ -111,7 +116,21 @@ function verdictFrom(answer: ServiceAnswer): Verdict {
     const { verification } = parsed.data;
     return { result: verification.result, reason: (verification.reason as FallbackReason | null) ?? null, detail: verification.detail, record: verification };
   }
-  const error = (answer.body as { error?: unknown } | null)?.error;
-  if (error === "token_rejected" || error === "repo_not_installed" || error === "github_denied") return fallback(error);
+  const { error, message } = (answer.body ?? {}) as { error?: unknown; message?: unknown };
+  if (error === "github_denied") return githubDenied(typeof message === "string" ? message : "");
+  if (error === "token_rejected" || error === "repo_not_installed") return fallback(error);
   return fallback("service_error");
+}
+
+/** What the line names when an IP allow list is why GitHub refused the service. */
+export const IP_ALLOW_LIST_DETAIL = "an IP allow list blocks the service";
+
+/**
+ * GitHub refused the service's installation-token call (403). When GitHub's message names an IP
+ * allow list, the line says so and the summary quotes the message: v1 has no fixed IP addresses.
+ * Any other message stays out of the PR.
+ */
+function githubDenied(message: string): Verdict {
+  if (!/IP allow list/i.test(message)) return fallback("github_denied");
+  return { ...fallback("github_denied", IP_ALLOW_LIST_DETAIL), githubMessage: message };
 }

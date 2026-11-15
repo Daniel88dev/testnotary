@@ -1,4 +1,4 @@
-import { accountName, mismatchesPageUrl, runPageUrl, resolveServiceUrl, type FallbackReason, type JobOutcome, type VerificationResult } from "./shared.ts";
+import { LINKS, accountName, mismatchesPageUrl, runPageUrl, resolveServiceUrl, type FallbackReason, type JobOutcome, type VerificationResult } from "./shared.ts";
 import type { RunnerEnv } from "./runner.ts";
 import type { Verdict } from "./verify.ts";
 
@@ -156,6 +156,10 @@ function testsPhrase(tests: TestsRan): string {
 function details(env: RunnerEnv, verdict: Verdict, tests: TestsRan | null): string {
   const lines = [`- Result: \`${verdict.result}\``];
   if (verdict.reason) lines.push(`- Reason: \`${verdict.reason}\``);
+  if (verdict.githubMessage) {
+    lines.push(`- GitHub said: ${escape(oneLine(verdict.githubMessage))}`);
+    lines.push(`- Testnotary has no fixed IP addresses, so GitHub IP allow lists are not supported in v1. See [Limits in v1](${LINKS.githubEnterpriseLimits}).`);
+  }
   lines.push(`- Tests: ${tests ? escape(testsPhrase(tests)) : "not run in this step"}`);
   const record = verdict.record;
   if (record?.attestation) {
