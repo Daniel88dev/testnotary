@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { SANDBOX_TOKEN_DEFAULT_DAYS } from "@testnotary/core";
 import { database } from "../../../src/db/client.ts";
 import { hasWriteAccess, repoAccess } from "../../../src/server/access.ts";
+import { isSuspended } from "../../../src/server/accounts.ts";
 import { issueSandboxToken, ownSandboxToken, revokeToken, sandboxTokenDays, tokenName } from "../../../src/server/tokens.ts";
 import { getViewer } from "./viewer.ts";
 
@@ -20,6 +21,7 @@ export type CreateSandboxTokenState =
 export async function createSandboxToken(_previous: CreateSandboxTokenState, form: FormData): Promise<CreateSandboxTokenState> {
   const viewer = await getViewer();
   if (!viewer) return { kind: "error", message: "Sign in again to create a sandbox token." };
+  if (await isSuspended(database(), viewer.account.id)) return { kind: "error", message: "Your account is suspended, so it is issued no token." };
   const name = tokenName(form.get("name"));
   if (!name) return { kind: "error", message: "Give the token a name, up to 100 characters." };
   const rawDays = form.get("days");
