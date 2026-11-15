@@ -1,0 +1,43 @@
+<Lede>Testnotary can’t prove a test ran. It ties every skipped test job to a named GitHub account and re-runs a random share of them in CI.</Lede>
+
+That is the whole promise. This page says what it buys you, and what it doesn’t.
+
+## What a skip rests on
+
+When CI skips a test job, it does so because of an attestation: a record that a run of this suite passed on this exact tree, uploaded with a token that belongs to a GitHub account who can write to the repo. The record is real, the tree match is exact, and the account is named on the pull request. What Testnotary can’t see is the run itself. It happened on a machine Testnotary doesn’t control.
+
+A person who controls their machine can fake a pass. They could edit the test runner, stub out the tests, or replay a passing result. Audits make that detectable, not impossible: a random share of skips (<Fact name="auditRate" /> by default, <Fact name="sandboxAuditRate" /> for sandbox tokens) runs in CI anyway, and when CI fails where the run passed, the repo returns to shadow mode and the mismatch is recorded against that account for every admin to see.
+
+So the question a maintainer answers is the same one as for any code review: do you trust the people who can write to this repo, given that what they do is recorded under their name and checked at random?
+
+## Who it is built for
+
+**Honest developers and their agents, who make mistakes.** Most false passes aren’t lies: a dirty working copy, a stale `node_modules`, the wrong Node version, a test filtered to the changed files, an extra argument that skipped half the suite. The library refuses all of those before it attests anything. See [Refusal codes](/docs/refusals).
+
+**Agents that cut corners.** An agent told to make the tests pass may narrow the suite, pass `--only`, or run from a dirty tree. The declared command, the refusal of extra arguments and history flags, and the clean-tree rule stop that. An agent attests with a sandbox token, never a person’s laptop token, and its attestations name the person who created the token.
+
+**Someone who can’t write to the repo.** A fork’s pull request never skips. A token’s attestations stop counting the moment its owner loses write access. A pull request can’t change the rules it is checked against: the config, the workflows, the lockfiles and the other guarded files are read from the base branch, and changing them always runs CI.
+
+## Who it is not built for
+
+**A writer set on deceiving you.** Someone with write access can already push code that does harm; Testnotary doesn’t add a new kind of risk, but it doesn’t stop that person either. It makes their skips traceable and, at random, checked.
+
+**A compromised Testnotary service,** unless the repo opts into signatures. A repo that doesn’t opt into signatures trusts the service: a service that lied could let a job skip. With `"signatures": "required"`, the action checks the attester’s own key itself, and a compromised service can no longer make CI skip; it can still leave audits out undetected in signature mode. See [Security](/docs/security).
+
+## What every doubtful case does
+
+Every doubt runs the tests: no OIDC token, an unknown suite, a guarded file, an old run, a changed command, a slow or unreachable service, a GitHub error. A repo starts in shadow mode, where nothing skips at all, and goes back there after any mismatch. The kill switch, the repository variable <Fact name="killSwitch" code />, turns skipping off in seconds.
+
+## The limits we accept
+
+The trust model has known gaps, stated here and on [Security](/docs/security) so you can weigh them:
+
+- A person who controls their machine can fake a pass. Audits make that detectable, not impossible.
+- A compromised service can leave audits out undetected in signature mode.
+- A repo that doesn’t opt into signatures trusts the service.
+- The stale-base hole: without strict mode or a merge queue, a pull request tested against an older `main` can skip and merge. See [Merge queues and up-to-date branches](/docs/queue).
+- Codex cloud has no sandbox marker, so `TESTNOTARY_SANDBOX=1` covers it. See [Agents and sandbox tokens](/docs/agents).
+- Hand edits inside `node_modules` go unnoticed. The install check compares the package manager’s install state with the lockfile, not every installed file.
+- A history flag hidden deeper than one script level is left to audits. The library reads the command and the script it names, one level deep.
+
+<Next pages="security data limits audits" />

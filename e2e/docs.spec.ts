@@ -1,0 +1,308 @@
+import { FALLBACK_REASONS, REFUSAL_CODES, VERIFICATION_RESULTS, parseConfig } from "@testnotary/core";
+import { LINKS } from "@testnotary/protocol";
+import { expect, test } from "@testnotary/test-world/playwright";
+
+// The docs tree as the spec lists it ("Docs": 28 pages in six groups, plus the licensing and
+// security pages added later). The Reference group is T-831's: its pages exist as stubs here.
+const WRITTEN: Record<string, string[]> = {
+  "Start here": ["What Testnotary does", "Setup guide", "How a skip is decided"],
+  Guides: ["Agents and sandbox tokens", "Shadow mode and enforce", "Audits and mismatches", "Forks, Dependabot and Copilot"],
+  "Workflow recipes": ["Gate job", "Matrix jobs", "Merge queues and up-to-date branches", "Coverage and test reports"],
+  "Test command recipes": [
+    "Build before the tests",
+    "Postgres and other services",
+    "Playwright and other caches",
+    "Shell features and .env files",
+    "Run the suite in Docker",
+    "A pre-push hook",
+  ],
+  Trust: ["What Testnotary can’t prove", "What leaves your machine", "Limits in v1", "Security", "Licensing"],
+};
+const REFERENCE = [
+  "testnotary.json",
+  "CLI commands",
+  "Exit codes and output",
+  "Refusal codes",
+  "Action inputs and outputs",
+  "Fallback reason codes",
+  "What the pull request shows",
+  "Guarded files",
+];
+
+test("the package-manager tabs switch every code panel on the page and the choice is remembered", async ({ page }) => {
+  await page.goto("/docs/setup");
+  const article = page.getByRole("main");
+  const switching = article.locator("figure.code").filter({ has: page.getByRole("tablist", { name: "Package manager" }) });
+  // The terminal, testnotary.json, AGENTS.md, the workflow, the sign-in and the first run at least.
+  expect(await switching.count()).toBeGreaterThanOrEqual(6);
+  await expect(article).toContainText("pnpm add -D testnotary");
+  await expect(article).toContainText("pnpm install --frozen-lockfile");
+
+  // One tab, in the workflow panel, switches all of them.
+  const workflow = switching.filter({ hasText: ".github/workflows/ci.yml" }).first();
+  await workflow.getByRole("tab", { name: "npm", exact: true }).click();
+  for (const panel of await switching.all()) await expect(panel.getByRole("tab", { name: "npm", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(article).toContainText("npm install -D testnotary");
+  await expect(article).toContainText("- run: npm ci");
+  await expect(article).toContainText('"command": ["npm", "test"]');
+  await expect(article).toContainText("npx testnotary run unit");
+  await expect(article).not.toContainText("pnpm/action-setup");
+  await expect(article).not.toContainText("pnpm exec");
+
+  // Remembered across a reload and on another page.
+  await page.reload();
+  await expect(article).toContainText("npm install -D testnotary");
+  await page.goto("/docs/hook");
+  await expect(page.getByRole("main")).toContainText("exec npx testnotary run unit --require-attestation");
+
+  await page.getByRole("main").getByRole("tab", { name: "yarn" }).first().click();
+  await page.goto("/docs/setup");
+  await expect(page.getByRole("main")).toContainText("yarn add -D testnotary");
+  await expect(page.getByRole("main")).toContainText("yarn install --immutable");
+});
+
+test("search filters the page tree by title and by heading, and links straight to a matching heading", async ({ page }) => {
+  await page.goto("/docs/intro");
+  const tree = page.getByRole("navigation", { name: "Docs" });
+  const search = page.getByRole("searchbox", { name: "Search the docs" });
+
+  // "/" focuses the box.
+  await page.keyboard.press("/");
+  await expect(search).toBeFocused();
+
+  // By title.
+  await search.fill("matrix");
+  await expect(tree.getByRole("link", { name: "Matrix jobs", exact: true })).toBeVisible();
+  await expect(tree.getByRole("link", { name: "Setup guide", exact: true })).toBeHidden();
+  await expect(tree.getByRole("heading", { name: "Workflow recipes" })).toBeVisible();
+  await expect(tree.getByRole("heading", { name: "Trust" })).toBeHidden();
+
+  // By a heading inside a page whose title doesn't match: the GitHub Enterprise section of "Limits in v1".
+  await search.fill("enterprise");
+  await expect(tree.getByRole("link", { name: "Limits in v1", exact: true })).toBeVisible();
+  const hit = tree.getByRole("link", { name: "GitHub Enterprise", exact: true });
+  await expect(hit).toHaveAttribute("href", "/docs/limits#github-enterprise");
+  await expect(tree.getByRole("link", { name: "Gate job", exact: true })).toBeHidden();
+
+  // A setup-guide step is a heading too.
+  await search.fill("sandbox token");
+  await expect(tree.getByRole("link", { name: "Give each agent a sandbox token" })).toHaveAttribute("href", "/docs/setup#agents");
+  await expect(tree.getByRole("link", { name: "Agents and sandbox tokens", exact: true })).toBeVisible();
+
+  await search.fill("enterprise");
+  await tree.getByRole("link", { name: "GitHub Enterprise", exact: true }).click();
+  await expect(page).toHaveURL(/\/docs\/limits#github-enterprise$/);
+  await expect(page.getByRole("heading", { level: 2, name: "GitHub Enterprise" })).toBeInViewport();
+
+  await search.fill("no such words anywhere");
+  await expect(tree).toContainText("No page or heading matches");
+  await search.fill("");
+  await expect(tree.getByRole("link", { name: "Setup guide", exact: true })).toBeVisible();
+});
+
+test("on a phone the page tree is a full-screen menu and “On this page” is hidden", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/docs/setup");
+  const tree = page.getByRole("navigation", { name: "Docs" });
+  const menu = page.getByRole("button", { name: "Menu" });
+
+  await expect(page.getByRole("complementary", { name: "On this page" })).toBeHidden();
+  await expect(tree).toBeHidden();
+
+  await menu.click();
+  await expect(tree).toBeVisible();
+  const box = (await tree.boundingBox())!;
+  expect(box.x).toBe(0);
+  expect(box.width).toBe(375);
+  expect(box.y + box.height).toBeGreaterThanOrEqual(812 - 1);
+
+  await tree.getByRole("link", { name: "Gate job", exact: true }).click();
+  await expect(page).toHaveURL(/\/docs\/gate$/);
+  await expect(tree).toBeHidden();
+  await expect(page.getByRole("heading", { level: 1, name: "Gate job" })).toBeVisible();
+
+  // Typing a search on a phone opens the tree to show what matches.
+  await page.getByRole("searchbox", { name: "Search the docs" }).fill("docker");
+  await expect(tree.getByRole("link", { name: "Run the suite in Docker", exact: true })).toBeVisible();
+
+  // On a wide screen both are there, with the guide's parts and steps in "On this page".
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/docs/setup");
+  const toc = page.getByRole("complementary", { name: "On this page" });
+  await expect(toc).toBeVisible();
+  await expect(toc.getByRole("link", { name: "Set up who attests" })).toHaveAttribute("href", "#who");
+  await expect(toc.getByRole("link", { name: "Switch the repo to enforce" })).toHaveAttribute("href", "#enforce");
+  await expect(page.getByRole("navigation", { name: "Docs" })).toBeVisible();
+
+  // Scroll spy: the step in view and its part are marked.
+  await page.locator("#login").evaluate((step) => (step as unknown as { scrollIntoView(options: object): void }).scrollIntoView({ block: "start" }));
+  await expect(toc.getByRole("link", { name: "Sign in on your laptop" })).toHaveAttribute("aria-current", "location");
+  await expect(toc.getByRole("link", { name: "Set up who attests" })).toHaveAttribute("aria-current", "location");
+  await expect(toc.getByRole("link", { name: "Install the GitHub App" })).not.toHaveAttribute("aria-current", /.*/);
+});
+
+test("the setup guide has nine numbered steps in three parts at the anchors the dashboard and the CLI link", async ({ page }) => {
+  await page.goto("/docs/setup");
+  const parts = { repo: "Set up the repo", who: "Set up who attests", skip: "Get to the first skip" };
+  const steps = ["install-app", "pin", "library", "action", "merge", "login", "agents", "first-pr", "enforce"];
+  for (const [id, title] of Object.entries(parts)) await expect(page.locator(`#${id}`).getByRole("heading", { level: 2 })).toHaveText(title);
+  for (const [i, id] of steps.entries()) {
+    const step = page.locator(`li#${id}`);
+    await expect(step).toBeVisible();
+    // The number continues across the parts.
+    await expect(step.locator(".num")).toHaveText(String(i + 1));
+  }
+
+  // The workflow snippet grants the same three permissions everywhere (open decision 1).
+  const workflow = page.locator("figure.code").filter({ hasText: ".github/workflows/ci.yml" }).first();
+  await expect(workflow).toContainText("contents: read");
+  await expect(workflow).toContainText("id-token: write");
+  await expect(workflow).toContainText("checks: write");
+  await expect(workflow).toContainText("TESTNOTARY_DISABLED: ${{ vars.TESTNOTARY_DISABLED }}");
+  await expect(workflow).toContainText("uses: Daniel88dev/testnotary@v1");
+
+  // The CLI's links land on real sections.
+  for (const url of [LINKS.githubEnterpriseLimits, LINKS.sandboxTokens]) {
+    const { pathname, hash } = new URL(url);
+    await page.goto(pathname + hash);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    if (hash) await expect(page.locator(hash)).toBeInViewport();
+  }
+});
+
+test("every testnotary.json the docs show is one the library accepts", async ({ page }) => {
+  let seen = 0;
+  for (const slug of ["setup", "build", "services", "caches", "shell", "docker", "security"]) {
+    await page.goto(`/docs/${slug}`);
+    for (const panel of await page.locator("figure.code").filter({ hasText: /^testnotary\.json/ }).all()) {
+      const text = await panel.locator("pre").innerText();
+      const parsed = parseConfig(text);
+      // The shell page's second example is a mistake on purpose: valid JSON, but it runs `vitest` with "&&" as an argument.
+      expect(parsed.ok, `${slug}: ${text}`).toBe(true);
+      seen++;
+    }
+  }
+  expect(seen).toBeGreaterThanOrEqual(8);
+});
+
+// The spec's "Accepted limits the docs must state", each as words a page must carry.
+const ACCEPTED_LIMITS = [
+  "A person who controls their machine can fake a pass. Audits make that detectable, not impossible.",
+  "A compromised service can leave audits out undetected in signature mode.",
+  "A repo that doesn’t opt into signatures trusts the service.",
+  "stale-base hole",
+  "Codex cloud has no sandbox marker, so TESTNOTARY_SANDBOX=1 covers it",
+  "Hand edits inside node_modules go unnoticed.",
+  "A history flag hidden deeper than one script level is left to audits.",
+];
+
+test("every accepted limit is stated on a Trust or Security page", async ({ page }) => {
+  const text: string[] = [];
+  for (const path of ["/docs/limit", "/docs/data", "/docs/limits", "/docs/security"]) {
+    await page.goto(path);
+    text.push(await page.getByRole("main").innerText());
+  }
+  const all = text.join("\n").replace(/\s+/g, " ");
+  for (const limit of ACCEPTED_LIMITS) expect(all, limit).toContain(limit);
+
+  // The security page also covers SHA pinning with a Dependabot-kept version comment, and signature mode.
+  await page.goto("/docs/security");
+  const security = page.getByRole("main");
+  await expect(security).toContainText(/uses: Daniel88dev\/testnotary@[0-9a-f]{40} # v\d+\.\d+\.\d+/);
+  await expect(security).toContainText("package-ecosystem: github-actions");
+  await expect(security).toContainText('"signatures": "required"');
+});
+
+test("“What leaves your machine” links the privacy policy, and the docs footer links the terms and the privacy policy", async ({ page }) => {
+  await page.goto("/docs/data");
+  const privacy = page.getByRole("main").getByRole("link", { name: "privacy policy" });
+  expect(await privacy.count()).toBeGreaterThan(0);
+  for (const link of await privacy.all()) await expect(link).toHaveAttribute("href", "/privacy");
+
+  const footer = page.getByRole("contentinfo");
+  await expect(footer.getByRole("link", { name: "Terms" })).toHaveAttribute("href", "/terms");
+  await expect(footer.getByRole("link", { name: "Privacy" })).toHaveAttribute("href", "/privacy");
+});
+
+test("the docs use only real codes, the checks-list shape and none of the banned words, and load nothing from a third party", async ({ page, world }) => {
+  const origins = new Set<string>();
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.protocol !== "data:") origins.add(url.origin);
+  });
+
+  await page.goto("/docs/intro");
+  const hrefs = await page
+    .getByRole("navigation", { name: "Docs" })
+    .getByRole("link")
+    .evaluateAll((links) => links.map((link) => link.getAttribute("href")!));
+  // Codes the docs may name: refusals, fallback reasons, results and warnings, as the product spells them.
+  // GitHub's event names and node_modules look the same, and are fine.
+  const known = new Set([
+    ...REFUSAL_CODES,
+    ...FALLBACK_REASONS,
+    ...VERIFICATION_RESULTS,
+    "runtime_sources_disagree",
+    "ignored_env_file",
+    "pull_request",
+    "merge_group",
+    "node_modules",
+  ]);
+
+  for (const href of hrefs) {
+    await page.goto(href);
+    await page.waitForLoadState("networkidle");
+    const main = page.getByRole("main");
+    const text = await main.innerText();
+    expect(text, href).not.toMatch(/\bproofs?\b|verified pass|can[’']t fake/i);
+
+    for (const code of await main.locator("code").allInnerTexts()) {
+      if (/^[a-z]+(_[a-z]+)+$/.test(code)) expect(known.has(code), `${href}: ${code}`).toBe(true);
+    }
+    // A picture of the checks list names the check as GitHub shows it.
+    for (const label of await main.locator("figure.code.check figcaption").allInnerTexts()) {
+      expect(label, href).toMatch(/^\S+ \/ Testnotary \/ \S+ \(\w+\)$/);
+    }
+  }
+
+  expect([...origins]).toEqual([world.service.url]);
+});
+
+test("every page in the tree exists: the written groups with content, the Reference group as stubs whose links resolve", async ({ page, request }) => {
+  await page.goto("/docs/setup");
+  const tree = page.getByRole("navigation", { name: "Docs" });
+
+  for (const [group, titles] of Object.entries(WRITTEN)) {
+    await expect(tree.getByRole("heading", { name: group, exact: true })).toBeVisible();
+    for (const title of titles) {
+      const href = await tree.getByRole("link", { name: title, exact: true }).getAttribute("href");
+      expect(href, title).toMatch(/^\/docs\/[a-z-]+$/);
+      await page.goto(href!);
+      // The guide keeps its approved heading; every other page is headed by its title.
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(title === "Setup guide" ? "Set up Testnotary" : title);
+      await expect(page).toHaveTitle(new RegExp(`^${title.replace(/[.?]/g, "\\$&")} · Testnotary docs$`));
+      const article = page.getByRole("main");
+      await expect(article).not.toContainText("This page will hold");
+      // Content, not a title alone: at least a few paragraphs of text.
+      expect((await article.innerText()).length, title).toBeGreaterThan(600);
+    }
+  }
+
+  await page.goto("/docs/setup");
+  for (const title of REFERENCE) {
+    const href = await tree.getByRole("link", { name: title, exact: true }).getAttribute("href");
+    const response = await request.get(href!);
+    expect(response.status(), title).toBe(200);
+  }
+
+  // Every link inside the docs resolves, the stubs' included.
+  const hrefs = new Set<string>();
+  for (const link of await page.locator("a[href^='/docs']").all()) hrefs.add((await link.getAttribute("href"))!.split("#")[0]!);
+  for (const href of hrefs) {
+    await page.goto(href);
+    for (const link of await page.getByRole("main").locator("a[href^='/docs']").all()) {
+      const target = (await link.getAttribute("href"))!.split("#")[0]!;
+      expect((await request.get(target)).status(), `${href} → ${target}`).toBe(200);
+    }
+  }
+});

@@ -1,0 +1,63 @@
+<Lede>A suite’s command is a list of arguments, run without a shell. For pipes, `&&` or globbing, point it at a `package.json` script.</Lede>
+
+## Why no shell
+
+The command in `testnotary.json` is spawned as is, and the library reads its exit code directly. Without a shell in between, there is no quoting to get wrong, no exit code lost in a pipe, and no way for an extra argument to slip in: anything after `--` on the command line is refused as `extra_arguments`, so the suite that runs is the suite the repo declared.
+
+So this works:
+
+```json testnotary.json
+{
+  "suites": {
+    "unit": { "command": {{test}} }
+  }
+}
+```
+
+and this doesn’t do what it looks like, because `&&` is passed to `vitest` as an argument:
+
+```json testnotary.json
+{
+  "suites": {
+    "unit": { "command": ["vitest", "run", "&&", "eslint", "."] }
+  }
+}
+```
+
+## Use a script for shell features
+
+Package-manager scripts run in a shell, so put the shell part there:
+
+```json package.json
+{
+  "scripts": {
+    "test:ci": "vitest run --reporter=dot | tee test.log && node scripts/check-log.js"
+  }
+}
+```
+
+```json testnotary.json
+{
+  "suites": {
+    "unit": { "command": ["{{pm}}", "run", "test:ci"] }
+  }
+}
+```
+
+Mind the exit code in pipes: `a | b` exits with `b`’s code. Use `set -o pipefail` in a shell script if that matters.
+
+The library reads the script the command names, one level deep, and refuses history-filtered flags there as well as in the command: `--changed`, `--changedSince`, `--onlyChanged`, `--since`, `nx affected` and turbo’s git-ref filters (`history_dependent_command`). A flag hidden deeper, in a script called by a script, isn’t caught; audits are the net for that.
+
+## .env files
+
+Many projects keep local secrets and settings in a `.env` file that git ignores, and test setups often load it with dotenv. That file isn’t part of the tree, so CI doesn’t have it: a test that passes because of a value in your `.env` can fail in CI.
+
+When an ignored `.env` or `.env.*` file exists (other than `.env.example`), `testnotary run` warns with `ignored_env_file`. The run still attests; the warning is recorded with it and shown on the run page.
+
+To keep results honest:
+
+- Pass the variables the tests need by name with `env.pass`, or fix public ones with `env.set`, rather than relying on `.env`.
+- Don’t load `.env` in the test setup, or load `.env.test`, committed, with no secrets.
+- Testnotary never reads your `.env` file, and never uploads its name or contents.
+
+<Next pages="build caches services config" />

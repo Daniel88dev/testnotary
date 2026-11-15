@@ -1,0 +1,43 @@
+<Lede>Every repo starts in shadow mode: Testnotary answers every test job, and CI runs the tests anyway. You switch to enforce on evidence.</Lede>
+
+## What shadow mode records
+
+In shadow mode each verification is recorded as one of two results:
+
+- *would have skipped* (`would_skip`): a valid attestation named the tree, and in enforce mode the test step would have ended at once;
+- *would have fallen back* (`would_fall_back`), with the reason code that would have run the tests.
+
+The tests run either way, and their result is reported back. So each *would have skipped* is a free comparison: the attestation said the suite passed on this tree, and CI says whether it did. If CI fails where the run passed, that is a mismatch, exactly as it would be for a failed audit in enforce mode.
+
+On the pull request the **CI / Testnotary / unit (pull_request)** check reads *would have skipped* or *would have fallen back* and names the reason. The repo’s Verifications page lists every one, and can be filtered by reason.
+
+A repo comes back in shadow mode too: after a mismatch, and after a reinstall of the App within 30 days of removing it (its history is restored, its trust isn’t).
+
+## The toggle
+
+On the dashboard, open the repo, then **Settings → Mode**. Only a repo admin can change it. Beside the toggle is the shadow record: how many commits were compared, how many agreed, and any mismatches.
+
+The toggle warns, but never blocks, when:
+
+- fewer than 20 comparisons agreed so far, or
+- a mismatch hasn’t been explained yet.
+
+The setup guide suggests switching once the first *would have skipped* appears and CI agreed. The 20 is a warning for you to weigh, not a rule.
+
+After a mismatch the repo is back in shadow mode, and the toggle refuses enforce until an admin has explained it. Explaining it doesn’t switch the repo back by itself; you do that on purpose. See [Audits and mismatches](/docs/audits).
+
+## In enforce mode
+
+A matching run skips the test step, and the check reads *skipped* with the attester, the run’s age, platform and Node. Audits re-run <Fact name="auditRate" /> of skips anyway (<Fact name="sandboxAuditRate" /> for sandbox tokens). Every doubtful case still runs the tests.
+
+## The kill switch
+
+To turn skipping off in seconds, without a code change or a pull request, set the repository variable <Fact name="killSwitch" code /> to `true` (**Settings → Secrets and variables → Actions → Variables** on GitHub). The workflow snippet passes it to the action:
+
+<Code snippet="kill-switch" lang="yaml" file=".github/workflows/ci.yml" />
+
+The action reads it before it calls the service. Every job then falls back with `disabled` and runs its tests. Delete the variable, or set it to anything else, to turn skipping back on.
+
+Switching the repo to shadow mode is not the kill switch: in shadow mode Testnotary is still asked on every job. The variable needs no call at all, so it also works when the service is unreachable.
+
+<Next pages="audits how setup coverage" />

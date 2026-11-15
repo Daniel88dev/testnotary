@@ -1,0 +1,52 @@
+<Lede>What v1 supports, and what it doesn’t yet. Where something isn’t supported, Testnotary says so and CI runs its tests as usual.</Lede>
+
+## Operating systems
+
+Runs work on **macOS and Linux**. WSL counts as Linux. On Windows itself the library refuses with `platform_unsupported` and points to WSL.
+
+In CI, the action’s run mode needs a Linux or macOS runner: on a Windows runner it stops with a setup error rather than run your tests outside the stripped environment. The gate job’s verify mode works on any runner.
+
+A repo can restrict which platforms may attest, such as `linux/x64`, with `platforms` in `testnotary.json`; a suite can’t narrow that list in v1.
+
+## Package managers and runtimes
+
+**npm, pnpm and Yarn** (classic and Berry, Plug’n’Play included) on **Node**. Bun and Deno are refused with `package_manager_unsupported`. The library supports Node 20 and later.
+
+The library checks your Node and package manager against the versions the repo pins, and your install against the lockfile, using each package manager’s own install-state file. It never runs an install itself. **Hand edits inside `node_modules` go unnoticed:** the check compares the install state with the lockfile, not every installed file.
+
+## Tests and commands
+
+- One suite is one command. The library reads the command and the `package.json` script it names, **one level deep**, for history-filtered flags; a flag hidden deeper is left to audits.
+- No built-in container mode: a suite can run in Docker through its command. See [Run the suite in Docker](/docs/docker).
+- No per-test results or log upload.
+- Only test jobs: lint, typecheck, build and other CI jobs always run.
+
+## Hosts
+
+**GitHub only**, and only github.com. No GitLab or Bitbucket.
+
+The repo needs the Testnotary GitHub App installed, and its tests in GitHub Actions. Self-hosting isn’t supported: the source is open, but `testnotary.dev` is the only instance we run.
+
+## GitHub Enterprise
+
+| Where your repo lives | What happens |
+|---|---|
+| GitHub Enterprise Cloud on github.com | Supported. The action’s OIDC token can come from your enterprise’s own issuer (`https://token.actions.githubusercontent.com/<enterprise>`); the service accepts it. |
+| GitHub Enterprise Server | Not served. The action sees a server URL other than `https://github.com`, prints a notice and runs the tests with the fallback `host_not_supported`, without fetching a token or calling Testnotary. |
+| GHE.com (data residency) | Not served, the same way: `host_not_supported`. |
+
+**IP allow lists.** Testnotary has no fixed outbound IP addresses, so an organization that limits GitHub access to an IP allow list blocks the service’s calls. In CI, verifications then fall back with `github_denied`, and the pull request line says an IP allow list refused the call. `testnotary login` fails with `github_denied` too, names the cause and links this section. Fixed outbound addresses aren’t part of v1, so there is no workaround yet; the tests simply run.
+
+**Conditional access policies** that block the App’s user token have the same effect on `login`: it fails with `github_denied`, and GitHub’s own message is shown.
+
+## Agents
+
+Testnotary detects the common cloud sandboxes from their environment. **Codex cloud has no sandbox marker,** so its setup step sets `TESTNOTARY_SANDBOX=1`; do the same in any sandbox the library doesn’t know. See [Agents and sandbox tokens](/docs/agents).
+
+The vendors’ settings pages change often; the per-vendor steps in the setup guide follow what each vendor documents.
+
+## Not in v1
+
+Billing (v1 is a free public beta), notifications of any kind, exports, totals across repos or beyond the 90 days of history, and editing guarded files in the dashboard.
+
+<Next pages="limit security forks data" />

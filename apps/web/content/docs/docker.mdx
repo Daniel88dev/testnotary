@@ -1,0 +1,50 @@
+<Lede>v1 has no container mode, but a suite’s command can run the tests in a container. The run then attests what that command did, on your machine.</Lede>
+
+## A command that runs a container
+
+Declare a script that builds the image from the repo and runs the tests inside it, and make that the suite’s command:
+
+```json package.json
+{
+  "scripts": {
+    "test:docker": "docker compose run --rm --build tests"
+  }
+}
+```
+
+```yaml compose.yaml
+services:
+  tests:
+    build: .
+    command: ["npm", "test"]
+    environment:
+      CI: "true"
+```
+
+```json testnotary.json
+{
+  "guarded": ["compose.yaml", "Dockerfile"],
+  "suites": {
+    "docker": { "command": ["{{pm}}", "run", "test:docker"] }
+  }
+}
+```
+
+In CI, the action runs the same command, so CI also runs the tests in the container.
+
+## What still applies
+
+- **The tree rules.** The image is built from your working tree, which must be clean (`dirty_tree`). Keep `.dockerignore` close to `.gitignore`, so the container doesn’t see ignored files from your laptop, such as a `.env`.
+- **The environment floor.** The library checks your machine’s Node and package manager against the repo’s, even when the tests then run on the container’s. Pin both in the repo and in the `Dockerfile` so they agree.
+- **The stripped environment** applies to the `docker` command, not inside the container: Docker passes on only what the compose file names. To pass a variable in, list it under `env.pass` and under the service’s `environment:`.
+- **The recorded platform** is your machine’s, such as `darwin/arm64`, not the container’s `linux/arm64`. If the repo restricts `platforms`, it is the host that must match.
+
+## Guard the image definition
+
+A change to the `Dockerfile` or the compose file can change the result without changing a test. Add both to `guarded`, as above, so such a pull request always runs its tests.
+
+## When to use it
+
+Use a container when the tests depend on system packages, a database version or an OS that laptops don’t share, or when your agents’ sandboxes can run Docker. Where the sandbox can’t, it can still attest the other suites.
+
+<Next pages="services build limits config" />
