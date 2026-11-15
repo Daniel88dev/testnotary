@@ -1,6 +1,8 @@
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import type { Verification } from "@testnotary/protocol";
 import { installLibrary, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine } from "@testnotary/test-world";
@@ -381,6 +383,59 @@ describe("what is neither an agreement nor a mismatch", () => {
     expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation" });
     expect(world.github.checkRuns(s.repo)[0]).toMatchObject({ conclusion: "neutral" });
     expect((await s.gate(merge.sha)).outputs.result).toBe("fallback");
+  });
+});
+
+describe("rotating the audit key", () => {
+  /** The operations script (`apps/web/scripts/ops.ts`) as the operator runs it, as the app role. */
+  function ops(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    const script = fileURLToPath(new URL("../../../apps/web/scripts/ops.ts", import.meta.url));
+    return new Promise((resolve) => {
+      const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script, ...args], {
+        env: { PATH: process.env.PATH, DATABASE_URL: world.db.urls.app },
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => (stdout += chunk));
+      child.stderr.on("data", (chunk) => (stderr += chunk));
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+    });
+  }
+
+  test("for one repo changes its draws and leaves other repos' alone", async () => {
+    const rotated = await story();
+    await featureWithTree(rotated, async (tree) => {
+      const drawn = (keyVersion: number) => world.audits.drawn(rotated.repo, { tree, suite: SUITE, tokenKind: "laptop", keyVersion });
+      return (await drawn(1)) && !(await drawn(2));
+    });
+    await rotated.attest();
+    const first = await rotated.fixture.testMerge({ base: "main", head: "feature" });
+    const other = await story();
+    const second = await auditedPullRequest(other);
+    expect((await rotated.gate(first.sha)).outputs.result).toBe("audit");
+    expect((await other.gate(second.sha)).outputs.result).toBe("audit");
+
+    const result = await ops(["rotate-audit-key", rotated.repo.fullName, "--reason", "key exposure drill"]);
+
+    expect(result).toMatchObject({ code: 0, stdout: `rotated the audit key of ${rotated.repo.fullName} to version 2\n` });
+    expect((await rotated.gate(first.sha)).outputs.result).toBe("skip");
+    expect((await other.gate(second.sha)).outputs.result).toBe("audit");
+  });
+
+  test("for every repo raises each one's version", async () => {
+    const s = await story();
+    const before = await world.audits.keyVersion(s.repo);
+
+    const result = await ops(["rotate-audit-key", "--all", "--reason", "yearly rotation"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toMatch(/^rotated the audit keys of \d+ repos\n$/);
+    expect(await world.audits.keyVersion(s.repo)).toBe(before + 1);
+  });
+
+  test("needs a reason and a repo Testnotary knows", async () => {
+    expect(await ops(["rotate-audit-key", "nobody/nothing", "--reason", "drill"])).toMatchObject({ code: 1, stderr: "ops: no repo named nobody/nothing\n" });
+    expect((await ops(["rotate-audit-key", "--all"])).code).toBe(2);
   });
 });
 
