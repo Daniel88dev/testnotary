@@ -6,6 +6,7 @@ import { say } from "../report.ts";
 import { BEFORE_START } from "./checks/index.ts";
 import { laptopTokenMarker } from "./checks/laptop-token-in-sandbox.ts";
 import { emptyNotes, warn, type Env, type RunContext, type RunNotes, type RunToken } from "./context.ts";
+import { guardedGlobsMatched } from "./guarded.ts";
 import { locate } from "./locate.ts";
 import { preflight, type Preflight } from "./service.ts";
 import { detectSession } from "./session.ts";
@@ -79,6 +80,7 @@ export async function prepareRun(input: PrepareInput): Promise<Ready | RefusedBe
     const found = await check.check(context);
     if (found) return refused(found.refusal, found.lines, found.upload ?? true);
   }
+  notes.guardedMatched = await guardedGlobsMatched(context);
 
   const repository = context.origin.repository;
   if (!repository) {
