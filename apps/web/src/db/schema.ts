@@ -294,6 +294,8 @@ export const verifications = pgTable(
     mode: text("mode").notNull(),
     result: text("result").notNull(),
     reason: text("reason"),
+    /** What the reason's line names besides the code: the guarded file for `guarded_file_changed`. */
+    detail: text("detail"),
     attestationId: uuid("attestation_id").references(() => attestations.id),
     environment: jsonb("environment").$type<CiEnvironment>().notNull(),
     createdAt: at("created_at"),

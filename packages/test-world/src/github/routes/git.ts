@@ -17,6 +17,29 @@ function readableRepo(context: RouteContext): FakeRepo | Response {
   return repo;
 }
 
+/** GitHub's compare lists at most this many changed files for a whole comparison. */
+const COMPARE_FILE_CAP = 300;
+
+const STATUSES: Record<string, string> = { A: "added", M: "modified", D: "removed", R: "renamed", C: "copied", T: "changed" };
+
+/** `git diff --name-status -z` as GitHub's file entries: status, path, and the old path of a rename. */
+function parseNameStatus(output: string): { filename: string; status: string; previousFilename?: string }[] {
+  const fields = output.split("\0");
+  const files: { filename: string; status: string; previousFilename?: string }[] = [];
+  for (let i = 0; i < fields.length - 1; ) {
+    const code = fields[i++]!;
+    const letter = code[0]!;
+    if (letter === "R" || letter === "C") {
+      const previous = fields[i++]!;
+      const filename = fields[i++]!;
+      files.push({ filename, status: STATUSES[letter]!, ...(letter === "R" ? { previousFilename: previous } : {}) });
+    } else {
+      files.push({ filename: fields[i++]!, status: STATUSES[letter] ?? "changed" });
+    }
+  }
+  return files;
+}
+
 export const gitRoutes = [
   // https://docs.github.com/rest/git/commits#get-a-commit-object (github-behaviours §4)
   // The service resolves the OIDC `sha` claim through this to get the tree CI is building.
@@ -42,6 +65,56 @@ export const gitRoutes = [
         html_url: `https://github.com/${repo.fullName}/commit/${sha}`,
       })),
       verification: { verified: false, reason: "unsigned", signature: null, payload: null, verified_at: null },
+    });
+  }),
+
+  // https://docs.github.com/rest/commits/commits#compare-two-commits (github-behaviours §5)
+  // `{base}...{head}`: the changes from their merge base to `head`, as GitHub lists them. From a
+  // pull request's merge commit to its first parent that is the PR's own files, never the
+  // base-only ones. Renames come with `previous_filename`. Like GitHub, at most 300 files for the
+  // whole comparison, sorted by path.
+  route("GET", "/repos/:owner/:repo/compare/:basehead", async (context) => {
+    const { params, github } = context;
+    const repo = readableRepo(context);
+    if (repo instanceof Response) return repo;
+    const match = /^(.+?)\.\.\.(.+)$/.exec(params.basehead!);
+    if (!match) return notFound();
+    const [, baseRef, headRef] = match;
+    const base = await readCommit(repo.gitDir, baseRef!);
+    const head = await readCommit(repo.gitDir, headRef!);
+    if (!base || !head) return notFound();
+    const mergeBase = (await gitMaybe(repo.gitDir, ["merge-base", base.sha, head.sha]))?.trim();
+    if (!mergeBase) return githubError(404, `No common ancestor between ${baseRef} and ${headRef}.`);
+    const ahead = (await gitMaybe(repo.gitDir, ["rev-list", "--reverse", `${mergeBase}..${head.sha}`]))?.split("\n").filter(Boolean) ?? [];
+    const behind = Number((await gitMaybe(repo.gitDir, ["rev-list", "--count", `${mergeBase}..${base.sha}`]))?.trim() ?? 0);
+    const diff = (await gitMaybe(repo.gitDir, ["diff", "--name-status", "-z", "--find-renames", mergeBase, head.sha])) ?? "";
+    const files = parseNameStatus(diff)
+      .sort((a, b) => (a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0))
+      .slice(0, COMPARE_FILE_CAP)
+      .map((file) => ({
+        sha: null,
+        filename: file.filename,
+        status: file.status,
+        additions: 0,
+        deletions: 0,
+        changes: 0,
+        blob_url: `https://github.com/${repo.fullName}/blob/${head.sha}/${file.filename}`,
+        raw_url: `https://github.com/${repo.fullName}/raw/${head.sha}/${file.filename}`,
+        contents_url: `${github.url}/repos/${repo.fullName}/contents/${file.filename}?ref=${head.sha}`,
+        ...(file.previousFilename ? { previous_filename: file.previousFilename } : {}),
+      }));
+    const status = ahead.length === 0 ? (behind === 0 ? "identical" : "behind") : behind === 0 ? "ahead" : "diverged";
+    return json(200, {
+      url: `${github.url}/repos/${repo.fullName}/compare/${params.basehead}`,
+      html_url: `https://github.com/${repo.fullName}/compare/${params.basehead}`,
+      base_commit: { sha: base.sha },
+      merge_base_commit: { sha: mergeBase },
+      status,
+      ahead_by: ahead.length,
+      behind_by: behind,
+      total_commits: ahead.length,
+      commits: ahead.slice(0, 250).map((sha) => ({ sha, url: `${github.url}/repos/${repo.fullName}/commits/${sha}` })),
+      files,
     });
   }),
 

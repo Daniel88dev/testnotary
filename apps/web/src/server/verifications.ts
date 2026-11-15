@@ -1,5 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-import { CONFIG_FILE, decideVerification, type AttestationCandidate } from "@testnotary/core";
+import { COMPARE_FILE_LIMIT, CONFIG_FILE, decideVerification, type AttestationCandidate } from "@testnotary/core";
 import {
   VERIFY_REFUSALS,
   decodeAttestationPayload,
@@ -12,7 +12,7 @@ import {
 import type { Database } from "../db/client.ts";
 import { attestations, jobReports, runs, tokens, verifications } from "../db/schema.ts";
 import { now } from "./config.ts";
-import { GitHubUnavailable, fileAt, gitCommit, installationToken } from "./github.ts";
+import { GitHubUnavailable, changedPaths, fileAt, gitCommit, installationToken } from "./github.ts";
 import { apiError } from "./http.ts";
 import { installedRepo, latestRepoState, type Executor, type RepoView } from "./installations.ts";
 import { acceptActionsToken, type ActionsClaims } from "./oidc.ts";
@@ -62,6 +62,11 @@ export async function verifyJob(db: Database, job: { claims: ActionsClaims; repo
       configAtBase: async () => (firstParent ? fileAt(installation, repo.fullName, CONFIG_FILE, firstParent) : undefined),
       attestations: (suite) => attestationsOfTree(db, repo.id, suite, commit.tree),
       hasWriteAccess: (accountId) => hasWriteAccess(db, repo, accountId, installation),
+      changedPaths: async () => {
+        if (!firstParent) return undefined;
+        const { paths, count } = await changedPaths(installation, repo.fullName, firstParent, claims.sha);
+        return { paths, complete: count < COMPARE_FILE_LIMIT };
+      },
     },
   });
   const [row] = await db
@@ -76,6 +81,7 @@ export async function verifyJob(db: Database, job: { claims: ActionsClaims; repo
       mode: repo.mode,
       result: decision.result,
       reason: decision.reason,
+      detail: decision.detail,
       attestationId: decision.attestation?.id ?? null,
       environment: request.environment,
       createdAt: now(),
@@ -151,6 +157,7 @@ export async function readVerification(db: Executor, id: string, repoId: number)
     mode: verification.mode === "enforce" ? "enforce" : "shadow",
     result: verification.result as Verification["result"],
     reason: verification.reason,
+    detail: verification.detail,
     attestation: attestation
       ? {
           id: attestation.id,

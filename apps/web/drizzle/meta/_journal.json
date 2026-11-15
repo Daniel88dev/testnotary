@@ -50,6 +50,13 @@
       "when": 1794773549557,
       "tag": "0006_job_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794776531009,
+      "tag": "0007_verification_detail",
+      "breakpoints": true
     }
   ]
 }

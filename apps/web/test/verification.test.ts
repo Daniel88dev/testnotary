@@ -21,10 +21,10 @@ interface Installed {
 }
 
 /** An installed repo whose `feature` branch a developer with write access attested on their laptop. */
-async function installed(options: { attest?: boolean; install?: boolean } = {}): Promise<Installed> {
+async function installed(options: { attest?: boolean; install?: boolean; visibility?: "public" | "private" } = {}): Promise<Installed> {
   const i = ++n;
   const fixture = await world.fixtureRepo({ config: { suites: { test: { command: ["node", "-e", "process.exit(0)"] } } } });
-  const repo = await world.hostOnGitHub(fixture, { owner: `org-${i}`, name: "app" });
+  const repo = await world.hostOnGitHub(fixture, { owner: `org-${i}`, name: "app", visibility: options.visibility });
   if (options.install !== false) await world.github.installApp({ account: { login: `org-${i}`, type: "Organization" }, repos: [repo] });
   await fixture.branch("feature");
   await fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
@@ -219,5 +219,48 @@ describe("the tree a verification matches", () => {
     const answer = await verify(await r.token(attested, { event: "push" }));
 
     expect(answer.body.verification).toMatchObject({ commit: attested, tree: await r.fixture.tree("feature"), event: "push", result: "would_skip", reason: null });
+  });
+});
+
+describe("the paths a verification checks against the guarded files", () => {
+  test("come from GitHub's compare, first parent to the token's commit, with the installation token's Contents read only", async () => {
+    const r = await installed({ attest: true, visibility: "private" });
+    const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
+    const mark = world.github.requests.length;
+
+    const answer = await verify(await r.token(merge.sha));
+
+    expect(answer.body.verification).toMatchObject({ result: "would_skip", reason: null, detail: null });
+    const sent = world.github.requests.slice(mark);
+    const compares = sent.filter((request) => request.path.includes("/compare/"));
+    expect(compares.map((request) => request.path)).toEqual([`/repos/${r.repo.fullName}/compare/${merge.parents[0]}...${merge.sha}`]);
+    expect(compares[0]!.headers.authorization).toMatch(/^Bearer ghs_/);
+    // Contents and Metadata read are all the App has: no pull request or other endpoint is asked.
+    expect(sent.filter((request) => /\/(pulls|issues|check-runs|actions)\b/.test(request.path))).toEqual([]);
+  });
+
+  test("a guarded file the pull request changes is the verification's detail", async () => {
+    const r = await installed();
+    await r.fixture.commit("Pin Node", { ".nvmrc": "24\n" });
+    await r.fixture.push();
+    const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
+
+    const answer = await verify(await r.token(merge.sha));
+
+    expect(answer.body.verification).toMatchObject({ result: "would_fall_back", reason: "guarded_file_changed", detail: ".nvmrc" });
+  });
+
+  test("can't be listed when GitHub refuses the compare: github_denied with GitHub's message, and no decision", async () => {
+    const r = await installed();
+    const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
+    const message = `Although you appear to have the correct authorization credentials, the '${r.repo.owner}' organization has an IP allow list enabled, and your IP address is not permitted to access this resource.`;
+    const restore = world.github.override("GET", "/repos/:owner/:repo/compare/:basehead", () => githubError(403, message));
+    try {
+      const answer = await verify(await r.token(merge.sha));
+
+      expect(answer).toEqual({ status: 502, body: { error: "github_denied", message } });
+    } finally {
+      restore();
+    }
   });
 });
