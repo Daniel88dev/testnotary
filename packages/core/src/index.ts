@@ -15,14 +15,18 @@ export {
   type TestnotaryConfig,
 } from "./config.ts";
 export { REFUSAL_CODES, type Outcome, type RefusalCode } from "./outcome.ts";
+export { GUARDED_DEFAULTS, guardedGlobs, guardedMatches, matchesGuardedGlob, type GuardedMatch } from "./guarded.ts";
 export {
   ATTESTATION_MAX_AGE_MS,
+  COMPARE_FILE_LIMIT,
   FALLBACK_REASONS,
   VERIFICATION_RESULTS,
   VERIFICATION_STEPS,
   decideVerification,
   resultFor,
   type AttestationCandidate,
+  type ChangedPaths,
+  type Fallback,
   type FallbackReason,
   type VerificationDecision,
   type VerificationInput,

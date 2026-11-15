@@ -94,6 +94,11 @@ export const verification = z.object({
   result: verificationResult,
   /** A fallback reason code; null for a skip or *would skip*. */
   reason: z.string().nullable(),
+  /**
+   * What the reason's line names besides the code, or null: the changed path for
+   * `guarded_file_changed` (the first one a guarded glob matched).
+   */
+  detail: z.string().nullable().default(null),
   /** The attestation matched, with its payload exactly as stored; also when a later step refused it. */
   attestation: z
     .object({

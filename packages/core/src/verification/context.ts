@@ -27,6 +27,19 @@ export interface VerificationSources {
   attestations(suite: string): Promise<AttestationCandidate[]>;
   /** Whether the account has `admin` or `write` on the repo, checked live with GitHub. */
   hasWriteAccess(accountId: number): Promise<boolean>;
+  /**
+   * The paths the built commit changes against its first parent (GitHub's compare), or undefined
+   * when the commit has no first parent.
+   */
+  changedPaths(): Promise<ChangedPaths | undefined>;
+}
+
+/** What GitHub's compare lists between the first parent and the built commit. */
+export interface ChangedPaths {
+  /** Every path changed, added or removed; a renamed file's old path too. */
+  paths: string[];
+  /** False when GitHub cut the list short (it lists 300 files at most), so a path may be missing. */
+  complete: boolean;
 }
 
 /** What a verification starts from: who asks about which commit, and the repo's mode. */
@@ -60,13 +73,19 @@ export interface VerificationState extends VerificationInput {
   attestation?: AttestationCandidate;
 }
 
+/** A fallback reason with what its line names besides the code, such as the guarded file changed. */
+export interface Fallback {
+  reason: FallbackReason;
+  detail: string;
+}
+
 /**
- * One step of the decision order. It answers a fallback reason to stop the verification there, or
- * undefined to pass it on to the next step.
+ * One step of the decision order. It answers a fallback reason (alone, or with its detail) to stop
+ * the verification there, or undefined to pass it on to the next step.
  */
 export interface VerificationStep {
   name: string;
-  decide(state: VerificationState): Promise<FallbackReason | undefined>;
+  decide(state: VerificationState): Promise<FallbackReason | Fallback | undefined>;
 }
 
 /**

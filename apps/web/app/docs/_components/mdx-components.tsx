@@ -5,6 +5,7 @@ import {
   BASELINE_OVERRIDABLE,
   CONFIG_SCHEMA_URL,
   FALLBACK_REASONS,
+  GUARDED_DEFAULTS,
   INITIAL_REPO_SETTINGS,
   REFUSAL_CODES,
   VERIFICATION_RESULTS,
@@ -171,6 +172,19 @@ function CodeList({ of }: { of: string }) {
 }
 
 /** The sandbox markers the library ships. */
+/** The product-default guarded globs, from the core package: the list verification uses. */
+function GuardedDefaults() {
+  return (
+    <ul className="guarded-defaults">
+      {GUARDED_DEFAULTS.map((glob) => (
+        <li key={glob}>
+          <code>{glob}</code>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function SandboxMarkers() {
   return (
     <ul>
@@ -237,6 +251,7 @@ export const MDX_COMPONENTS = {
   VendorSteps,
   Fact,
   CodeList,
+  GuardedDefaults,
   SandboxMarkers,
   BaselineEnvironment,
   a: A,

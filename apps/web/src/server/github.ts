@@ -179,6 +179,27 @@ export async function gitCommit(token: string, fullName: string, sha: string): P
 }
 
 /**
+ * `GET /repos/{owner}/{repo}/compare/{base}...{head}` (§5), which needs only Contents read: every
+ * path `head` changes against `base`, a renamed file's old path included. From a merge commit to
+ * its first parent that is the pull request's files. GitHub lists 300 files at most for a whole
+ * comparison, so `count` is how many it listed; a caller treats a full list as possibly cut short.
+ */
+export async function changedPaths(token: string, fullName: string, base: string, head: string): Promise<{ paths: string[]; count: number }> {
+  const basehead = `${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+  const response = await call(`${serviceConfig().githubApiUrl}/repos/${fullName}/compare/${basehead}`, withToken(token));
+  if (!response.ok) return failure(response, "the compare call");
+  const body = await jsonBody(response);
+  if (!Array.isArray(body.files)) throw new GitHubUnavailable("the compare call answered without files");
+  const paths: string[] = [];
+  for (const file of body.files as { filename?: unknown; previous_filename?: unknown }[]) {
+    if (typeof file.filename !== "string") throw new GitHubUnavailable("the compare call answered a file without a filename");
+    paths.push(file.filename);
+    if (typeof file.previous_filename === "string") paths.push(file.previous_filename);
+  }
+  return { paths, count: body.files.length };
+}
+
+/**
  * `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}` (§6): one file's text at a commit, or
  * undefined when the commit has no such file.
  */

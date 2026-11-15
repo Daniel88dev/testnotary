@@ -64,7 +64,7 @@ function verdictFrom(answer: ServiceAnswer): Verdict {
     const parsed = verifyResponse.safeParse(answer.body);
     if (!parsed.success) return fallback("service_error");
     const { verification } = parsed.data;
-    return { result: verification.result, reason: (verification.reason as FallbackReason | null) ?? null, detail: null, record: verification };
+    return { result: verification.result, reason: (verification.reason as FallbackReason | null) ?? null, detail: verification.detail, record: verification };
   }
   const error = (answer.body as { error?: unknown } | null)?.error;
   if (error === "token_rejected" || error === "repo_not_installed" || error === "github_denied") return fallback(error);

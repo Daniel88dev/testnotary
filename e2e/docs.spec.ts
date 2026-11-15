@@ -213,6 +213,16 @@ test("every accepted limit is stated on a Trust or Security page", async ({ page
   await expect(security).toContainText('"signatures": "required"');
 });
 
+test("“How a skip is decided” lists the product-default guarded files the verification uses", async ({ page }) => {
+  await page.goto("/docs/how");
+
+  const listed = await page.getByRole("main").locator("ul.guarded-defaults code").allInnerTexts();
+  // The spec's defaults: workflows, actions, the config, allowed signers, every lockfile, every package.json, the Node version files.
+  for (const glob of [".github/workflows/**", ".github/actions/**", "testnotary.json", ".testnotary/allowed_signers", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "package.json", ".nvmrc", ".node-version", ".tool-versions"]) {
+    expect(listed, glob).toContain(glob);
+  }
+});
+
 test("“What leaves your machine” links the privacy policy, and the docs footer links the terms and the privacy policy", async ({ page }) => {
   await page.goto("/docs/data");
   const privacy = page.getByRole("main").getByRole("link", { name: "privacy policy" });

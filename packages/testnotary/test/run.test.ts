@@ -280,6 +280,32 @@ describe("what a run uploads", () => {
       },
     ]);
   });
+
+  test("the guarded globs the branch's change matched, against the base, the way CI's verification judges it", async () => {
+    const dev = await developer({ config: { ...PASSING, guarded: ["docker/**", "*.sql"] }, files: { "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" } });
+    await dev.fixture.branch("feature");
+    await dev.fixture.commit("Change things", { "src/a.js": "1\n", "docker/db/Dockerfile": "FROM postgres\n", "packages/api/package.json": "{}\n" });
+    await dev.fixture.commit("Drop the lockfile", { "pnpm-lock.yaml": null });
+    const mark = world.service.requests.length;
+
+    const result = await dev.run();
+
+    expect(summary(result).attested).toBe("true");
+    const [upload] = uploadsSince(mark);
+    // Globs only, in the order they are listed (defaults first): a run never sends file names.
+    expect(upload!.guardedMatched).toEqual(["pnpm-lock.yaml", "package.json", "docker/**"]);
+  });
+
+  test("no guarded glob matched when the branch changes none", async () => {
+    const dev = await developer({ config: { ...PASSING, guarded: ["docker/**"] } });
+    await dev.fixture.branch("feature");
+    await dev.fixture.commit("Change a", { "src/a.js": "1\n" });
+    const mark = world.service.requests.length;
+
+    await dev.run();
+
+    expect(uploadsSince(mark)[0]!.guardedMatched).toEqual([]);
+  });
 });
 
 interface RefusalCase {

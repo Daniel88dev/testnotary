@@ -6,6 +6,8 @@ export {
   REFUSAL_CODES,
   SANDBOX_MARKERS,
   baselineOverrides,
+  guardedGlobs,
+  guardedMatches,
   parseConfig,
   strippedEnvironment,
   suiteFromConfig,
