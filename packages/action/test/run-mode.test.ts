@@ -363,6 +363,21 @@ describe("the PR line", () => {
     expect(result.summary).toMatch(runPage);
   });
 
+  test("names the token by its current name, after its owner renamed it", async () => {
+    const s = await story();
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    const sql = world.db.connect("app");
+    await sql`insert into token_renames (token_id, name) select id, 'work laptop' from tokens where account_id = ${s.user.id}`;
+    const workspace = await ciWorkspace(s, merge.sha);
+
+    await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    expect(world.github.checkRuns(s.repo)[0]!.output.title).toContain(`attested by @${s.user.login} · laptop token "work laptop" · `);
+  });
+
   test("in shadow mode a run the attestation covers reads would_skip, runs the tests, and names both", async () => {
     const s = await story();
     await pullRequest(s);

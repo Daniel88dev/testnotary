@@ -1,0 +1,69 @@
+/* The one design-token file ("Pipeline", spec Web app). Every page of the app (landing, docs,
+   dashboard) uses these names; do not define colours anywhere else.
+   Cyan means skip, match or the primary action; amber means run, fallback, audit or mismatch.
+   There is no third accent. A mismatch is solid amber. */
+
+:root {
+  /* Grounds and surfaces */
+  --ground: #070a12; /* navy ground (landing --bg) */
+  --surface: #0c111d; /* panels (landing --panel) */
+  --raised: #111829; /* raised panels, hover (landing --panel-2) */
+  --active: #161f33; /* selected rows and segments */
+
+  /* Lines */
+  --border: #1c2538; /* panel borders (landing --line) */
+  --control: #2a3550; /* control outlines (landing --line-2) */
+  --rule: #151d2e; /* table row rules */
+  --grid: #1a2336; /* chart grid lines */
+
+  /* Text */
+  --text: #e8edf9;
+  --muted: #8d97b1; /* secondary text (spec value; the dashboard prototype's #9aa3bb is not used) */
+  --faint: #7e89a5; /* table headers, captions */
+
+  /* Skip: cyan */
+  --skip: #4fd8ff;
+  --skip-hover: #86e5ff;
+  --skip-ink: #04121a; /* text on solid cyan */
+  --skip-bg: rgba(79, 216, 255, 0.1);
+
+  /* Run: amber */
+  --run: #ffb648;
+  --run-hover: #ffc875;
+  --run-ink: #1c1203; /* text on solid amber */
+  --run-bg: rgba(255, 182, 72, 0.1);
+
+  /* Shapes and spacing */
+  --radius-card: 10px;
+  --radius-control: 6px;
+  --radius-chip: 4px;
+  --gap: 16px;
+  --pad: 20px;
+
+  /* Type: self-hosted through next/font (app/fonts.ts) */
+  --sans: var(--font-space-grotesk), system-ui, sans-serif;
+  --mono: var(--font-ibm-plex-mono), ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--ground); color-scheme: dark; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible { outline: 2px solid var(--skip); outline-offset: 2px; border-radius: 4px; }
+::selection { background: var(--skip); color: var(--skip-ink); }
+
+/* The mark: two nodes on a wire. Markup: <span class="mark" aria-hidden="true"><i></i><i></i></span> */
+.mark { position: relative; display: inline-block; width: 22px; height: 14px; flex: none; }
+.mark i { position: absolute; top: 3px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--skip); }
+.mark i:first-child { left: 0; }
+.mark i:last-child { right: 0; background: var(--skip); }
+.mark::before { content: ''; position: absolute; left: 7px; right: 7px; top: 6px; height: 2px; background: var(--skip); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

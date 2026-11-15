@@ -58,11 +58,13 @@ export class GitHubState {
   readonly installations = new Map<number, FakeInstallation>();
   /** GitHub accounts by lowercased login: people (device flow, `/user`) and organizations. */
   readonly accounts = new Map<string, FakeAccount>();
+  /** Every user token (`ghu_…`) handed out by the device flow or the browser sign-in, and whose it is. */
+  readonly userTokens = new Map<string, FakeAccount>();
   /** Installation access tokens (`ghs_…`) the App bought, by value (§10). */
   readonly installationTokens = new Map<string, InstallationToken>();
   /**
    * Collaborator permissions set by tests, by repo id then account id. Anyone not listed reads
-   * `read` on a public repo and `none` on a private one (§7).
+   * `read` on a public repo and `none` on a private one (§7); the owner of a personal repo is admin.
    */
   readonly permissions = new Map<number, Map<number, RepoPermission>>();
   /** Every job's `GITHUB_TOKEN`, by value. */
@@ -101,11 +103,22 @@ export class GitHubState {
 
   /** What `GET …/collaborators/{login}/permission` reports: `maintain` folds into `write`, `triage` into `read` (§7). */
   permission(repo: FakeRepo, account: FakeAccount): "admin" | "write" | "read" | "none" {
-    const set = this.permissions.get(repo.id)?.get(account.id);
+    const set = this.explicitRole(repo, account);
     if (set === "maintain") return "write";
     if (set === "triage") return "read";
-    if (set) return set;
+    if (set && set !== "none") return set;
     return repo.visibility === "public" ? "read" : "none";
+  }
+
+  /**
+   * The role the person holds on the repo itself (what GitHub lists a repo under their
+   * installations for): one set by a test, or admin on their own personal repo. `undefined` or
+   * `none` means they only read it if it is public.
+   */
+  explicitRole(repo: FakeRepo, account: FakeAccount): RepoPermission | undefined {
+    const set = this.permissions.get(repo.id)?.get(account.id);
+    if (set) return set;
+    return repo.owner.toLowerCase() === account.login.toLowerCase() ? "admin" : undefined;
   }
 
   /** The account with this login, made up (with a fresh id) the first time it is named. */

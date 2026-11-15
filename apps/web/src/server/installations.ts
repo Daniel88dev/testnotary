@@ -99,7 +99,8 @@ async function installationState(db: Executor, installationId: number): Promise<
   return "active";
 }
 
-async function repoViews(db: Executor, repoIds: number[]): Promise<RepoView[]> {
+/** The current view of each repo (whether installed or not), in no particular order. */
+export async function repoViews(db: Executor, repoIds: number[]): Promise<RepoView[]> {
   if (repoIds.length === 0) return [];
   const states = await db
     .selectDistinctOn([repoStates.repoId])

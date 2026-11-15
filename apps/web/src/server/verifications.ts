@@ -16,7 +16,7 @@ import { GitHubUnavailable, fileAt, gitCommit, installationToken } from "./githu
 import { apiError } from "./http.ts";
 import { installedRepo, latestRepoState, type Executor, type RepoView } from "./installations.ts";
 import { acceptActionsToken, type ActionsClaims } from "./oidc.ts";
-import { accountLogin, bearer } from "./tokens.ts";
+import { accountLogin, bearer, currentNames } from "./tokens.ts";
 import { hasWriteAccess } from "./write-access.ts";
 
 // Verification: a CI job, identified only by its Actions OIDC token, asks whether an attestation
@@ -160,7 +160,7 @@ export async function readVerification(db: Executor, id: string, repoId: number)
           endedAt: attestation.endedAt.toISOString(),
           attester: {
             account: { id: attestation.accountId, login: (await accountLogin(db, attestation.accountId)) ?? null },
-            token: { kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: token?.name ?? "" },
+            token: { kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: token ? ((await currentNames(db, [token])).get(token.id) ?? token.name) : "" },
           },
         }
       : null,
