@@ -139,11 +139,21 @@ export class FixtureRepo {
 
   /**
    * What `actions/checkout` leaves in `GITHUB_WORKSPACE`: a fresh clone of origin with `sha`
-   * checked out, detached (on `pull_request`, the test merge commit). Full history; a
-   * `fetch-depth: 2` shallow variant is for the signature-check ticket. Removed with the fixture.
+   * checked out, detached (on `pull_request`, the test merge commit). Full history by default;
+   * `fetchDepth: 2` is the shallow clone signature mode needs (`HEAD`, its parents and nothing
+   * more), and `fetchDepth: 1` the action's default (`HEAD` alone). Removed with the fixture.
    */
-  async ciCheckout(sha: string): Promise<string> {
+  async ciCheckout(sha: string, options: { fetchDepth?: number } = {}): Promise<string> {
     const dir = await mkdtemp(join(this.root, "ci-"));
+    if (options.fetchDepth) {
+      // actions/checkout fetches the one commit by SHA with `--depth`; GitHub serves any SHA.
+      await git(this.remoteDir, ["config", "uploadpack.allowAnySHA1InWant", "true"]);
+      await git(dir, ["init", "--quiet"]);
+      await git(dir, ["remote", "add", "origin", `file://${this.remoteDir}`]);
+      await git(dir, ["fetch", "--quiet", "--no-tags", `--depth=${options.fetchDepth}`, "origin", sha]);
+      await git(dir, ["checkout", "--quiet", "--detach", sha]);
+      return dir;
+    }
     await git(dir, ["clone", "--quiet", "--no-checkout", this.remoteDir, "."]);
     await git(dir, ["fetch", "--quiet", "origin", "+refs/pull/*:refs/remotes/origin/pull/*"]);
     await git(dir, ["checkout", "--quiet", "--detach", sha]);

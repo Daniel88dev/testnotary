@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { runEnvironment, sessionLabels } from "./run.ts";
+import { attestationSignature } from "./signature.ts";
 
 // Verification: the action asks the service whether an attestation names the tree of the commit CI
 // builds. It sends its Actions OIDC token as `Authorization: Bearer`, the suite and the runner's
@@ -112,7 +113,7 @@ export const mismatch = z.object({
     endedAt: z.string(),
     format: z.string(),
     payload: z.string(),
-    signature: z.record(z.string(), z.unknown()).nullable(),
+    signature: attestationSignature.nullable(),
   }),
   /** Both environments: the attested run's and the CI runner's. */
   environments: z.object({ run: runEnvironment.nullable(), ci: ciEnvironment }),
@@ -163,6 +164,11 @@ export const verification = z.object({
       run: z.object({ id: z.string(), environment: runEnvironment.nullable(), session: sessionLabels.nullable() }),
       format: z.string(),
       payload: z.string(),
+      /**
+       * The signature fields stored with it (signature mode); null when the run uploaded none. The
+       * action checks `sshsig` over `payload`'s exact bytes itself and trusts nothing else here.
+       */
+      signature: attestationSignature.nullable().default(null),
       endedAt: z.string(),
       /**
        * Who the PR line names: the token's account (for a sandbox token, its creator) with the login

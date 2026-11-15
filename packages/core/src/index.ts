@@ -27,6 +27,32 @@ export {
 } from "./audit.ts";
 export { GUARDED_DEFAULTS, guardedGlobs, guardedMatches, matchesGuardedGlob, type GuardedMatch } from "./guarded.ts";
 export {
+  ALLOWED_SIGNERS_FILE,
+  SIGNATURE_NAMESPACE,
+  SIGNING_KEY_VARIABLE,
+  accountPrincipal,
+  allowedSignerFor,
+  allowedSignersLine,
+  attesterPrincipal,
+  attesterSigner,
+  decodeSigningKey,
+  encodeSigningKey,
+  keyFingerprint,
+  parseAllowedSigners,
+  parsePublicKey,
+  parseSshSignature,
+  publicKeyText,
+  sameKey,
+  sandboxPrincipal,
+  verifySshSignature,
+  type AllowedSigner,
+  type KeySource,
+  type SignatureCheck,
+  type Signer,
+  type SshPublicKey,
+  type SshSignature,
+} from "./signature.ts";
+export {
   ATTESTATION_MAX_AGE_MS,
   COMPARE_FILE_LIMIT,
   FALLBACK_REASONS,

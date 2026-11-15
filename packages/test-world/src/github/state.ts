@@ -32,6 +32,16 @@ export interface FakeCheckRun {
   app: { slug: string; id: number };
 }
 
+/** An SSH signing key on a person's GitHub account (`GET /users/{login}/ssh_signing_keys`, §8). */
+export interface FakeSigningKey {
+  id: number;
+  accountId: number;
+  /** `type base64`, as GitHub lists it (no comment). */
+  key: string;
+  title: string;
+  createdAt: string;
+}
+
 /** A repo the fake GitHub knows, backed by a fixture repo's bare `origin`. */
 export interface FakeRepo {
   /** GitHub's numeric repo id (what the OIDC `repository_id` claim carries). */
@@ -71,6 +81,11 @@ export class GitHubState {
   readonly jobTokens = new Map<string, JobToken>();
   /** Check runs, oldest first. */
   readonly checkRuns: FakeCheckRun[] = [];
+  /**
+   * SSH signing keys people added to their accounts, oldest first. A deleted key is gone from the
+   * next request: authenticated reads saw the change within 2 s live, and there is no cache here.
+   */
+  readonly signingKeys: FakeSigningKey[] = [];
   private nextId = 1000;
 
   id(): number {

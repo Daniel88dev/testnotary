@@ -7,7 +7,7 @@
 // the current state. GitHub ids are the keys for everything that comes from GitHub.
 import { sql } from "drizzle-orm";
 import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
-import type { CiEnvironment, RunEnvironment, SessionLabels, SkippedCommit } from "@testnotary/protocol";
+import type { AttestationSignature, CiEnvironment, RunEnvironment, SessionLabels, SkippedCommit } from "@testnotary/protocol";
 
 const githubId = (name: string) => bigint(name, { mode: "number" });
 const at = (name = "at") => timestamp(name, { withTimezone: true, mode: "date" }).notNull().defaultNow();
@@ -243,7 +243,7 @@ export const runs = pgTable(
 /**
  * A passed run's attestation: exactly one per passed run. `payload` is the canonical payload's
  * bytes as uploaded, in the `format` it names; the columns beside it are copies for lookups and
- * must never be used to rebuild it. Signature fields arrive with signature mode (T-829).
+ * must never be used to rebuild it. `signature` holds the signature fields in signature mode.
  */
 export const attestations = pgTable(
   "attestations",
@@ -269,6 +269,11 @@ export const attestations = pgTable(
     endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }).notNull(),
     format: text("format").notNull(),
     payload: bytea("payload").notNull(),
+    /**
+     * The signature fields uploaded with it (signature mode), with whether GitHub listed the key at
+     * upload and when that was checked; null when the run uploaded none. Served as stored.
+     */
+    signature: jsonb("signature").$type<AttestationSignature>(),
     createdAt: at("created_at"),
   },
   (table) => [index("attestations_lookup").on(table.repoId, table.suite, table.tree)],
@@ -389,8 +394,8 @@ export const mismatches = pgTable(
     attestationEndedAt: timestamp("attestation_ended_at", { withTimezone: true, mode: "date" }).notNull(),
     attestationFormat: text("attestation_format").notNull(),
     attestationPayload: bytea("attestation_payload").notNull(),
-    /** The attestation's signature fields; null while it has none (signature mode, T-829). */
-    signature: jsonb("signature").$type<Record<string, unknown>>(),
+    /** The attestation's signature fields, copied as stored; null when it had none. */
+    signature: jsonb("signature").$type<AttestationSignature>(),
     runEnvironment: jsonb("run_environment").$type<RunEnvironment>(),
     session: jsonb("session").$type<SessionLabels>(),
     ciEnvironment: jsonb("ci_environment").$type<CiEnvironment>().notNull(),
