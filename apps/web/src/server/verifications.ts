@@ -1,6 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { COMPARE_FILE_LIMIT, CONFIG_FILE, decideVerification, type AttestationCandidate } from "@testnotary/core";
 import {
+  DELETED_ACCOUNT,
   VERIFY_REFUSALS,
   decodeAttestationPayload,
   type JobReport,
@@ -161,6 +162,8 @@ export async function readVerification(db: Executor, id: string, repoId: number)
     .where(and(eq(verifications.id, id), eq(verifications.repoId, repoId)));
   if (!row) return undefined;
   const { verification, attestation, run, token } = row;
+  const attester = attestation ? await accountAsOf(db, attestation.accountId, attestation.createdAt) : undefined;
+  const withheld = attester?.id === DELETED_ACCOUNT.id;
   const [report] = await db
     .select()
     .from(jobReports)
@@ -184,11 +187,11 @@ export async function readVerification(db: Executor, id: string, repoId: number)
           id: attestation.id,
           run: { id: attestation.runId, environment: run?.environment ?? null, session: run?.session ?? null },
           format: attestation.format,
-          payload: attestation.payload.toString("utf8"),
-          signature: attestation.signature ?? null,
+          payload: withheld ? null : attestation.payload.toString("utf8"),
+          signature: withheld ? null : (attestation.signature ?? null),
           endedAt: attestation.endedAt.toISOString(),
           attester: {
-            account: await accountAsOf(db, attestation.accountId, attestation.createdAt),
+            account: attester!,
             token: { kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: token ? ((await currentNames(db, [token])).get(token.id) ?? token.name) : "" },
           },
         }

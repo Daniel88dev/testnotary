@@ -1,4 +1,5 @@
 import type { FallbackReason, RefusalCode, VerificationResult } from "@testnotary/core";
+import type { ExplanationCause } from "../../../src/server/settings.ts";
 
 // The dashboard's words for the codes. The codes come from core; adding one there makes these
 // tables fail to typecheck until it has its words here. Seeded from the dashboard prototype's
@@ -59,6 +60,14 @@ export const RESULT_LABELS: Record<VerificationResult, string> = {
   fallback: "Ran",
   would_skip: "Would have skipped",
   would_fall_back: "Would have fallen back",
+};
+
+/** A mismatch explanation's cause. */
+export const CAUSE_LABELS: Record<ExplanationCause, string> = {
+  flaky_test: "Flaky test",
+  environment_difference: "Environment difference",
+  false_attestation: "False attestation",
+  other: "Other",
 };
 
 export function reasonLabel(code: string): string {

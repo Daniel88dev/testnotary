@@ -5,6 +5,7 @@ import { MobileBar } from "../../_components/shell.tsx";
 import { database } from "../../../../src/db/client.ts";
 import { now } from "../../../../src/server/config.ts";
 import { suitesLastResult } from "../../../../src/server/history.ts";
+import { openMismatchCounts } from "../../../../src/server/settings.ts";
 import { rel } from "../../_lib/format.ts";
 import { getReadableRepos, getViewer, requireRepoAccess } from "../../_lib/viewer.ts";
 
@@ -23,9 +24,10 @@ export default async function RepoLayout({ children, params }: { children: React
     lastResult: suite.result === "skip" || suite.result === "would_skip" ? ("skip" as const) : ("run" as const),
     at: rel(suite.at, at),
   }));
+  const openMismatches = (await openMismatchCounts(database(), [access.repo.id])).get(access.repo.id) ?? 0;
   return (
     <>
-      <RepoColumn access={access} viewer={viewer} repos={repos} suites={suites} />
+      <RepoColumn access={access} viewer={viewer} repos={repos} suites={suites} openMismatches={openMismatches} />
       <main className="dash-main">
         <MobileBar title={fullName} repo={{ fullName, sections: visibleSections(fullName, viewer) }} viewer={viewer} />
         <LegalChanges />

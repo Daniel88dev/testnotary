@@ -256,12 +256,13 @@ export async function behindBy(token: string, fullName: string, base: string, he
 }
 
 /**
- * `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}` (§6): one file's text at a commit, or
- * undefined when the commit has no such file.
+ * `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}` (§6): one file's text at a commit (with no
+ * `ref`, on the default branch), or undefined when the commit has no such file.
  */
-export async function fileAt(token: string, fullName: string, path: string, ref: string): Promise<string | undefined> {
+export async function fileAt(token: string, fullName: string, path: string, ref?: string): Promise<string | undefined> {
   const encoded = path.split("/").map(encodeURIComponent).join("/");
-  const response = await call(`${serviceConfig().githubApiUrl}/repos/${fullName}/contents/${encoded}?ref=${encodeURIComponent(ref)}`, withToken(token));
+  const query = ref === undefined ? "" : `?ref=${encodeURIComponent(ref)}`;
+  const response = await call(`${serviceConfig().githubApiUrl}/repos/${fullName}/contents/${encoded}${query}`, withToken(token));
   if (response.status === 404) return undefined;
   if (!response.ok) return failure(response, "the contents call");
   const body = await jsonBody(response);

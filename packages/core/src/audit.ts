@@ -66,6 +66,14 @@ export function auditOneIn(settings: Pick<RepoSettings, "auditOneIn" | "sandboxA
   return Math.min(laptop, clampRate(settings.sandboxAuditOneIn, AUDIT_RATE_DEFAULTS.sandboxAuditOneIn));
 }
 
+/**
+ * The sandbox rate a repo gets unless an admin sets another: twice as often as the repo's own rate
+ * (1 in 10 → 1 in 5), rounded towards more audits, and never less often than the sandbox default.
+ */
+export function sandboxAuditDefault(auditOneIn: number): number {
+  return Math.min(AUDIT_RATE_DEFAULTS.sandboxAuditOneIn, Math.max(1, Math.floor(auditOneIn / 2)));
+}
+
 function clampRate(oneIn: number, least: number): number {
   return Number.isInteger(oneIn) && oneIn >= 1 ? Math.min(oneIn, least) : least;
 }

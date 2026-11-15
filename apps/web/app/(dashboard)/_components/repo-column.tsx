@@ -24,16 +24,17 @@ export function RepoColumn({
   viewer,
   repos,
   suites,
+  openMismatches,
 }: {
   access: RepoAccess;
   viewer: Viewer | undefined;
   repos: ReadableRepo[];
   /** Each suite's latest verification: cyan when it skipped or would have, amber when the tests ran. */
   suites: { name: string; lastResult: "skip" | "run"; at: string }[];
+  /** Mismatches no admin has explained yet: counted in amber beside Mismatches. */
+  openMismatches: number;
 }) {
   const { repo } = access;
-  // Open mismatches arrive with T-828 (an explanation closes one); until then none are counted.
-  const openMismatches = 0;
   return (
     <div className="dash-nav">
       <details className="menu">
