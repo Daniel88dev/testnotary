@@ -128,6 +128,16 @@ test("the Verifications list filters by reason through the URL and shows shadow 
   // A row opens its commit page.
   await rows.nth(0).getByRole("link", { name: guarded.sha.slice(0, 7) }).click();
   await expect(page).toHaveURL(new RegExp(`/tess-verify/compass/commit/${guarded.sha}$`));
+
+  // The repo column lists the suite with its last result, linking the suite's verifications.
+  await page.locator(".dash-nav a.suite", { hasText: "unit" }).click();
+  await expect(page).toHaveURL(/\/tess-verify\/compass\/verifications\?suite=unit$/);
+  await expect(rows).toHaveCount(4);
+  await expect(page.locator(".dash-nav a.suite .dot.run")).toHaveCount(1);
+  // Home shows when the repo was last verified.
+  await signIn(page, world, s.user);
+  const home = page.getByRole("table", { name: "Repositories" }).getByRole("row", { name: /tess-verify\/compass/ });
+  await expect(home).toContainText("just now");
 });
 
 test("the commit page shows the matched attestation from another commit, the attester beside the commit author, gates and the CI log", async ({ page, world }) => {

@@ -1,6 +1,10 @@
 import Link from "next/link";
 import type { RepoMode } from "@testnotary/core";
+import { database } from "../../../src/db/client.ts";
 import type { ReadableRepo } from "../../../src/server/access.ts";
+import { now } from "../../../src/server/config.ts";
+import { lastVerifications } from "../../../src/server/history.ts";
+import { rel } from "../_lib/format.ts";
 
 /** A repo's mode as a chip: enforcing is cyan (tests skip), shadow is an outlined amber chip. */
 export function ModeChip({ mode }: { mode: RepoMode }) {
@@ -8,7 +12,12 @@ export function ModeChip({ mode }: { mode: RepoMode }) {
 }
 
 /** Repos with mode, open mismatches and last verification (prototype `P.home`). */
-export function RepoTable({ repos, label }: { repos: ReadableRepo[]; label: string }) {
+export async function RepoTable({ repos, label }: { repos: ReadableRepo[]; label: string }) {
+  const last = await lastVerifications(
+    database(),
+    repos.map((repo) => repo.id),
+  );
+  const at = now();
   return (
     <div className="panel">
       <div className="tbl-wrap">
@@ -33,11 +42,9 @@ export function RepoTable({ repos, label }: { repos: ReadableRepo[]; label: stri
                 <td>
                   <ModeChip mode={repo.mode} />
                 </td>
-                {/* Mismatches and verifications arrive with their tickets; none exist yet. */}
+                {/* Open mismatches arrive with T-828 (an explanation closes one); none are counted yet. */}
                 <td className="num">0</td>
-                <td className="num muted">
-                  <span className="faint">None yet</span>
-                </td>
+                <td className="num muted">{last.has(repo.id) ? rel(last.get(repo.id)!, at) : <span className="faint">None yet</span>}</td>
               </tr>
             ))}
           </tbody>
