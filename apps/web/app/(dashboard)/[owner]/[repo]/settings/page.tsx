@@ -40,6 +40,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ owner
     guardedFilesOf(repo),
   ]);
   const enforcing = settings.mode === "enforce";
+  // While a mismatch is open the switch is blocked, so "switching is allowed" would mislead.
+  const warnings = settings.openMismatches > 0 ? [] : settings.warnings;
   return (
     <Section
       title="Settings"
@@ -70,7 +72,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ owner
                 <LastChange settings={settings} />
               </div>
               {admin ? (
-                <ModeSwitch repository={repo.fullName} mode={settings.mode} warnings={settings.warnings} blocked={settings.openMismatches > 0} />
+                <ModeSwitch repository={repo.fullName} mode={settings.mode} warnings={warnings} blocked={settings.openMismatches > 0} />
               ) : (
                 <button type="button" className="switch" role="switch" aria-checked={enforcing} aria-label="Enforce" disabled />
               )}
@@ -105,7 +107,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ owner
                 </span>
               </p>
             ) : null}
-            {(settings.openMismatches > 0 ? [] : settings.warnings).map((warning) => (
+            {warnings.map((warning) => (
               <p key={warning} className="warn-line">
                 {warning} Switching is allowed; it is a warning, not a block.
               </p>
