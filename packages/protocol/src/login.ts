@@ -38,6 +38,19 @@ export type DevicePollRequest = z.infer<typeof devicePollRequest>;
 export const account = z.object({ id: z.number(), login: z.string() });
 export type Account = z.infer<typeof account>;
 
+/**
+ * The shared tombstone that every record of a deleted account shows instead of it: id 0 and no
+ * login. No GitHub account has id 0.
+ */
+export const DELETED_ACCOUNT = { id: 0, login: null } as const;
+export const DELETED_ACCOUNT_NAME = "deleted account";
+
+/** How a record names its account: `@login`, `account <id>` when the login is unknown, or *deleted account*. */
+export function accountName(account: { id: number; login: string | null }): string {
+  if (account.id === DELETED_ACCOUNT.id) return DELETED_ACCOUNT_NAME;
+  return account.login ? `@${account.login}` : `account ${account.id}`;
+}
+
 export const tokenInfo = z.object({
   id: z.string(),
   kind: z.enum(["laptop", "sandbox"]),
@@ -53,8 +66,9 @@ export type TokenInfo = z.infer<typeof tokenInfo>;
  * - `github_denied`: GitHub refused the service's `/user` call with the person's token, for an
  *   IP allow list or conditional access (`cause`), with GitHub's own words in `message`.
  * - `github_unavailable`: GitHub could not be reached or answered something unexpected.
+ * - `account_suspended`: the operator suspended the account for breaking the terms.
  */
-export const loginError = z.enum(["expired_token", "access_denied", "github_denied", "github_unavailable"]);
+export const loginError = z.enum(["expired_token", "access_denied", "github_denied", "github_unavailable", "account_suspended"]);
 export type LoginError = z.infer<typeof loginError>;
 
 export const githubDeniedCause = z.enum(["ip_allow_list", "conditional_access", "unknown"]);

@@ -59,8 +59,11 @@ export {
   type VerifyResponse,
 } from "./verification.ts";
 export {
+  DELETED_ACCOUNT,
+  DELETED_ACCOUNT_NAME,
   LINKS,
   account,
+  accountName,
   apiError,
   deviceStartResponse,
   devicePollRequest,

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import type { Account } from "@testnotary/protocol";
 import { database } from "../db/client.ts";
 import { sessionEnds } from "../db/schema.ts";
+import { sessionStillValid } from "./accounts.ts";
 import { auth, githubIdentity } from "./auth.ts";
 import { rememberAccount } from "./tokens.ts";
 
@@ -29,6 +30,8 @@ export async function viewerFrom(headers: Headers): Promise<Viewer | undefined> 
   const db = database();
   const ended = await db.select({ id: sessionEnds.sessionId }).from(sessionEnds).where(eq(sessionEnds.sessionId, session.session.id));
   if (ended.length > 0) return undefined;
+  // *Delete account* ends every session that started before it.
+  if (!(await sessionStillValid(db, identity.id, new Date(session.session.createdAt)))) return undefined;
   const token = await instance.api
     .getAccessToken({ body: { useAccountCookie: true }, headers })
     .catch(() => undefined);
