@@ -121,9 +121,7 @@ In shadow mode the tests still run in CI. The **CI / Testnotary / unit (pull_req
 <Code snippet="first-run" lang="sh" file="terminal" />
 
 ```check unit pull_request
-Would have skipped · unit passed 14 min ago
-Attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0
-Shadow mode: the tests ran. View run →
+Would have skipped · unit passed 14 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0 · shadow mode: the tests passed in 48 s
 ```
 
 | Reason | What to do |
@@ -146,9 +144,7 @@ Switch to enforce. From the next pull request on, a matching run skips the test 
 To turn Testnotary off in a hurry, set the repo variable `TESTNOTARY_DISABLED` to `true`. Every job then runs its tests.
 
 ```check unit pull_request
-Skipped · unit passed 9 min ago
-Attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0
-Test time saved: about 11 min. View run →
+Skipped · unit passed 9 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0
 ```
 
 </Step>

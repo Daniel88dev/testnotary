@@ -135,7 +135,7 @@ test("on a phone the page tree is a full-screen menu and “On this page” is h
   await expect(page.getByRole("navigation", { name: "Docs" })).toBeVisible();
 
   // Scroll spy: the step in view and its part are marked.
-  await page.evaluate(() => document.getElementById("login")!.scrollIntoView({ block: "start" }));
+  await page.locator("#login").evaluate((step) => (step as unknown as { scrollIntoView(options: object): void }).scrollIntoView({ block: "start" }));
   await expect(toc.getByRole("link", { name: "Sign in on your laptop" })).toHaveAttribute("aria-current", "location");
   await expect(toc.getByRole("link", { name: "Set up who attests" })).toHaveAttribute("aria-current", "location");
   await expect(toc.getByRole("link", { name: "Install the GitHub App" })).not.toHaveAttribute("aria-current", /.*/);
