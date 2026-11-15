@@ -9,6 +9,29 @@ export interface InstallationToken {
   expiresAt: number;
 }
 
+/**
+ * A job's `GITHUB_TOKEN`: it reaches only the workflow's own repo, with the workflow's
+ * `permissions`. A fork pull request's token is read-only whatever the workflow asks (§9).
+ */
+export interface JobToken {
+  repoId: number;
+  checks: "write" | "read";
+}
+
+/** A check run made through `POST /repos/{owner}/{repo}/check-runs` (§9). */
+export interface FakeCheckRun {
+  id: number;
+  repoId: number;
+  name: string;
+  headSha: string;
+  status: string;
+  conclusion: string | null;
+  output: { title: string | null; summary: string | null };
+  detailsUrl: string | null;
+  /** The App that made it: `github-actions` (15368) for a `GITHUB_TOKEN`. */
+  app: { slug: string; id: number };
+}
+
 /** A repo the fake GitHub knows, backed by a fixture repo's bare `origin`. */
 export interface FakeRepo {
   /** GitHub's numeric repo id (what the OIDC `repository_id` claim carries). */
@@ -44,6 +67,10 @@ export class GitHubState {
    * `read` on a public repo and `none` on a private one (§7); the owner of a personal repo is admin.
    */
   readonly permissions = new Map<number, Map<number, RepoPermission>>();
+  /** Every job's `GITHUB_TOKEN`, by value. */
+  readonly jobTokens = new Map<string, JobToken>();
+  /** Check runs, oldest first. */
+  readonly checkRuns: FakeCheckRun[] = [];
   private nextId = 1000;
 
   id(): number {

@@ -301,6 +301,29 @@ export const verifications = pgTable(
   (table) => [index("verifications_repo").on(table.repoId, table.createdAt)],
 );
 
+/**
+ * A CI job's report of its tests after a verification: `outcome` (`passed`, `failed`, `refused`),
+ * the test command's wall-clock duration and the runner's environment. Append-only, because the
+ * app role can't update a verification; a re-run job may add another, and the latest counts. A
+ * verification with none reads "outcome unknown". Hard-deleted at 90 days (retention ticket).
+ */
+export const jobReports = pgTable(
+  "job_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    verificationId: uuid("verification_id")
+      .notNull()
+      .references(() => verifications.id),
+    outcome: text("outcome").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    environment: jsonb("environment").$type<CiEnvironment>().notNull(),
+    createdAt: at("created_at"),
+    /** Arrival order, so the latest report is well defined even within one millisecond. */
+    seq: bigint("seq", { mode: "number" }).notNull().generatedAlwaysAsIdentity(),
+  },
+  (table) => [index("job_reports_verification").on(table.verificationId, table.seq)],
+);
+
 /** A token's new name, given by its owner on the Tokens page. The latest row is the token's name. */
 export const tokenRenames = pgTable(
   "token_renames",

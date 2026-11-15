@@ -43,6 +43,13 @@
       "when": 1794772629807,
       "tag": "0005_token_renames_and_session_ends",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794773549557,
+      "tag": "0006_job_reports",
+      "breakpoints": true
     }
   ]
 }

@@ -124,7 +124,7 @@ function expiry(token: { kind: string; expiresAt: Date | null }, lastSeen: Date)
 }
 
 /** Each token's name now: the latest rename, or the name it was created with. */
-async function currentNames(db: Executor, rows: { id: string; name: string }[]): Promise<Map<string, string>> {
+export async function currentNames(db: Executor, rows: { id: string; name: string }[]): Promise<Map<string, string>> {
   const names = new Map(rows.map((row) => [row.id, row.name]));
   if (rows.length === 0) return names;
   const renames = await db

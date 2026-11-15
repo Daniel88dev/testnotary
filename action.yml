@@ -13,8 +13,12 @@ inputs:
     required: false
     default: run
   verification:
-    description: A verification id from a gate job.
+    description: A verification id from a gate job. When it is empty (the gate failed), the step verifies on its own.
     required: false
+  github-token:
+    description: The token the `Testnotary / <suite>` check run is made with. It needs `checks: write`; without it the step writes only the job summary.
+    required: false
+    default: ${{ github.token }}
 outputs:
   result:
     description: skip, audit, fallback, would_skip or would_fall_back.
