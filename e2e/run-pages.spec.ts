@@ -10,7 +10,7 @@ interface Developer {
   repo: FakeRepo;
   machine: Machine;
   /** `testnotary run` on the developer's laptop: its `url=` (empty unless it attested) and exit code. */
-  run(): Promise<{ url: string; exitCode: number; stderr: string }>;
+  run(): Promise<{ url: string; exitCode: number | null; stderr: string }>;
 }
 
 /** A public repo installed on its owner's account, and its owner signed in on a laptop. */
