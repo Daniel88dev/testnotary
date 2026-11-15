@@ -136,6 +136,42 @@ describe("the OIDC token a verification sends", () => {
     expect(await verify(prefixed)).toEqual({ status: 401, body: { error: "token_rejected" } });
   });
 
+  test("a GitHub Enterprise Cloud slug issuer is accepted, and the verification stores it", async () => {
+    const r = await installed();
+    const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
+    const iss = `${world.github.oidc.issuer}/octocat-inc_2-B`;
+
+    const answer = await verify(await r.token(merge.sha, { claims: { iss, enterprise: "octocat-inc_2-B" } }));
+
+    expect(answer.status).toBe(200);
+    expect(answer.body.verification).toMatchObject({ iss, reason: "no_attestation" });
+  });
+
+  test("an issuer that only looks like a slug issuer is rejected and logged as claim_iss", async () => {
+    const r = await installed();
+    const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
+    const root = world.github.oidc.issuer;
+    const lookalikes = [
+      `${root}/acme/extra`, // an extra segment
+      `${root}/`, // an empty segment
+      `${root}/acme/`, // a trailing slash
+      `${root}/acme.inc`, // a character outside [A-Za-z0-9_-]
+      `${root}/acme\n`, // a newline after the segment
+      `${root}.evil.example/acme`, // another host that starts the same
+      `https://evil.example/${root}`, // the issuer inside another URL
+      `https://evil.example/?${root}/acme`,
+      ` ${root}/acme`,
+    ];
+
+    for (const iss of lookalikes) {
+      const from = world.service.logs.length;
+      const answer = await verify(await r.token(merge.sha, { claims: { iss } }));
+
+      expect(answer, iss).toEqual({ status: 401, body: { error: "token_rejected" } });
+      expect(world.service.logs.slice(from), iss).toEqual([expect.objectContaining({ event: "token_rejected", reason: "claim_iss" })]);
+    }
+  });
+
   test("no token, or one that isn't a JWT, is rejected", async () => {
     const answer = await fetch(`${world.service.url}/api/v1/verifications`, {
       method: "POST",

@@ -23,7 +23,7 @@ interface Scene {
   /** `testnotary run` on the developer's laptop, on the feature branch; must attest. */
   attest(env?: Record<string, string | undefined>): Promise<void>;
   /** The action in run mode on the pull request's test merge commit, with the library installed. */
-  ci(options?: Partial<RunActionOptions> & { fetchDepth?: number; audit?: boolean }): Promise<ActionResult & { workspace: string }>;
+  ci(options?: Partial<RunActionOptions> & { fetchDepth?: number; audit?: boolean }): Promise<ActionResult & { workspace: string; sha: string }>;
 }
 
 let scenes = 0;
@@ -68,14 +68,14 @@ async function scene(options_: { config?: Record<string, unknown>; install?: boo
       const workspace = await fixture.ciCheckout(merge.sha, fetchDepth ? { fetchDepth } : {});
       await installLibrary(workspace);
       const result = await world.runAction({ repo, sha: merge.sha, workspace, inputs: { suite: "test" }, ...options });
-      return { ...result, workspace };
+      return { ...result, workspace, sha: merge.sha };
     },
   };
 }
 
 interface Case {
   /** Stages the cause and runs the action. */
-  run(): Promise<ActionResult & { workspace: string }>;
+  run(): Promise<ActionResult & { workspace: string; sha: string }>;
   /** What the line names in brackets after the code, when anything. */
   detail?: RegExp;
 }
@@ -193,6 +193,23 @@ describe("identity and GitHub", () => {
     expect(line(result.summary)).toMatch(/^Fell back: token_rejected, the service did not accept the job's OIDC token · the tests passed in /);
     expect(result.summary).not.toMatch(/\biss\b|issuer|claim/);
     expect(world.service.logs.slice(logs)).toContainEqual(expect.objectContaining({ event: "token_rejected", reason: "claim_iss" }));
+  });
+
+  test("a job whose token comes from its enterprise's slug issuer verifies and skips", async () => {
+    const s = await scene();
+    await s.attest();
+
+    const result = await s.ci({ enterpriseSlug: "octocat-inc" });
+
+    expect(result.outputs).toMatchObject({ result: "skip", ran: "false" });
+    // The verification stores the slug issuer, read back as a later step of the job would.
+    const id = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    const token = await world.github.oidc.tokenFor(
+      { repo: s.repo, sha: result.sha, ref: "refs/pull/1/merge", eventName: "pull_request", enterpriseSlug: "octocat-inc" },
+      "https://testnotary.dev",
+    );
+    const read = await fetch(`${world.service.url}/api/v1/verifications/${id}`, { headers: { authorization: `Bearer ${token}` } });
+    expect(((await read.json()) as { verification: { iss: string } }).verification.iss).toBe(`${world.github.oidc.issuer}/octocat-inc`);
   });
 
   test("github_denied from an IP allow list says so in the line, passes GitHub's message and links Limits in v1", async () => {
@@ -316,6 +333,22 @@ describe("before the service", () => {
     expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_oidc_token", ran: "true" });
     expect(result.stdout).toMatch(/^::warning::Testnotary: .*permissions: id-token: write/m);
     expect(result.stdout).not.toMatch(/::notice::/);
+  });
+
+  test("a Dependabot pull request gets an OIDC token, unlike a fork's: it verifies, and its check run is made", async () => {
+    const s = await scene();
+    const from = world.service.requests.length;
+
+    const result = await s.ci({ dependabot: true });
+
+    // Nobody attested Dependabot's tree, so the service answers no_attestation: but it answered.
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(result.summary).toMatch(/- Verification: `[0-9a-f-]{36}`/);
+    expect(result.stdout).not.toMatch(/::(notice|warning)::/);
+    const [verify] = world.service.requests.slice(from).filter((request) => request.method === "POST" && request.path === "/api/v1/verifications");
+    const claims = JSON.parse(Buffer.from(verify!.headers.authorization!.split(".")[1]!, "base64url").toString()) as { actor: string };
+    expect(claims.actor).toBe("dependabot[bot]");
+    expect(world.github.checkRuns(s.repo)).toEqual([expect.objectContaining({ conclusion: "neutral" })]);
   });
 });
 
