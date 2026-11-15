@@ -9,6 +9,11 @@ export interface WorldDatabase {
   urls: Record<Role, string>;
   /** A short-lived connection as one role, for tests that check what a role may do. */
   connect(role: Role): postgres.Sql;
+  /**
+   * Every row of every table, as text: for asserting that a value (a raw token, a GitHub token)
+   * is stored nowhere, whatever the schema looks like.
+   */
+  dump(): Promise<string>;
   drop(): Promise<void>;
 }
 
@@ -37,6 +42,22 @@ export async function createWorldDatabase(server: PostgresServer): Promise<World
       const sql = postgres(urls[role], { max: 1, connect_timeout: 5, onnotice: () => {} });
       opened.push(sql);
       return sql;
+    },
+    async dump() {
+      const sql = postgres(urls.migration, { max: 1, connect_timeout: 5, onnotice: () => {} });
+      try {
+        const tables = await sql<{ name: string }[]>`
+          select table_name as name from information_schema.tables
+          where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name`;
+        const parts: string[] = [];
+        for (const { name } of tables) {
+          const rows = await sql.unsafe(`select * from "${name.replace(/"/g, '""')}"`);
+          parts.push(`${name}\n${JSON.stringify(rows)}`);
+        }
+        return parts.join("\n");
+      } finally {
+        await sql.end({ timeout: 1 });
+      }
     },
     async drop() {
       await Promise.all(opened.map((sql) => sql.end({ timeout: 1 })));

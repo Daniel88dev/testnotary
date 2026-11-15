@@ -33,3 +33,22 @@ export function tokenKind(value: string): TokenKind | undefined {
   if (value.startsWith("tns_")) return "sandbox";
   return undefined;
 }
+
+/** Shadow mode reports what would have skipped while CI runs every test job; enforce skips. */
+export type RepoMode = "shadow" | "enforce";
+
+/** A repo's settings in effect. Audit rates are "1 in N": a lower N audits more often. */
+export interface RepoSettings {
+  mode: RepoMode;
+  auditOneIn: number;
+  sandboxAuditOneIn: number;
+}
+
+/**
+ * What every repo starts with when the App is given it, and again when it comes back after being
+ * removed: shadow mode, 1 in 10 audits, and 1 in 5 for sandbox tokens. Rates never go below these.
+ */
+export const INITIAL_REPO_SETTINGS: RepoSettings = { mode: "shadow", auditOneIn: 10, sandboxAuditOneIn: 5 };
+
+/** A laptop token lasts this long from its last use. */
+export const LAPTOP_TOKEN_LIFETIME_DAYS = 90;

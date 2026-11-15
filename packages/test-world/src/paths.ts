@@ -10,6 +10,7 @@ export const paths = {
   webApp: `${repoRoot}/apps/web`,
   migrations: `${repoRoot}/apps/web/drizzle`,
   cli: `${repoRoot}/packages/testnotary/src/cli.ts`,
+  keychainStub: `${repoRoot}/packages/test-world/src/keychain-stub.ts`,
   actionEntry: `${repoRoot}/packages/action/src/main.ts`,
 };
 
