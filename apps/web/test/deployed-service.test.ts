@@ -18,3 +18,46 @@ describe("a service whose secrets live in Secrets Manager", () => {
     );
   });
 });
+
+describe("a service with a secret it cannot read", () => {
+  // A reference to a secret the fake Secrets Manager does not hold.
+  const world = useWorld({
+    service: "next",
+    secrets: ["DATABASE_URL"],
+    serviceEnv: { AUDIT_MASTER_KEY: "secretsmanager:testnotary/world/AUDIT_MASTER_KEY" },
+  });
+
+  test("answers no request and reports which secret is missing to Sentry", async () => {
+    // A production server exits before listening; `next dev` drops the connection instead.
+    const answer = await fetch(`${world.service.url}/api/v1/health`).then(
+      (response) => response.status,
+      () => "connection closed",
+    );
+
+    expect(answer).not.toBe(200);
+    const event = await world.sentry.waitForEvent();
+    expect(event.exception?.values?.map((value) => value.value)).toContain(
+      "AUDIT_MASTER_KEY: cannot read secret testnotary/world/AUDIT_MASTER_KEY from Secrets Manager",
+    );
+  });
+});
+
+describe("a service that cannot reach its database", () => {
+  // Nothing listens on port 1, so every connection is refused.
+  const world = useWorld({
+    service: "next",
+    serviceEnv: { DATABASE_URL: "postgres://testnotary_app:testnotary_app@127.0.0.1:1/testnotary" },
+  });
+
+  test("reports the error to Sentry", async () => {
+    const response = await fetch(`${world.service.url}/api/v1/health`, {
+      headers: { authorization: "Bearer tnl_never-reaches-sentry", cookie: "session=never-reaches-sentry" },
+    });
+
+    expect(response.status).toBe(503);
+    const event = await world.sentry.waitForEvent();
+    // Drizzle's "Failed query" error, with the refused connection as its cause.
+    expect(event.exception?.values?.map((value) => value.value).join("\n")).toMatch(/ECONNREFUSED/);
+    expect(JSON.stringify(world.sentry.envelopes)).not.toContain("never-reaches-sentry");
+  });
+});
