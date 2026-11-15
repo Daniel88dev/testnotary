@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { fromJob, githubError, installLibrary, type ActionResult, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine, type RunActionOptions } from "@testnotary/test-world";
+import { fromJob, githubError, installLibrary, type ActionResult, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine, type RunActionOptions, type SshKeyPair } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
 import { FALLBACK_REASONS, type FallbackReason } from "@testnotary/core";
 
@@ -15,6 +15,9 @@ const world = useWorld();
 /** A suite that leaves a mark in the workspace, so a test can tell whether the command ran. */
 const MARKED = { suites: { test: { command: ["node", "-e", "require('fs').writeFileSync('ran.txt', 'x')"] } } };
 
+/** What a case hands back: the step's result, its workspace, the commit CI built and the repo. */
+type CiResult = ActionResult & { workspace: string; sha: string; repo: FakeRepo };
+
 interface Scene {
   fixture: FixtureRepo;
   repo: FakeRepo;
@@ -23,27 +26,27 @@ interface Scene {
   /** `testnotary run` on the developer's laptop, on the feature branch; must attest. */
   attest(env?: Record<string, string | undefined>): Promise<void>;
   /** The action in run mode on the pull request's test merge commit, with the library installed. */
-  ci(options?: Partial<RunActionOptions> & { fetchDepth?: number; audit?: boolean }): Promise<ActionResult & { workspace: string; sha: string }>;
+  ci(options?: Partial<RunActionOptions> & { fetchDepth?: number; audit?: boolean }): Promise<CiResult>;
 }
 
 let scenes = 0;
 
 /** An installed repo in enforce mode with a pushed feature branch, and a writer signed in on their laptop. */
-async function scene(options_: { config?: Record<string, unknown>; install?: boolean } = {}): Promise<Scene> {
-  const options = options_;
+async function scene(options: { config?: Record<string, unknown>; install?: boolean } = {}): Promise<Scene> {
+  const installed = options.install !== false;
   const n = ++scenes;
   const fixture = await world.fixtureRepo({
     config: options.config ?? MARKED,
     files: { "package.json": '{ "name": "relay", "private": true, "packageManager": "pnpm@10.34.9" }\n', ".gitignore": "node_modules\nran.txt\n" },
   });
   const repo = await world.hostOnGitHub(fixture, { owner: `fallback-${n}`, name: "relay" });
-  if (options.install !== false) await world.github.installApp({ account: { login: `fallback-${n}`, type: "Organization" }, repos: [repo] });
+  if (installed) await world.github.installApp({ account: { login: `fallback-${n}`, type: "Organization" }, repos: [repo] });
   const user = world.github.addUser({ login: `fallback-dev-${n}` });
   world.github.setPermission(repo, user, "write");
   const machine = await world.machine();
   world.github.deviceFlow.approveNext(user);
   expect((await world.runCli(["login"], { cwd: machine.home, machine })).exitCode).toBe(0);
-  if (options.install !== false) {
+  if (installed) {
     const sql = world.db.connect("app");
     await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
               values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
@@ -63,24 +66,24 @@ async function scene(options_: { config?: Record<string, unknown>; install?: boo
     async ci({ fetchDepth, audit = false, ...options } = {}) {
       // Audits are drawn only where a case asks for one.
       if (audit) await world.audits.force(repo);
-      else if (options_.install !== false) await world.audits.forbid(repo);
+      else if (installed) await world.audits.forbid(repo);
       const merge = await fixture.testMerge({ base: "main", head: "feature" });
       const workspace = await fixture.ciCheckout(merge.sha, fetchDepth ? { fetchDepth } : {});
       await installLibrary(workspace);
       const result = await world.runAction({ repo, sha: merge.sha, workspace, inputs: { suite: "test" }, ...options });
-      return { ...result, workspace, sha: merge.sha };
+      return { ...result, workspace, sha: merge.sha, repo };
     },
   };
 }
 
 interface Case {
   /** Stages the cause and runs the action. */
-  run(): Promise<ActionResult & { workspace: string; sha: string }>;
+  run(): Promise<CiResult>;
   /** What the line names in brackets after the code, when anything. */
   detail?: RegExp;
 }
 
-const CASES: Partial<Record<FallbackReason, Case>> = {
+const CASES: Record<FallbackReason, Case> = {
   disabled: {
     async run() {
       const s = await scene();
@@ -148,7 +151,124 @@ const CASES: Partial<Record<FallbackReason, Case>> = {
     },
     detail: /an IP allow list blocks the service/,
   },
+  unknown_suite: {
+    async run() {
+      // The pull request adds the suite to its own testnotary.json; the base's config decides.
+      const s = await scene();
+      await s.fixture.commit("Add an e2e suite", { "testnotary.json": `${JSON.stringify({ suites: { ...MARKED.suites, e2e: MARKED.suites.test } })}\n` });
+      await s.fixture.push();
+      await s.attest();
+      return s.ci({ inputs: { suite: "e2e" } });
+    },
+  },
+  no_attestation: {
+    async run() {
+      const s = await scene();
+      return s.ci();
+    },
+  },
+  attestation_expired: {
+    async run() {
+      const s = await scene();
+      await s.attest();
+      world.clock.advance(24 * 60 * 60 * 1000 + 60_000);
+      return s.ci();
+    },
+  },
+  attestation_revoked: {
+    async run() {
+      const s = await scene();
+      await s.attest();
+      expect((await world.runCli(["logout"], { cwd: s.machine.home, machine: s.machine })).exitCode).toBe(0);
+      return s.ci();
+    },
+    detail: /token revoked/,
+  },
+  attester_no_write: {
+    async run() {
+      const s = await scene();
+      await s.attest();
+      world.github.setPermission(s.repo, s.user, "read");
+      return s.ci();
+    },
+  },
+  command_changed: {
+    async run() {
+      // main changes the suite's command after the branch left it; the developer's run reads the
+      // command from the fetched main, and CI on the push of the branch builds its head, whose
+      // first parent has the old one.
+      const s = await scene();
+      const head = (await s.fixture.git("rev-parse", "feature")).trim();
+      await s.fixture.checkout("main");
+      await s.fixture.commit("Change the test command", { "testnotary.json": `${JSON.stringify({ suites: { test: { command: [...MARKED.suites.test.command, "changed"] } } })}\n` });
+      await s.fixture.push();
+      await s.fixture.checkout("feature");
+      await s.attest();
+      await world.audits.forbid(s.repo);
+      const workspace = await s.fixture.ciCheckout(head);
+      await installLibrary(workspace);
+      const result = await world.runAction({ repo: s.repo, sha: head, workspace, event: "push", ref: "refs/heads/feature", inputs: { suite: "test" } });
+      return { ...result, workspace, sha: head, repo: s.repo };
+    },
+  },
+  guarded_file_changed: {
+    async run() {
+      const s = await scene();
+      await s.fixture.commit("Pin Node", { ".nvmrc": "24\n" });
+      await s.fixture.push();
+      await s.attest();
+      return s.ci();
+    },
+    detail: /\.nvmrc/,
+  },
+  signature_missing: {
+    async run() {
+      // No signing key on the laptop: the run attests unsigned (with a no_signing_key warning).
+      const s = await scene({ config: SIGNED });
+      await s.attest();
+      return s.ci({ fetchDepth: 2 });
+    },
+  },
+  signature_invalid: {
+    async run() {
+      // Signed with a key that is neither the developer's on GitHub nor in allowed_signers.
+      const s = await scene({ config: SIGNED });
+      await useSigningKey(s.fixture, await world.sshKey());
+      await s.attest();
+      return s.ci({ fetchDepth: 2 });
+    },
+  },
+  github_unavailable: {
+    async run() {
+      // A trusted signature, but GitHub fails the action's own lookup of the signer.
+      const s = await scene({ config: SIGNED });
+      const key = await world.sshKey();
+      world.github.addSigningKey(s.user, key.publicKey);
+      await useSigningKey(s.fixture, key);
+      await s.attest();
+      return during(
+        world.github.override("GET", "/user/:id", () => githubError(500, "Server Error"), { when: fromJob }),
+        () => s.ci({ fetchDepth: 2 }),
+      );
+    },
+  },
+  audit: {
+    async run() {
+      const s = await scene();
+      await s.attest();
+      return s.ci({ audit: true });
+    },
+  },
 };
+
+/** A base config that requires signatures (signature mode), with the marked suite. */
+const SIGNED = { signatures: "required", ...MARKED };
+
+/** Makes `key` the developer's git signing key in the repo, as `git config gpg.format ssh` + `user.signingKey` do. */
+async function useSigningKey(fixture: FixtureRepo, key: SshKeyPair): Promise<void> {
+  await fixture.git("config", "gpg.format", "ssh");
+  await fixture.git("config", "user.signingKey", key.privateKeyPath);
+}
 
 /** Runs `body` with an override in place, then removes it. */
 async function during<T>(remove: () => void, body: () => Promise<T>): Promise<T> {
@@ -353,7 +473,7 @@ describe("before the service", () => {
 });
 
 describe("every fallback reason code runs the tests and names the code", () => {
-  test.each(Object.entries(CASES) as [FallbackReason, Case][])("%s", async (code, { run, detail }) => {
+  test.each(FALLBACK_REASONS.map((code) => [code, CASES[code]] as const))("%s", async (code, { run, detail }) => {
     // The world clock stands still, so a retry's pause or a stalled service takes no real time.
     world.clock.set(new Date());
     let result: Awaited<ReturnType<Case["run"]>>;
@@ -367,13 +487,16 @@ describe("every fallback reason code runs the tests and names the code", () => {
     expect(existsSync(join(result.workspace, "ran.txt"))).toBe(true);
     const audit = code === "audit";
     expect(result.outputs).toMatchObject({ result: audit ? "audit" : "fallback", reason: code, ran: "true" });
-    const title = result.summary.split("\n").find((line) => line.startsWith("**"))!.slice(2, -2);
+    const title = line(result.summary);
     if (audit) expect(title).toMatch(/^Audit · /);
-    else expect(title).toMatch(new RegExp(`^Fell back: ${code}${detail ? ` \\(${detail.source}\\)` : ""}, `));
+    // The code, its detail in brackets (the case's when it names one), then the words for the code.
+    else expect(title).toMatch(new RegExp(`^Fell back: ${code}${detail ? ` \\(.*${detail.source}.*\\)` : "(?: \\(.+\\))?"}, [^·]+ · the tests passed in `));
+    expect(world.github.checkRuns(result.repo).at(-1)).toMatchObject({ conclusion: audit ? "success" : "neutral", output: { title } });
   });
 });
 
-test("the table has a case for each of the 20 codes", () => {
+test("the table has a case for each of the 20 codes, which core exports as one list", () => {
   expect(FALLBACK_REASONS).toHaveLength(20);
+  expect(new Set(FALLBACK_REASONS).size).toBe(20);
   expect(Object.keys(CASES).sort()).toEqual([...FALLBACK_REASONS].sort());
 });
