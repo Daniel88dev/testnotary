@@ -1,0 +1,62 @@
+<Lede>When the tests need Postgres, Redis or another service, the suite’s command starts it, and the connection URL reaches the tests through `env.pass`.</Lede>
+
+## Start the services in the command
+
+The run is only as good as its command, and CI runs the same one. So the command starts what the tests need, waits for it, and runs the tests:
+
+```json package.json
+{
+  "scripts": {
+    "test:integration": "docker compose up -d --wait && vitest run --project integration"
+  }
+}
+```
+
+```json testnotary.json
+{
+  "env": { "pass": ["DATABASE_URL"] },
+  "suites": {
+    "integration": { "command": ["{{pm}}", "run", "test:integration"] }
+  }
+}
+```
+
+Starting a container that is already running is quick, so a laptop with Postgres already up loses nothing. If CI starts its services as GitHub Actions `services:` instead, that’s fine: the command’s `docker compose up` then finds them, or you keep the services in the workflow and the command only waits for them. Either way the command, not your shell’s history, decides what runs.
+
+## Pass the URL, not the secret store
+
+The tests run in a [stripped environment](/docs/caches#the-scratch-home): nothing from your shell reaches them unless the config names it. List the variable’s **name** under `env.pass`; its value comes from your shell on a laptop and from the job’s `env:` in CI. Only the names travel with the run, never the values.
+
+For a fixed, public value, such as a local-only URL with a throwaway password, use `env.set` instead, so every run gets the same one:
+
+```json testnotary.json
+{
+  "env": { "set": { "DATABASE_URL": "postgres://test:test@127.0.0.1:5432/test" } },
+  "suites": {
+    "integration": { "command": ["{{pm}}", "run", "test:integration"] }
+  }
+}
+```
+
+Never put a real secret in `env.set`: `testnotary.json` is committed. Names starting with `TESTNOTARY_` are refused in both lists (`config_invalid`).
+
+## Guard the compose file
+
+A change to `compose.yaml` can make CI behave differently from a run made before it, the same way a lockfile change can. Add it to the repo’s guarded files, so a pull request that changes it always runs its tests:
+
+```json testnotary.json
+{
+  "guarded": ["compose.yaml", "docker/**"],
+  "suites": {
+    "integration": { "command": ["{{pm}}", "run", "test:integration"] }
+  }
+}
+```
+
+The globs add to the product defaults; they can’t remove one. See [Guarded files](/docs/guarded).
+
+## Ports and parallel runs
+
+Two runs on one machine, or a run beside your dev server, can fight over a fixed port. Let the tests pick a free port or a fresh database name per run where they can; it makes the suite steadier in CI too.
+
+<Next pages="docker caches build config" />

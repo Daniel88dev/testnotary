@@ -1,0 +1,34 @@
+<Lede>A git pre-push hook can run the suite before every push and stop a push whose tests passed but won’t skip in CI.</Lede>
+
+## The hook
+
+```sh .git/hooks/pre-push
+#!/bin/sh
+# Stop a push that would not skip in CI.
+exec {{x}} testnotary run unit --require-attestation
+```
+
+Make it executable with `chmod +x .git/hooks/pre-push`, or add the same command to your hook manager (Husky, Lefthook, simple-git-hooks) so the whole team gets it.
+
+## What `--require-attestation` changes
+
+Without the flag, a run whose tests passed exits `0` even when nothing was attested (no token, the service unreachable, the upload failed), with a warning. With it, that case exits `3`, and git stops the push. Everything else is as usual:
+
+| Exit code | Meaning | The push |
+|---|---|---|
+| `0` | Passed and attested | goes ahead |
+| `1` | The tests failed | is stopped |
+| `2` | Refused: the run can’t attest; the summary line names the refusal code | is stopped |
+| `3` | Passed, but nothing was attested | is stopped |
+| `130` | You pressed Ctrl-C | is stopped |
+
+The refusal codes are in [Refusal codes](/docs/refusals). To see why a run would be refused without running the tests, use `testnotary check`.
+
+## Things to know
+
+- **Commit first.** The run refuses a dirty tree (`dirty_tree`), and a push sends commits, not your working copy.
+- **Update from the base first,** or the pull request won’t skip although the run attests: CI tests the merge into the base. See [Merge queues and up-to-date branches](/docs/queue).
+- **Skip it when you need to** with `git push --no-verify`. CI runs the tests in that case, as always.
+- **Agents** follow the `AGENTS.md` block that `init` writes rather than a hook; a hook still helps when the agent pushes from its sandbox.
+
+<Next pages="shell build agents output" />

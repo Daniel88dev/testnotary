@@ -26,16 +26,19 @@
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1164.0",
+    "@mdx-js/mdx": "^3.1.1",
     "@sentry/nextjs": "^11.11.0",
     "@testnotary/core": "workspace:*",
     "@testnotary/protocol": "workspace:*",
     "better-auth": "~1.7.18",
     "drizzle-orm": "^0.45.4",
+    "github-slugger": "^2.0.0",
     "jose": "^6.2.16",
     "next": "^16.4.5",
     "postgres": "^4.1.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "remark-gfm": "^4.0.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

@@ -1,0 +1,34 @@
+<Lede>A skipped test step produces no coverage file and no test report. Guard the steps that upload them, so they run only when the tests did.</Lede>
+
+The action’s output `ran` is `true` when the tests ran in its step: a fallback, an audit, or any shadow-mode job. Guard every step that reads what the tests wrote:
+
+<Code snippet="coverage" lang="yaml" file=".github/workflows/ci.yml" />
+
+- `steps.testnotary.outputs.ran == 'true'` keeps the upload from failing on a skipped commit, where there is nothing to upload.
+- `!cancelled()` lets it run after failed tests too, which is usually when you want the report most. Without it, GitHub’s default `success()` would skip the upload whenever the tests failed.
+
+The action has no code for any coverage or reporting service. Whatever you upload with (an artifact, a vendor’s own action, a script) goes in a step of its own, guarded like this.
+
+## Required coverage checks
+
+Some coverage services post a status or check of their own, and some repos make it required. On a skipped commit no coverage is measured, so that check never reports, and a pull request that requires it waits forever.
+
+Choose one:
+
+- **Don’t require the coverage check.** Keep it informative; your test job is the required check, and it passes when the tests skip.
+- **Configure the service to pass when there is no upload,** if it offers that.
+- **Keep that suite out of Testnotary** if coverage on every commit matters more than the CI time.
+
+The same applies to anything else that needs the tests to have run on that exact commit: test-result annotations, flaky-test trackers, timing data for test splitting.
+
+## Reading the outputs
+
+| Output | Values |
+|---|---|
+| `result` | <CodeList of="results" /> |
+| `reason` | The fallback reason code; empty for a skip |
+| `ran` | `true` when the tests ran in this step |
+
+The full list of inputs and outputs is in [Action inputs and outputs](/docs/inputs).
+
+<Next pages="gate matrix inputs setup" />

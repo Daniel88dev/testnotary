@@ -1,0 +1,31 @@
+<Lede>CI tests the merge of your branch into the base, not your branch. A run covers that merge only when your branch already contains the base’s tip.</Lede>
+
+## Why a branch behind main never skips
+
+On a pull request GitHub builds a test merge commit: your head merged into the current tip of the base branch. Testnotary compares that commit’s **tree** with the trees your runs tested. If `main` has moved on since you last updated your branch, the merge contains files your run never saw, the trees differ, and the job falls back with `no_attestation`.
+
+So bring the branch up to date before the run that should count, by merging or rebasing on `main`, then run the suite and push. The library warns when your head doesn’t contain the base’s tip; it still attests the tree you tested, but that pull request won’t skip until the branch is up to date. The library never merges or rebases for you.
+
+GitHub’s **Update branch** button makes a new commit nobody tested, so it falls back too, unless someone already ran the suite on that merged tree.
+
+## The stale-base hole
+
+The flip side: a branch that was up to date when it was tested can skip, and then merge after `main` moved on. The skip was honest about the tree it tested, but the commit that lands on `main` is a new combination nobody ran. The push to `main` afterwards builds that combination and verifies again; it has no attestation, so its tests run there, after the merge rather than before it.
+
+Testnotary accepts this hole and states it: without strict mode or a merge queue, two pull requests that each passed can still break `main` together. Two GitHub settings close it.
+
+## Strict mode
+
+In the base branch’s protection rules or ruleset, turn on **Require branches to be up to date before merging**. A pull request can then merge only when it contains the base’s tip, so the tree that was tested and skipped is the tree that lands. It also raises the skip rate, since everyone updates before the final run anyway.
+
+## Merge queues
+
+With a merge queue, GitHub builds each group in a `merge_group` event before it lands. Add the trigger to the workflow that owns your required check, or the check never reports in the queue and the queue stalls:
+
+<Code snippet="queue" lang="yaml" file=".github/workflows/ci.yml" />
+
+The group’s commit is what lands, and its tree is your head merged into the base’s tip. When your branch was up to date and nothing is ahead of it in the queue, that is exactly the tree you tested, so the queue job skips on your attestation and the push after it can too. With other pull requests ahead of yours, the group’s tree is new and the tests run.
+
+Neither setting is required. Testnotary recommends one of them, and audits are the net either way.
+
+<Next pages="how matrix gate limit" />

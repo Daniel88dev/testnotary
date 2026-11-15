@@ -1,0 +1,33 @@
+<Lede>In a matrix, every leg is its own job and makes its own verification. Use the inline shape in each leg; never skip a matrix job as a whole.</Lede>
+
+<Code snippet="matrix" lang="yaml" file=".github/workflows/ci.yml" />
+
+Each leg asks about its own suite and skips or runs on its own answer. One leg can skip while another runs its tests, and each reports separately. The legs’ check names, such as `test (unit)` and `test (integration)`, stay what they always were, so the required checks you already have keep working.
+
+A matrix over Node versions works the same way: each leg verifies the same suite on the same tree. A single passing run then covers every leg, so if a suite really depends on the Node version, give each version its own suite, or keep that job out of Testnotary.
+
+## Why not a job-level skip
+
+The [gate job](/docs/gate) recipe skips a whole job with an `if:`. On a matrix job that breaks the checks:
+
+- A matrix job skipped by its `if:` reports **one** check under the bare job name, `test`, with the conclusion *skipped*. Its legs never expand, so no `test (unit)` check appears.
+- A matrix job that runs reports only the legs, `test (unit)` and `test (integration)`, and no bare `test`.
+
+GitHub matches required checks by name. Require `test (unit)` and every skipped pull request waits forever for a check that never comes; require `test` and every pull request whose tests run waits instead. No required name fits both, so keep the skip inside the steps, where the action does it.
+
+## If you need one required check
+
+Some repos require a single check for the whole matrix. Add a job that needs the matrix, runs even when a leg failed, and fails unless every leg passed:
+
+```yaml .github/workflows/ci.yml
+  tests-passed:
+    needs: test
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.test.result }}" = success
+```
+
+Require `tests-passed` and nothing else from the matrix. A leg that skipped its tests still ends in *success*, so the aggregate passes.
+
+<Next pages="gate queue coverage setup" />

@@ -67,6 +67,21 @@ export interface RepoSettings {
  */
 export const INITIAL_REPO_SETTINGS: RepoSettings = { mode: "shadow", auditOneIn: 10, sandboxAuditOneIn: 5 };
 
+export { SANDBOX_MARKERS, type SandboxMarker } from "./sandbox.ts";
+export {
+  ACTION_REF,
+  KILL_SWITCH_VARIABLE,
+  PACKAGE_MANAGERS,
+  WORKFLOW_PERMISSIONS,
+  agentsBlock,
+  setupSteps,
+  workflowHeader,
+  workflowSnippet,
+  type PackageManager,
+  type PackageManagerName,
+  type WorkflowSnippetOptions,
+} from "./workflow.ts";
+
 /** A laptop token lasts this long from its last use. */
 export const LAPTOP_TOKEN_LIFETIME_DAYS = 90;
 
