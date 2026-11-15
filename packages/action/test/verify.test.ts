@@ -92,6 +92,111 @@ describe("the gate job", () => {
   });
 });
 
+describe("the verification output", () => {
+  /** What a later step of the same repo's CI reads back with its own fresh OIDC token. */
+  async function readBack(repo: FakeRepo, sha: string, id: string) {
+    const token = await world.github.oidc.tokenFor({ repo, sha, ref: "refs/pull/1/merge", eventName: "pull_request" }, "https://testnotary.dev");
+    const response = await fetch(`${world.service.url}/api/v1/verifications/${id}`, { headers: { authorization: `Bearer ${token}` } });
+    return { status: response.status, body: (await response.json()) as { verification?: Record<string, unknown> } };
+  }
+
+  test("carries the id a later test step reads the recorded verification by", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+
+    const gate = await s.gate({ sha: merge.sha });
+    const read = await readBack(s.repo, merge.sha, gate.outputs.verification!);
+
+    expect(read.status).toBe(200);
+    expect(read.body.verification).toMatchObject({
+      id: gate.outputs.verification,
+      repository: { id: s.repo.id, fullName: s.repo.fullName },
+      suite: "test",
+      commit: merge.sha,
+      tree: merge.tree,
+      event: "pull_request",
+      iss: world.github.oidc.issuer,
+      mode: "enforce",
+      result: "skip",
+      reason: null,
+      attestation: { id: expect.any(String) as string, format: "testnotary.attestation/v1" },
+    });
+    const payload = JSON.parse((read.body.verification!.attestation as { payload: string }).payload) as Record<string, unknown>;
+    expect(payload).toMatchObject({ repository: s.repo.id, suite: "test", tree: merge.tree, outcome: "passed" });
+  });
+
+  test("records the attestation it matched also when it then falls back", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    world.github.setPermission(s.repo, s.user, "read");
+
+    const gate = await s.gate({ sha: merge.sha });
+    const read = await readBack(s.repo, merge.sha, gate.outputs.verification!);
+
+    expect(read.body.verification).toMatchObject({ mode: "shadow", result: "would_fall_back", reason: "attester_no_write", attestation: { format: "testnotary.attestation/v1" } });
+  });
+
+  test("is no use to another repo's CI", async () => {
+    const s = await story();
+    await featureBranch(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const other = await story();
+    await featureBranch(other);
+    const otherMerge = await other.fixture.testMerge({ base: "main", head: "feature" });
+
+    const gate = await s.gate({ sha: merge.sha });
+    const read = await readBack(other.repo, otherMerge.sha, gate.outputs.verification!);
+
+    expect(read.status).toBe(404);
+  });
+
+  test("works on a runner with no checkout: the gate job needs only the action", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const empty = await world.machine();
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: empty.home, inputs: { suite: "test", mode: "verify" } });
+
+    expect(result.outputs).toMatchObject({ result: "would_skip", skip: "false" });
+  });
+
+  test("names the config's only suite when the job leaves suite out", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { mode: "verify" } });
+
+    expect(result.outputs).toMatchObject({ result: "would_skip" });
+  });
+
+  test("sends the token, the suite and the runner's environment, and never a SHA, tree or path", async () => {
+    const s = await story();
+    await featureBranch(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const from = world.service.requests.length;
+
+    await s.gate({ sha: merge.sha });
+
+    const [sent] = world.service.requests.slice(from).filter((r) => r.method === "POST" && r.path === "/api/v1/verifications");
+    expect(sent!.headers.authorization).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
+    const body = JSON.parse(sent!.text) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["environment", "suite"]);
+    expect(body.suite).toBe("test");
+    expect(body.environment).toEqual({ os: "Linux", arch: "X64", image: null, imageVersion: null, node: expect.stringMatching(/^v\d+/) as string });
+    expect(sent!.text).not.toContain(merge.sha);
+    expect(sent!.text).not.toContain(merge.tree);
+  });
+});
+
 describe("the gate job falls back", () => {
   /** An attested pull request in enforce mode, and its test merge commit. */
   async function attestedPullRequest() {
