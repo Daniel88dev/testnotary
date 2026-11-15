@@ -183,7 +183,7 @@ describe("the 10 s budget", () => {
     let hungUp: Date | undefined;
     undo = world.service.override("POST", VERIFY, async (request) => {
       hungUp = await world.service.stall(request, { stepMs: 250 });
-      return "drop";
+      return "drop" as const;
     });
     const from = world.service.requests.length;
     const started = Date.now();
@@ -223,7 +223,7 @@ describe("the 10 s budget", () => {
         return Response.json({ error: "busy" }, { status: 503 });
       }
       hungUp = await world.service.stall(request, { stepMs: 250 });
-      return "drop";
+      return "drop" as const;
     });
     const from = world.service.requests.length;
 
