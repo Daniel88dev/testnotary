@@ -1,0 +1,23 @@
+{
+  "name": "testnotary",
+  "version": "0.0.0",
+  "description": "Run a declared test suite on a clean tree and attest the pass, so CI can skip its tests.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "testnotary": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@testnotary/core": "workspace:*",
+    "@testnotary/protocol": "workspace:*"
+  }
+}
