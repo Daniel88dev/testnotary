@@ -12,6 +12,8 @@ try {
   await migrateDatabase(url);
   process.stdout.write("migrations applied\n");
 } catch (error) {
-  process.stderr.write(`migration failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  // Drizzle wraps the database's error; its cause says what Postgres refused.
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  process.stderr.write(`migration failed: ${cause instanceof Error ? cause.message : String(cause)}\n`);
   process.exit(1);
 }
