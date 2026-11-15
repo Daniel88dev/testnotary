@@ -23,6 +23,8 @@
     "db:migrate": "node scripts/migrate.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1164.0",
+    "@sentry/nextjs": "^11.11.0",
     "@testnotary/core": "workspace:*",
     "@testnotary/protocol": "workspace:*",
     "drizzle-orm": "^0.45.4",
