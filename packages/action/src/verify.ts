@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { verifyResponse, type CiEnvironment, type FallbackReason, type Verification, type VerificationResult } from "./shared.ts";
-import type { RunnerEnv } from "./runner.ts";
+import { command, type RunnerEnv } from "./runner.ts";
 import { callService, type ServiceAnswer } from "./service.ts";
 
 // Verification from the runner: fetch the job's OIDC token, ask the service, and turn its answer
@@ -34,13 +35,57 @@ export function ciEnvironment(env: RunnerEnv): CiEnvironment {
   };
 }
 
+/** The only GitHub host v1 serves. */
+const GITHUB_COM = "https://github.com";
+
+/**
+ * The fallbacks the action decides before it fetches a token or calls the service, in the spec's
+ * order: the kill switch (`TESTNOTARY_DISABLED`, a repository variable), then the host. Undefined
+ * when neither applies and the job goes on to verify.
+ */
+export function beforeTheService(env: RunnerEnv): Verdict | undefined {
+  if ((env.TESTNOTARY_DISABLED ?? "").trim().toLowerCase() === "true") return fallback("disabled");
+  const server = (env.GITHUB_SERVER_URL ?? "").trim().replace(/\/+$/, "");
+  if (server !== GITHUB_COM) {
+    command("notice", `Testnotary: v1 serves github.com only, not ${server || "a runner without GITHUB_SERVER_URL"}, so the tests run (host_not_supported).`);
+    return fallback("host_not_supported");
+  }
+  return undefined;
+}
+
 /**
  * Verifies the job for `suite` (null: the config's only suite). Every way this can fail is a
  * fallback, never a skip.
  */
 export async function verifyJob(env: RunnerEnv, suite: string | null): Promise<Verdict> {
   const answer = await callService(env, "POST", "/verifications", { suite, environment: ciEnvironment(env) });
+  if (answer.kind === "no_token") noTokenNotice(env, answer.message);
   return verdictFrom(answer);
+}
+
+/**
+ * Why the job has no OIDC token, said once: a fork's pull request never gets one (a plain notice:
+ * nothing to fix), a same-repo job lacks `permissions: id-token: write` (a warning to add it), or
+ * the runner's token request failed.
+ */
+function noTokenNotice(env: RunnerEnv, failure: string | undefined): void {
+  if (failure) command("warning", `Testnotary: the runner's OIDC token request failed (${failure}), so the tests run (no_oidc_token).`);
+  else if (fromFork(env)) command("notice", "Testnotary: a pull request from a fork gets no OIDC token, so the tests run (no_oidc_token).");
+  else command("warning", "Testnotary: the job has no OIDC token, so the tests run (no_oidc_token). Add `permissions: id-token: write` to the job to let Testnotary verify it.");
+}
+
+/** Whether the event is a pull request whose head lives in another repository than this run's. */
+function fromFork(env: RunnerEnv): boolean {
+  if (!env.GITHUB_EVENT_PATH) return false;
+  try {
+    const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")) as { pull_request?: { head?: { repo?: { full_name?: unknown } | null } } };
+    const head = event.pull_request?.head;
+    if (!head) return false;
+    // A deleted fork's head has `repo: null`.
+    return head.repo?.full_name !== env.GITHUB_REPOSITORY;
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -25,7 +25,8 @@ export async function idToken(env: RunnerEnv, signal: AbortSignal): Promise<stri
 /** How one call went: the service's answer, or why there was none. */
 export type ServiceAnswer =
   | { kind: "answer"; status: number; body: unknown }
-  | { kind: "no_token" }
+  /** No token: the job has none (`message` undefined), or the runner's token request failed. */
+  | { kind: "no_token"; message?: string }
   | { kind: "unreachable"; message: string }
   | { kind: "timeout" }
   | { kind: "not_json"; status: number };
@@ -37,7 +38,7 @@ export async function callService(env: RunnerEnv, method: "GET" | "POST", path: 
   try {
     token = await idToken(env, signal);
   } catch (error) {
-    return isTimeout(error) ? { kind: "timeout" } : { kind: "no_token" };
+    return isTimeout(error) ? { kind: "timeout" } : { kind: "no_token", message: error instanceof Error ? error.message : String(error) };
   }
   if (!token) return { kind: "no_token" };
   let response: Response;
