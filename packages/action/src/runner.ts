@@ -23,6 +23,12 @@ export function setOutputs(env: RunnerEnv, outputs: Record<string, string>): voi
   appendFileSync(file, text);
 }
 
+/** Appends Markdown to the job summary (`GITHUB_STEP_SUMMARY`). */
+export function appendSummary(env: RunnerEnv, markdown: string): void {
+  const file = env.GITHUB_STEP_SUMMARY;
+  if (file) appendFileSync(file, markdown.endsWith("\n") ? markdown : `${markdown}\n`);
+}
+
 /** A workflow command on stdout, e.g. `::warning::…`. */
 export function command(name: "notice" | "warning" | "error", message: string): void {
   const escaped = message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");

@@ -22,7 +22,8 @@ export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-
 export { FakeGitHub, type AddRepoOptions, type InstallAppOptions, type RecordedRequest, type RepositoryAction } from "./github/server.ts";
 export type { DeliverOptions, FakeAccount, FakeApp, FakeInstallation, WebhookDelivery } from "./github/app.ts";
 export type { DeviceFlow, DevicePlan, IssuedDeviceCode } from "./github/device-flow.ts";
-export type { FakeRepo, RepoPermission } from "./github/state.ts";
+export type { FakeCheckRun, FakeRepo, RepoPermission } from "./github/state.ts";
+export { installLibrary } from "./processes.ts";
 export type { ServiceRequest } from "./service.ts";
 export type { LogEntry } from "@testnotary/web/config";
 export { FakeSecretsManager, type SecretsManagerRequest } from "./aws/secrets-manager.ts";
