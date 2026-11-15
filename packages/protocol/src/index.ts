@@ -34,6 +34,7 @@ export {
   type RunUpload,
   type RunUploadResponse,
   type ServiceRefusal,
+  type SessionLabels,
 } from "./run.ts";
 export {
   ACTIONS_OIDC_ISSUER,
@@ -44,6 +45,8 @@ export {
   jobReport,
   jobReportRequest,
   jobReportResponse,
+  mismatch,
+  skippedCommit,
   verification,
   verificationResult,
   verifyRequest,
@@ -53,6 +56,8 @@ export {
   type JobReport,
   type JobReportRequest,
   type JobReportResponse,
+  type Mismatch,
+  type SkippedCommit,
   type Verification,
   type VerifyRefusal,
   type VerifyRequest,

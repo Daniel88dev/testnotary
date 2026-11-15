@@ -1,5 +1,6 @@
 import type { VerificationOrder } from "../context.ts";
 import { ageStep } from "./age.ts";
+import { auditStep } from "./audit.ts";
 import { commandStep } from "./command.ts";
 import { guardedFilesStep } from "./guarded-files.ts";
 import { suiteStep } from "./suite.ts";
@@ -24,6 +25,6 @@ export const VERIFICATION_STEPS: VerificationOrder = {
     writeAccessStep,
   ],
   matched: [
-    // T-822: the audit draw (`audit`) goes here, last, for the attestation that cleared.
+    auditStep,
   ],
 };

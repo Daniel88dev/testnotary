@@ -77,6 +77,59 @@ export type JobReport = z.infer<typeof jobReport>;
 export const jobReportResponse = z.object({ jobReport });
 export type JobReportResponse = z.infer<typeof jobReportResponse>;
 
+/** A commit CI skipped on an account's attestation, as a mismatch copies it in. */
+export const skippedCommit = z.object({
+  commit: z.string(),
+  tree: z.string(),
+  suite: z.string().nullable(),
+  event: z.string(),
+  /** The skip's verification, while retention still holds it. */
+  verificationId: z.string(),
+  at: z.string(),
+});
+export type SkippedCommit = z.infer<typeof skippedCommit>;
+
+/**
+ * A mismatch: CI's tests failed on a tree an attestation said passed, on an audit or on a shadow
+ * *would skip*. Self-contained: everything here was copied in when it was recorded, so it still
+ * reads in full after retention prunes the runs, attestations and verifications it came from.
+ */
+export const mismatch = z.object({
+  id: z.string(),
+  /** The verification's result: `audit` in enforce mode, `would_skip` in shadow mode. */
+  result: z.enum(["audit", "would_skip"]),
+  suite: z.string().nullable(),
+  /** The commit CI built and its tree, and the event it built it on. */
+  commit: z.string(),
+  tree: z.string(),
+  event: z.string(),
+  /** The attester (for a sandbox token, its creator), named as of the attestation: *deleted account* once deleted. */
+  account: z.object({ id: z.number(), login: z.string().nullable() }),
+  /** The token, with its type and its name when the mismatch was recorded. */
+  token: z.object({ id: z.string(), kind: z.enum(["laptop", "sandbox"]), name: z.string() }),
+  /** The attestation's payload exactly as stored, and its signature fields (null without a signature). */
+  attestation: z.object({
+    id: z.string(),
+    runId: z.string(),
+    /** The commit the attested run was made on, which may differ from CI's. */
+    commit: z.string(),
+    endedAt: z.string(),
+    format: z.string(),
+    payload: z.string(),
+    signature: z.record(z.string(), z.unknown()).nullable(),
+  }),
+  /** Both environments: the attested run's and the CI runner's. */
+  environments: z.object({ run: runEnvironment.nullable(), ci: ciEnvironment }),
+  /** The attested run's agent session labels, unverified. */
+  session: sessionLabels.nullable(),
+  /** CI's failing report. */
+  tests: z.object({ outcome: jobOutcome, durationMs: z.number() }),
+  /** Every commit CI skipped on the same account's attestations since its last agreeing audit, newest first, as far as retention held them. */
+  skippedCommits: z.array(skippedCommit),
+  createdAt: z.string(),
+});
+export type Mismatch = z.infer<typeof mismatch>;
+
 /** A verification as the service decided and recorded it. */
 export const verification = z.object({
   id: z.string(),
@@ -120,6 +173,8 @@ export const verification = z.object({
     .nullable(),
   /** The CI job's own report of its tests, the latest one; null while none arrived ("outcome unknown"). */
   jobReport: jobReport.nullable(),
+  /** The mismatch a failing report on this verification recorded; null when none did. */
+  mismatch: mismatch.nullable().default(null),
   createdAt: z.string(),
 });
 export type Verification = z.infer<typeof verification>;

@@ -56,6 +56,7 @@ export type RunEnvironment = z.infer<typeof runEnvironment>;
 export const sessionLabels = z
   .object({ vendor: z.string().max(100), id: z.string().max(200).nullable(), url: z.string().max(500).nullable() })
   .strict();
+export type SessionLabels = z.infer<typeof sessionLabels>;
 
 const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).max(200);
 const suiteName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);

@@ -1,5 +1,5 @@
 import type { Suite, TestnotaryConfig } from "../config.ts";
-import type { RepoMode, TokenKind } from "../index.ts";
+import type { RepoMode, RepoSettings, TokenKind } from "../index.ts";
 import type { FallbackReason } from "./reasons.ts";
 
 /** An attestation the service holds for the repo, suite and tree CI builds. */
@@ -32,6 +32,11 @@ export interface VerificationSources {
    * when the commit has no first parent.
    */
   changedPaths(): Promise<ChangedPaths | undefined>;
+  /**
+   * The repo's audit key: HKDF of the master key, the repo id and the repo's key version
+   * (`repoAuditKey`). Asked for only when the draw is made.
+   */
+  auditKey(): Promise<Uint8Array>;
 }
 
 /** What GitHub's compare lists between the first parent and the built commit. */
@@ -52,6 +57,8 @@ export interface VerificationInput {
   /** The OIDC `event_name`. */
   event: string;
   mode: RepoMode;
+  /** The repo's audit rates, as "1 in N" (the draw never goes below the defaults whatever they say). */
+  rates: Pick<RepoSettings, "auditOneIn" | "sandboxAuditOneIn">;
   /** The service clock's now. */
   now: Date;
   sources: VerificationSources;

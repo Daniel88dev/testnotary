@@ -5,8 +5,9 @@
 // Where something changes over time (a repo's name or visibility, its settings, an account's
 // login), each change is a row carrying the whole state after it, and the latest row per key is
 // the current state. GitHub ids are the keys for everything that comes from GitHub.
-import { bigint, boolean, customType, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
-import type { CiEnvironment, RunEnvironment } from "@testnotary/protocol";
+import { sql } from "drizzle-orm";
+import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import type { CiEnvironment, RunEnvironment, SessionLabels, SkippedCommit } from "@testnotary/protocol";
 
 const githubId = (name: string) => bigint(name, { mode: "number" });
 const at = (name = "at") => timestamp(name, { withTimezone: true, mode: "date" }).notNull().defaultNow();
@@ -98,7 +99,32 @@ export const repoSettingChanges = pgTable(
     reason: text("reason").notNull(),
     at: at(),
   },
-  (table) => [index("repo_setting_changes_latest").on(table.repoId, table.id)],
+  (table) => [
+    index("repo_setting_changes_latest").on(table.repoId, table.id),
+    // A rate can be raised (a lower N), never set below the defaults: 1 in 10, 1 in 5 for sandbox
+    // tokens (core's AUDIT_RATE_DEFAULTS). The database refuses such a row whoever writes it.
+    check("repo_setting_changes_audit_rate", sql`${table.auditOneIn} between 1 and 10`),
+    check("repo_setting_changes_sandbox_audit_rate", sql`${table.sandboxAuditOneIn} between 1 and 5`),
+  ],
+);
+
+/**
+ * A repo's audit key version: the per-repo audit key is HKDF(master key, repo id, version), so the
+ * database holds no secret. No row means version 1; the latest row is the version in effect.
+ * Rotating raises it, for one repo or for every repo (`scripts/ops.ts rotate-audit-key`).
+ */
+export const auditKeyVersions = pgTable(
+  "audit_key_versions",
+  {
+    id: rowId(),
+    repoId: githubId("repo_id")
+      .notNull()
+      .references(() => repos.githubId),
+    version: integer("version").notNull(),
+    reason: text("reason").notNull(),
+    at: at(),
+  },
+  (table) => [index("audit_key_versions_latest").on(table.repoId, table.id), check("audit_key_versions_positive", sql`${table.version} >= 1`)],
 );
 
 /** A person: a GitHub user, keyed by numeric id, never by login. */
@@ -324,6 +350,56 @@ export const jobReports = pgTable(
     seq: bigint("seq", { mode: "number" }).notNull().generatedAlwaysAsIdentity(),
   },
   (table) => [index("job_reports_verification").on(table.verificationId, table.seq)],
+);
+
+/**
+ * A mismatch: a job report that failed on an audit, or on a shadow *would skip*. Self-contained:
+ * when it is recorded it copies in the account, the token with its type, the attestation's payload
+ * and signature fields, CI's commit and tree, both environments and the commits that skipped on the
+ * account's attestations since its last agreeing audit. Its ids of the rows it came from are plain
+ * columns, not foreign keys, so retention prunes those rows (at 90 days) and the mismatch stays
+ * while the repo is installed. `accountId` names the account through `accountsAsOf` as of
+ * `attestedAt`, so a deleted account reads *deleted account*; no login is copied, since the app role
+ * could never erase it. At most one per verification.
+ */
+export const mismatches = pgTable(
+  "mismatches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    repoId: githubId("repo_id")
+      .notNull()
+      .references(() => repos.githubId),
+    verificationId: uuid("verification_id").notNull().unique(),
+    jobReportId: uuid("job_report_id").notNull(),
+    /** `audit` (enforce) or `would_skip` (shadow). */
+    result: text("result").notNull(),
+    suite: text("suite"),
+    commit: text("commit").notNull(),
+    tree: text("tree").notNull(),
+    event: text("event").notNull(),
+    accountId: githubId("account_id").notNull(),
+    tokenId: uuid("token_id").notNull(),
+    tokenKind: text("token_kind").notNull(),
+    tokenName: text("token_name").notNull(),
+    attestationId: uuid("attestation_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    attestedCommit: text("attested_commit").notNull(),
+    /** When the attestation was recorded: the account is named as of then. */
+    attestedAt: timestamp("attested_at", { withTimezone: true, mode: "date" }).notNull(),
+    attestationEndedAt: timestamp("attestation_ended_at", { withTimezone: true, mode: "date" }).notNull(),
+    attestationFormat: text("attestation_format").notNull(),
+    attestationPayload: bytea("attestation_payload").notNull(),
+    /** The attestation's signature fields; null while it has none (signature mode, T-829). */
+    signature: jsonb("signature").$type<Record<string, unknown>>(),
+    runEnvironment: jsonb("run_environment").$type<RunEnvironment>(),
+    session: jsonb("session").$type<SessionLabels>(),
+    ciEnvironment: jsonb("ci_environment").$type<CiEnvironment>().notNull(),
+    outcome: text("outcome").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    skippedCommits: jsonb("skipped_commits").$type<SkippedCommit[]>().notNull(),
+    createdAt: at("created_at"),
+  },
+  (table) => [index("mismatches_repo").on(table.repoId, table.createdAt), index("mismatches_account").on(table.accountId)],
 );
 
 /** A token's new name, given by its owner on the Tokens page. The latest row is the token's name. */

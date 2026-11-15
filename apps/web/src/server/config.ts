@@ -39,6 +39,12 @@ export interface ServiceConfig {
    */
   legalDir: string | undefined;
   /**
+   * The audit master key (a secret, from Secrets Manager). Each repo's audit key is derived from it
+   * with the repo id and the repo's key version; the database holds only the version. Without it
+   * the service draws no audit, so it never skips: a verification that would skip answers 503.
+   */
+  auditMasterKey: string | undefined;
+  /**
    * The service's clock. Everything the service decides by time (token renewal and expiry, run
    * receipt, attestation age) reads it here, never `new Date()`, so the test world can move it.
    * Not an environment setting: a deployment always uses real time.
@@ -84,6 +90,7 @@ const ENV = {
   githubAppPrivateKey: "GITHUB_APP_PRIVATE_KEY",
   actionsOidcIssuer: "ACTIONS_OIDC_ISSUER",
   legalDir: "LEGAL_DIR",
+  auditMasterKey: "AUDIT_MASTER_KEY",
 } as const satisfies Record<EnvSetting, string>;
 
 export function realClock(): Date {
@@ -106,6 +113,7 @@ export function configFromEnv(env: Readonly<Record<string, string | undefined>>)
     githubAppPrivateKey: env[ENV.githubAppPrivateKey] || undefined,
     actionsOidcIssuer: (env[ENV.actionsOidcIssuer] || ACTIONS_OIDC_ISSUER).replace(/\/+$/, ""),
     legalDir: env[ENV.legalDir] || undefined,
+    auditMasterKey: env[ENV.auditMasterKey] || undefined,
     now: realClock,
     log: stdoutLog,
   };

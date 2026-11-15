@@ -17,6 +17,7 @@ import { apiError } from "./http.ts";
 import { installedRepo, latestRepoState, type Executor, type RepoView } from "./installations.ts";
 import { acceptActionsToken, type ActionsClaims } from "./oidc.ts";
 import { accountAsOf } from "./accounts.ts";
+import { auditKeyOf } from "./audits.ts";
 import { bearer, currentNames } from "./tokens.ts";
 import { hasWriteAccess } from "./write-access.ts";
 
@@ -58,8 +59,10 @@ export async function verifyJob(db: Database, job: { claims: ActionsClaims; repo
     tree: commit.tree,
     event: claims.eventName,
     mode: repo.mode,
+    rates: { auditOneIn: repo.auditOneIn, sandboxAuditOneIn: repo.sandboxAuditOneIn },
     now: now(),
     sources: {
+      auditKey: () => auditKeyOf(db, repo.id),
       configAtBase: async () => (firstParent ? fileAt(installation, repo.fullName, CONFIG_FILE, firstParent) : undefined),
       attestations: (suite) => attestationsOfTree(db, repo.id, suite, commit.tree),
       hasWriteAccess: (accountId) => hasWriteAccess(db, repo, accountId, installation),
