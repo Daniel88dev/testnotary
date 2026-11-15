@@ -14,6 +14,13 @@ export interface Route {
   method: string;
   path: string;
   handle: RouteHandler;
+  /** Only requests this accepts are handled here (overrides). */
+  when?: (request: Request) => boolean;
+}
+
+/** Whether a request carries a job's `GITHUB_TOKEN` (the action's calls), for `override`'s `when`. */
+export function fromJob(request: Request): boolean {
+  return /^(?:Bearer|token) ghs_job_/i.test(request.headers.get("authorization") ?? "");
 }
 
 export function route(method: string, path: string, handle: RouteHandler): Route {

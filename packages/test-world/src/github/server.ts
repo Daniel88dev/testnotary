@@ -279,9 +279,12 @@ export class FakeGitHub {
   /**
    * Answers one endpoint differently until the returned function is called, e.g. a 403 naming an
    * IP allow list, a 500, or a slow reply. Overrides win over the built-in routes; newest first.
+   * With `when`, only the requests it accepts are answered so (say, only the action's, made with a
+   * job's `GITHUB_TOKEN`: see `fromJob`); the rest get the usual answer.
    */
-  override(method: string, path: string, handle: RouteHandler): () => void {
-    const entry = { method, path, handle };
+  override(method: string, path: string, handle: RouteHandler, options: { when?: (request: Request) => boolean } = {}): () => void {
+    const when = options.when;
+    const entry: Route = { method, path, handle, ...(when ? { when } : {}) };
     this.overrides.unshift(entry);
     return () => {
       const index = this.overrides.indexOf(entry);
@@ -311,7 +314,7 @@ export class FakeGitHub {
       at: Date.now(),
     });
     for (const candidate of [...this.overrides, ...routes]) {
-      if (candidate.method !== request.method) continue;
+      if (candidate.method !== request.method || (candidate.when && !candidate.when(request))) continue;
       const params = matchPath(candidate.path, url.pathname);
       if (params) return candidate.handle({ request, url, params, github: this });
     }

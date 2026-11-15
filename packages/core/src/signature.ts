@@ -101,9 +101,11 @@ export function parsePublicKey(text: string): SshPublicKey | undefined {
   if (!type || !data) return undefined;
   const blob = fromBase64(data);
   if (!blob) return undefined;
-  const reader = new WireReader(blob);
-  const inner = reader.text();
-  return inner === type ? { type, blob } : undefined;
+  try {
+    return new WireReader(blob).text() === type ? { type, blob } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether two keys are the same key (type and blob), whatever their comments. */

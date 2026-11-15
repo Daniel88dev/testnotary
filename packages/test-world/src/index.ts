@@ -23,6 +23,7 @@ import { issueSandboxToken } from "@testnotary/web/tokens";
 import type { FakeAccount } from "./github/app.ts";
 import { WORLD_AUDIT_MASTER_KEY, worldAudits, type WorldAudits } from "./audits.ts";
 import { makeSshKey, type SshKeyPair, type SshKeyType } from "./ssh-keys.ts";
+import { startCompromisedService } from "./compromised-service.ts";
 
 export { WORLD_AUDIT_MASTER_KEY, type AuditTree, type WorldAudits } from "./audits.ts";
 export { sshSign, type SshKeyPair, type SshKeyType } from "./ssh-keys.ts";
@@ -39,7 +40,7 @@ export type { LogEntry } from "@testnotary/web/config";
 export { FakeSecretsManager, type SecretsManagerRequest } from "./aws/secrets-manager.ts";
 export { FakeSentry, type SentryEnvelope, type SentryEvent } from "./sentry.ts";
 export { OIDC_LIFETIME_SECONDS, type ActionsJob } from "./github/oidc.ts";
-export { json, githubError, notFound, route, type Route, type RouteContext } from "./github/router.ts";
+export { fromJob, json, githubError, notFound, route, type Route, type RouteContext } from "./github/router.ts";
 export type { ActionResult, Env, ProcessResult, RunActionOptions, RunOptions } from "./processes.ts";
 export type { PostgresServer, Role } from "./postgres-server.ts";
 export { startPostgresServer } from "./postgres-server.ts";
@@ -117,6 +118,12 @@ export interface World {
    * passphrase) in the world's temp directory. Never one from `~/.ssh` or an ssh-agent.
    */
   sshKey(options?: { type?: SshKeyType; comment?: string }): Promise<SshKeyPair>;
+  /**
+   * A compromised service in front of this world's (see compromised-service.ts): every verification
+   * it answers goes through `forge` first. Returns its URL, for the action's `TESTNOTARY_URL`.
+   * Stopped when the world closes.
+   */
+  compromisedService<V extends Record<string, unknown>>(forge: (verification: V) => V): Promise<string>;
   /** Runs `testnotary <args>` as a process, pointed at this world's service. */
   runCli(args: string[], options: RunOptions): Promise<ProcessResult>;
   /** Runs the action's entry point as a process in a simulated runner. */
@@ -253,6 +260,11 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       },
       sshKey(keyOptions) {
         return makeSshKey(tmp, keyOptions);
+      },
+      async compromisedService(forge) {
+        const proxy = await startCompromisedService(service.url, forge);
+        cleanups.push(() => proxy.close());
+        return proxy.url;
       },
       async runCli(args, runOptions) {
         const machine = runOptions.machine ?? (await createMachine(tmp));
