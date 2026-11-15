@@ -1,3 +1,5 @@
+import { readClockFile, writeClockFile } from "./clock-file.ts";
+
 /**
  * The service's clock in a world. It runs with real time until a test sets or advances it; from
  * then on it stands still at that moment until the next `set`, `advance` or `reset`, so expiry
@@ -8,6 +10,12 @@
  * and every other time the service decides with, and the fake GitHub's OIDC issuer (`iat`, `nbf`,
  * `exp` of the tokens a job gets), so a job after `advance` still sends a fresh token. It does not
  * move Postgres's own `now()` or the rest of the fake GitHub (installation tokens, App JWTs).
+ *
+ * **The action's waits** (`runAction`) follow it too, while it stands still: the action's deadlines
+ * (`AbortSignal.timeout`, its 10 s budget) fire once the clock reaches them, and its pauses
+ * (`setTimeout` of `node:timers/promises`, the 1 s before a retry) move the clock forward instead
+ * of sleeping. So a service override that advances the clock is a slow service, and nothing waits
+ * in real time. While the clock runs with real time, the action's timers are real ones.
  */
 export interface WorldClock {
   now(): Date;
@@ -19,18 +27,28 @@ export interface WorldClock {
   reset(): void;
 }
 
-export function createClock(): WorldClock {
-  let fixed: number | undefined;
+/**
+ * A clock whose state lives in `file` (see clock-file.ts), so the processes the world starts can
+ * read it and move it; without a file, in memory.
+ */
+export function createClock(file?: string): WorldClock {
+  let memory: number | undefined;
+  const read = () => (file ? readClockFile(file) : memory);
+  const write = (fixed: number | undefined) => {
+    if (file) writeClockFile(file, fixed);
+    else memory = fixed;
+  };
+  write(undefined);
   return {
-    now: () => new Date(fixed ?? Date.now()),
+    now: () => new Date(read() ?? Date.now()),
     set(at) {
-      fixed = at.getTime();
+      write(at.getTime());
     },
     advance(ms) {
-      fixed = (fixed ?? Date.now()) + ms;
+      write((read() ?? Date.now()) + ms);
     },
     reset() {
-      fixed = undefined;
+      write(undefined);
     },
   };
 }

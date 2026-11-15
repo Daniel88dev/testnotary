@@ -6,7 +6,7 @@ import { createCheckRun, writeSummary } from "./publish.ts";
 import { sendJobReport } from "./report.ts";
 import { checkSkip } from "./signature.ts";
 import { appendSummary, command, input, setOutputs, type RunnerEnv } from "./runner.ts";
-import { readVerification, verifyJob, type Verdict } from "./verify.ts";
+import { beforeTheService, readVerification, verifyJob, type Verdict } from "./verify.ts";
 
 const env = process.env;
 const mode = input(env, "mode") || "run";
@@ -25,7 +25,7 @@ else {
  * skip: otherwise the test job runs and makes it, with the tests' outcome.
  */
 async function gate(env: RunnerEnv): Promise<number> {
-  const verdict = await checkSkip(env, await verifyJob(env, suite), suite);
+  const verdict = await checkSkip(env, beforeTheService(env) ?? (await verifyJob(env, suite)), suite);
   const presentation = presentJob(env, verdict, null);
   setOutputs(env, { ...presentation.outputs, skip: String(verdict.result === "skip"), verification: verdict.record?.id ?? "" });
   await publish(env, verdict, presentation, { checkRun: verdict.result === "skip" });
@@ -72,8 +72,13 @@ async function run(env: RunnerEnv): Promise<number> {
   return tests.exitCode;
 }
 
-/** A gate job's verification when the step is given one it can read back; otherwise its own. */
+/**
+ * A fallback decided before the service; else a gate job's verification when the step is given one
+ * it can read back; otherwise its own.
+ */
 async function verdictForJob(env: RunnerEnv): Promise<Verdict> {
+  const early = beforeTheService(env);
+  if (early) return early;
   const id = input(env, "verification");
   if (id) {
     const reused = await readVerification(env, id);

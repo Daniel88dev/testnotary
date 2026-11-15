@@ -44,13 +44,17 @@ export interface RunOptions {
  * Runs a TypeScript entry point as its own Node process. Sources run directly through Node's type
  * stripping (no build step), so workspace packages must stay erasable-syntax TypeScript.
  */
-export function runNode(entry: string, args: string[], options: RunOptions & { baseEnv: Record<string, string> }): Promise<ProcessResult> {
+export function runNode(
+  entry: string,
+  args: string[],
+  options: RunOptions & { baseEnv: Record<string, string>; /** Modules loaded with `--import` before the entry point. */ imports?: string[] },
+): Promise<ProcessResult> {
   const env: Record<string, string> = { ...options.baseEnv };
   for (const [key, value] of Object.entries(options.env ?? {})) {
     if (value === undefined) delete env[key];
     else env[key] = value;
   }
-  const preload: string[] = [];
+  const preload: string[] = (options.imports ?? []).flatMap((module) => ["--import", module]);
   if (options.rootFiles?.length) {
     preload.push("--import", paths.rootFilesPreload);
     env.TESTNOTARY_WORLD_ROOT_FILES = JSON.stringify(options.rootFiles);
@@ -121,6 +125,13 @@ export interface RunActionOptions {
   env?: Env;
   /** A fork pull request: the runner gets no OIDC token (live behaviour 1). */
   fork?: boolean;
+  /**
+   * A Dependabot pull request: the actor is `dependabot[bot]` and the head a `dependabot/…` branch
+   * of the same repo. Unlike a fork's, the job gets an OIDC token (live behaviour 1).
+   */
+  dependabot?: boolean;
+  /** The lifetime of the job's OIDC tokens (`exp - iat`); GitHub's is 300 s. */
+  oidcLifetimeSeconds?: number;
   /** `permissions: id-token: write` granted. Default true. */
   idToken?: boolean;
   /**
@@ -193,10 +204,11 @@ async function pullRequestHead(repo: FakeRepo, sha: string): Promise<string | un
 /** Runs the action's entry point as a process inside a simulated runner. */
 export async function runAction(
   options: RunActionOptions,
-  world: { github: FakeGitHub; serviceUrl: string; tmp: string },
+  world: { github: FakeGitHub; serviceUrl: string; tmp: string; /** The world clock's state file (clock-file.ts). */ clockFile: string },
 ): Promise<ActionResult> {
   const { repo } = options;
   const event = options.event ?? "pull_request";
+  const actor = options.actor ?? (options.dependabot ? DEPENDABOT : "octocat");
   const ref =
     options.ref ??
     (event === "pull_request"
@@ -238,7 +250,7 @@ export async function runAction(
     GITHUB_REF: ref,
     GITHUB_EVENT_NAME: event,
     GITHUB_EVENT_PATH: files.event,
-    GITHUB_ACTOR: options.actor ?? "octocat",
+    GITHUB_ACTOR: actor,
     GITHUB_RUN_ID: "1",
     GITHUB_RUN_ATTEMPT: "1",
     GITHUB_JOB: "test",
@@ -250,6 +262,8 @@ export async function runAction(
     GITHUB_ENV: files.env,
     GITHUB_STATE: files.state,
     GITHUB_PATH: files.path,
+    // The action's timers follow the world clock (action-clock-preload.ts).
+    TESTNOTARY_WORLD_CLOCK: world.clockFile,
   };
   // The runner evaluates the `github-token` input's default, `${{ github.token }}`: the job's
   // GITHUB_TOKEN, read-only on a fork pull request.
@@ -263,8 +277,10 @@ export async function runAction(
       sha: options.sha,
       ref,
       eventName: event,
-      actor: options.actor,
+      actor,
+      ...(options.dependabot ? { actorId: DEPENDABOT_ID, headRef: DEPENDABOT_BRANCH } : {}),
       enterpriseSlug: options.enterpriseSlug,
+      lifetimeSeconds: options.oidcLifetimeSeconds,
     });
     env.ACTIONS_ID_TOKEN_REQUEST_URL = job.requestUrl;
     env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = job.requestToken;
@@ -275,6 +291,7 @@ export async function runAction(
     env: options.env,
     baseEnv: env,
     cancelOnceExists: options.cancelOnceExists,
+    imports: [paths.actionClockPreload],
   });
   return {
     ...result,
@@ -294,10 +311,20 @@ function eventPayload(event: string, repo: FakeRepo, options: RunActionOptions, 
   return {
     action: "synchronize",
     number: 1,
-    pull_request: { number: 1, head: { ref: "feature", sha: headSha, repo: head }, base: { ref: repo.defaultBranch, repo: repository } },
+    pull_request: {
+      number: 1,
+      user: options.dependabot ? { login: DEPENDABOT, id: DEPENDABOT_ID, type: "Bot" } : { login: options.actor ?? "octocat" },
+      head: { ref: options.dependabot ? DEPENDABOT_BRANCH : "feature", sha: headSha, repo: head },
+      base: { ref: repo.defaultBranch, repo: repository },
+    },
     repository,
   };
 }
+
+/** Dependabot's account (`dependabot[bot]`, id 49699333) and the kind of branch it opens. */
+const DEPENDABOT = "dependabot[bot]";
+const DEPENDABOT_ID = 49699333;
+const DEPENDABOT_BRANCH = "dependabot/npm_and_yarn/lodash-4.17.21";
 
 /** Parses `name=value` lines and `name<<DELIMITER` blocks, as the runner does. */
 export function parseCommandFile(text: string): Record<string, string> {

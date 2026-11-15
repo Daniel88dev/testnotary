@@ -63,6 +63,16 @@ const REJECTIONS: Record<string, string> = {
   ERR_JWT_INVALID: "malformed",
 };
 
+/**
+ * The issuers accepted: the root issuer, or it plus `/` and one GitHub Enterprise Cloud slug
+ * (`https://token.actions.githubusercontent.com/<enterprise>`), anchored at both ends (an
+ * unanchored match was Fulcio's CVE-2026-22772). Either way the keys come from the root's JWKS
+ * only, never by discovery on `iss`, and `iss` is stored with the verification.
+ */
+function actionsIssuer(root: string): RegExp {
+  return new RegExp(`^${root.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}(?:/[A-Za-z0-9_-]+)?$`);
+}
+
 /** Logs why a token was rejected (`token_rejected` itself never says) and answers undefined. */
 function rejected(reason: string, detail?: string): undefined {
   logEvent({ level: "warn", event: "token_rejected", reason, ...(detail ? { detail } : {}) });
@@ -72,7 +82,7 @@ function rejected(reason: string, detail?: string): undefined {
 /**
  * The token's claims when it is GitHub Actions' and fresh, or undefined to reject it
  * (`token_rejected`, which never tells the caller why; the service logs it): RS256 against the
- * root JWKS, `iss` exactly the issuer, `aud` Testnotary, inside its 300 s window with 60 s of skew
+ * root JWKS, `iss` the issuer or one enterprise slug under it (`actionsIssuer`), `aud` Testnotary, inside its 300 s window with 60 s of skew
  * by the service clock, and a `jti` never seen before. Accepting a token spends its `jti`. Throws
  * GitHubUnavailable when the JWKS can't be read.
  */
@@ -82,7 +92,6 @@ export async function acceptActionsToken(db: Executor, token: string | undefined
   try {
     ({ payload } = await jwtVerify(token, keySet(), {
       algorithms: ["RS256"],
-      issuer: serviceConfig().actionsOidcIssuer,
       audience: OIDC_AUDIENCE,
       currentDate: now(),
       clockTolerance: SKEW_S,
@@ -98,7 +107,10 @@ export async function acceptActionsToken(db: Executor, token: string | undefined
     throw new GitHubUnavailable(`the Actions JWKS could not be read: ${error instanceof Error ? error.message : String(error)}`);
   }
   const { iss, jti, sha, repository_id: repositoryId, event_name: eventName, exp } = payload;
-  if (typeof iss !== "string" || typeof jti !== "string" || typeof sha !== "string" || typeof eventName !== "string" || typeof exp !== "number") {
+  if (typeof iss !== "string" || !actionsIssuer(serviceConfig().actionsOidcIssuer).test(iss)) {
+    return rejected("claim_iss", `unexpected "iss" claim value`);
+  }
+  if (typeof jti !== "string" || typeof sha !== "string" || typeof eventName !== "string" || typeof exp !== "number") {
     return rejected("claim_type");
   }
   if (typeof repositoryId !== "string" || !/^[1-9][0-9]{0,15}$/.test(repositoryId)) return rejected("claim_repository_id");

@@ -6,8 +6,16 @@ export interface HttpServer {
   close(): Promise<void>;
 }
 
-/** Serves fetch-style handlers on 127.0.0.1 and an ephemeral port. */
-export async function serve(handler: (request: Request) => Promise<Response>): Promise<HttpServer> {
+/** A handler's answer that closes the connection without a response: the client sees a connection error. */
+export const DROP_CONNECTION = Symbol("drop the connection");
+
+type Handler = (request: Request) => Promise<Response | typeof DROP_CONNECTION>;
+
+/**
+ * Serves fetch-style handlers on 127.0.0.1 and an ephemeral port. A request's `signal` aborts when
+ * the client hangs up before the answer.
+ */
+export async function serve(handler: Handler): Promise<HttpServer> {
   const server = createServer((req, res) => {
     void handle(req, res, handler);
   });
@@ -16,13 +24,17 @@ export async function serve(handler: (request: Request) => Promise<Response>): P
   return { url: `http://127.0.0.1:${port}`, close: () => close(server) };
 }
 
-async function handle(
-  req: IncomingMessage,
-  res: ServerResponse,
-  handler: (request: Request) => Promise<Response>,
-): Promise<void> {
+async function handle(req: IncomingMessage, res: ServerResponse, handler: Handler): Promise<void> {
+  const hangUp = new AbortController();
+  res.on("close", () => {
+    if (!res.writableFinished) hangUp.abort();
+  });
   try {
-    const response = await handler(await toRequest(req));
+    const response = await handler(await toRequest(req, hangUp.signal));
+    if (response === DROP_CONNECTION) {
+      req.socket.destroy();
+      return;
+    }
     res.statusCode = response.status;
     response.headers.forEach((value, key) => {
       if (key !== "set-cookie") res.setHeader(key, value);
@@ -38,7 +50,7 @@ async function handle(
   }
 }
 
-async function toRequest(req: IncomingMessage): Promise<Request> {
+async function toRequest(req: IncomingMessage, signal: AbortSignal): Promise<Request> {
   const url = `http://${req.headers.host ?? "127.0.0.1"}${req.url ?? "/"}`;
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
@@ -48,7 +60,7 @@ async function toRequest(req: IncomingMessage): Promise<Request> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const body = chunks.length > 0 && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined;
-  return new Request(url, { method: req.method, headers, body });
+  return new Request(url, { method: req.method, headers, body, signal });
 }
 
 function close(server: Server): Promise<void> {

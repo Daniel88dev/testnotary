@@ -23,6 +23,7 @@ export {
 } from "@testnotary/core";
 export {
   API_V1,
+  LINKS,
   OIDC_AUDIENCE,
   accountName,
   decodeAttestationPayload,
