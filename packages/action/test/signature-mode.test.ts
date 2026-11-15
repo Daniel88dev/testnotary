@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { installLibrary, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine, type SshKeyPair } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
+import type { Verification } from "@testnotary/protocol";
 
 // Signature mode end to end: a repo whose base config says `"signatures": "required"`. The library
 // signs each attestation with `ssh-keygen -Y sign`, and the action checks the signature itself
@@ -23,8 +24,11 @@ interface Scene {
   machine: Machine;
   /** `testnotary run` on the developer's laptop, on the pushed feature branch. */
   attest(env?: Record<string, string | undefined>): ReturnType<typeof world.runCli>;
-  /** GitHub's test merge commit for the pull request, checked out with `fetch-depth: 2`, and the action in run mode on it. */
-  ci(): ReturnType<typeof world.runAction>;
+  /**
+   * GitHub's test merge commit for the pull request, checked out with `fetch-depth: 2`, and the
+   * action in run mode on it. The tree is never drawn for an audit, unless `audit`: then always.
+   */
+  ci(options?: { audit?: boolean }): Promise<Awaited<ReturnType<typeof world.runAction>> & { sha: string }>;
 }
 
 let repos = 0;
@@ -55,13 +59,14 @@ async function scene(options: { config?: Record<string, unknown>; files?: Record
     user,
     machine,
     attest: (env) => world.runCli(["run"], { cwd: fixture.dir, machine, env }),
-    async ci() {
+    async ci({ audit = false } = {}) {
       // These tests are about signatures; audits have their own.
-      await world.audits.forbid(repo);
+      if (audit) await world.audits.force(repo);
+      else await world.audits.forbid(repo);
       const merge = await fixture.testMerge({ base: "main", head: "feature" });
       const workspace = await fixture.ciCheckout(merge.sha, { fetchDepth: 2 });
       await installLibrary(workspace);
-      return world.runAction({ repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+      return { ...(await world.runAction({ repo, sha: merge.sha, workspace, inputs: { suite: "test" } })), sha: merge.sha };
     },
   };
 }
@@ -94,6 +99,32 @@ describe("signature mode with the developer's GitHub SSH signing key", () => {
     expect(byJob(`/user/${s.user.id}`)).toHaveLength(1);
     expect(byJob(`/users/${s.user.login}/ssh_signing_keys`)).toHaveLength(1);
     expect(byJob(`/repos/${s.repo.fullName}/collaborators/${s.user.login}/permission`)).toHaveLength(1);
+    // The private half never left the laptop.
+    const sent = world.service.requests.map((request) => request.text).join("\n");
+    expect(sent).not.toContain("PRIVATE KEY");
+    expect(sent).not.toContain(key.privateKey.split("\n")[1]);
+  });
+
+  test("an audit is still drawn by the service, and a failing one records a mismatch that copies the signature fields", async () => {
+    // Passes on the laptop, fails in CI (where `local-only` is absent: it is ignored by git).
+    const s = await scene({
+      config: { signatures: "required", suites: { test: { command: ["node", "-e", "process.exit(require('fs').existsSync('local-only') ? 0 : 1)"] } } },
+      files: { ".gitignore": "node_modules\nlocal-only\n" },
+    });
+    await s.fixture.write({ "local-only": "x" });
+    const key = await world.sshKey();
+    world.github.addSigningKey(s.user, key.publicKey);
+    await useSigningKey(s.fixture, key);
+    expect((await s.attest()).stderr).toMatch(/attested=true/);
+
+    const result = await s.ci({ audit: true });
+
+    expect(result.outputs).toMatchObject({ result: "audit", ran: "true" });
+    expect(result.exitCode).toBe(1);
+    const verificationId = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    const verification = await readBack(s.repo, result.sha, verificationId);
+    expect(verification.attestation!.signature).toMatchObject({ keySource: "github", signer: { account: s.user.id }, githubListed: true });
+    expect(verification.mismatch!.attestation.signature).toEqual(verification.attestation!.signature);
   });
 
   test("after the key is deleted on GitHub, the next check is signature_invalid and the tests run", async () => {
@@ -205,6 +236,14 @@ describe("signature mode with a sandbox token's own key in allowed_signers", () 
     expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_missing", ran: "true" });
   });
 });
+
+/** What a later step of the same repo's CI reads back about a verification, with its own fresh OIDC token. */
+async function readBack(repo: FakeRepo, sha: string, id: string): Promise<Verification> {
+  const token = await world.github.oidc.tokenFor({ repo, sha, ref: "refs/pull/1/merge", eventName: "pull_request" }, "https://testnotary.dev");
+  const response = await fetch(`${world.service.url}/api/v1/verifications/${id}`, { headers: { authorization: `Bearer ${token}` } });
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { verification: Verification }).verification;
+}
 
 /** The PR line: the bold line of the job summary. */
 function line(summary: string): string {
