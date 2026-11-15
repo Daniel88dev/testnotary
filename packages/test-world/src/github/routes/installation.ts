@@ -5,7 +5,9 @@ import { githubError, json, notFound, route, type RouteContext } from "../router
 
 // What the service does with the App's own credentials (NOTES/github-behaviours.md §0, §7, §10):
 // buy an installation token with an App JWT, then read with it. Tokens carry only
-// `contents: read` and `metadata: read`, and reach only the installation's repos.
+// `contents: read` and `metadata: read`, and reach only the installation's repos. The action's
+// signature check reads users and permissions with the job's `GITHUB_TOKEN` (§8), which reaches
+// only the workflow's own repo.
 
 const TOKEN_LIFETIME_MS = 3_600_000;
 
@@ -23,6 +25,20 @@ export function installationFor(context: RouteContext): FakeInstallation | Respo
   const installation = token && token.expiresAt > Date.now() ? context.github.state.installations.get(token.installationId) : undefined;
   if (!installation || installation.suspended) return githubError(401, "Bad credentials");
   return installation;
+}
+
+/**
+ * Which repos the request's token reaches: an installation token its installation's repos, a job's
+ * `GITHUB_TOKEN` its own repo (every `GITHUB_TOKEN` has metadata read, §7), or the 401 GitHub
+ * answers. For the endpoints both the service and the action's signature check call (§7, §8).
+ */
+function readerFor(context: RouteContext): { reaches(repoId: number): boolean } | Response {
+  const value = bearer(context.request);
+  const job = value ? context.github.state.jobTokens.get(value) : undefined;
+  if (job) return { reaches: (repoId) => repoId === job.repoId };
+  const installation = installationFor(context);
+  if (installation instanceof Response) return installation;
+  return { reaches: (repoId) => installation.repoIds.has(repoId) };
 }
 
 export const installationRoutes = [
@@ -54,8 +70,8 @@ export const installationRoutes = [
 
   // §8: GET /user/{account_id}. 404 for an id GitHub doesn't know.
   route("GET", "/user/:id", (context) => {
-    const installation = installationFor(context);
-    if (installation instanceof Response) return installation;
+    const reader = readerFor(context);
+    if (reader instanceof Response) return reader;
     const account = /^\d+$/.test(context.params.id!) ? context.github.state.accountById(Number(context.params.id)) : undefined;
     if (!account) return notFound();
     return json(200, { login: account.login, id: account.id, node_id: `U_${account.id}`, type: account.type, site_admin: false });
@@ -65,11 +81,11 @@ export const installationRoutes = [
   // access on a public repo, `none` on a private one, 404 "… is not a user" for an unknown login.
   // A repo outside the installation is a 404, as GitHub hides what a token can't reach.
   route("GET", "/repos/:owner/:repo/collaborators/:username/permission", (context) => {
-    const installation = installationFor(context);
-    if (installation instanceof Response) return installation;
+    const reader = readerFor(context);
+    if (reader instanceof Response) return reader;
     const { github, params } = context;
     const repo = github.state.repo(params.owner!, params.repo!);
-    if (!repo || !installation.repoIds.has(repo.id)) return notFound();
+    if (!repo || !reader.reaches(repo.id)) return notFound();
     const account = github.state.accounts.get(params.username!.toLowerCase());
     if (!account || account.type !== "User") return githubError(404, `${params.username} is not a user`);
     const permission = github.state.permission(repo, account);

@@ -146,6 +146,19 @@ export async function userById(token: string, accountId: number): Promise<{ id: 
   return { id: body.id, login: body.login };
 }
 
+/**
+ * `GET /users/{login}/ssh_signing_keys` (§8): the account's SSH signing keys as `type base64`, or
+ * undefined when GitHub knows no such login. Up to 100, the most a page holds.
+ */
+export async function sshSigningKeys(token: string, login: string): Promise<string[] | undefined> {
+  const response = await call(`${serviceConfig().githubApiUrl}/users/${encodeURIComponent(login)}/ssh_signing_keys?per_page=100`, withToken(token));
+  if (response.status === 404) return undefined;
+  if (!response.ok) return failure(response, "the ssh_signing_keys call");
+  const body = (await response.json().catch(() => undefined)) as unknown;
+  if (!Array.isArray(body)) throw new GitHubUnavailable("the ssh_signing_keys call answered without a list");
+  return body.map((entry: { key?: unknown }) => (typeof entry.key === "string" ? entry.key : "")).filter(Boolean);
+}
+
 export type CollaboratorPermission = "admin" | "write" | "read" | "none";
 
 /**

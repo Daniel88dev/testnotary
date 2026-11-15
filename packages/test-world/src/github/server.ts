@@ -21,12 +21,13 @@ import { loginRoutes } from "./routes/login.ts";
 import { oidcRoutes } from "./routes/oidc.ts";
 import { avatarRoutes } from "./routes/avatars.ts";
 import { userAccessRoutes } from "./routes/user-access.ts";
+import { signingKeyRoutes } from "./routes/signing-keys.ts";
 import { GitHubState, type FakeCheckRun, type FakeRepo, type RepoPermission } from "./state.ts";
 import { WebFlow } from "./web-flow.ts";
 
 /** Every endpoint the fake serves. Add a file under routes/ and list it here. */
 // `GET /user/installations` (user-access) must come before `GET /user/:id` (installation).
-const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes, ...userAccessRoutes, ...installationRoutes, ...avatarRoutes, ...checkRoutes];
+const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes, ...userAccessRoutes, ...installationRoutes, ...avatarRoutes, ...checkRoutes, ...signingKeyRoutes];
 
 export interface RecordedRequest {
   method: string;
@@ -141,6 +142,23 @@ export class FakeGitHub {
   /** A person on GitHub, who can sign in through the device flow or in the browser. */
   addUser(options: { login: string; id?: number }): FakeAccount {
     return this.state.account(options.login, "User", options.id);
+  }
+
+  /**
+   * The person adds an SSH signing key to their account (Settings › SSH and GPG keys, as a signing
+   * key). `publicKey` is a `.pub` line; GitHub keeps only its type and base64. Returns its id.
+   */
+  addSigningKey(account: FakeAccount, publicKey: string, title = "laptop"): number {
+    const [type, data] = publicKey.trim().split(/\s+/);
+    const id = this.state.id();
+    this.state.signingKeys.push({ id, accountId: account.id, key: `${type} ${data}`, title, createdAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") });
+    return id;
+  }
+
+  /** The person deletes a signing key: it is gone from the very next `ssh_signing_keys` read (§8). */
+  removeSigningKey(id: number): void {
+    const index = this.state.signingKeys.findIndex((key) => key.id === id);
+    if (index >= 0) this.state.signingKeys.splice(index, 1);
   }
 
   /** Where the App's avatars come from: avatars.githubusercontent.com in production. */
@@ -261,9 +279,12 @@ export class FakeGitHub {
   /**
    * Answers one endpoint differently until the returned function is called, e.g. a 403 naming an
    * IP allow list, a 500, or a slow reply. Overrides win over the built-in routes; newest first.
+   * With `when`, only the requests it accepts are answered so (say, only the action's, made with a
+   * job's `GITHUB_TOKEN`: see `fromJob`); the rest get the usual answer.
    */
-  override(method: string, path: string, handle: RouteHandler): () => void {
-    const entry = { method, path, handle };
+  override(method: string, path: string, handle: RouteHandler, options: { when?: (request: Request) => boolean } = {}): () => void {
+    const when = options.when;
+    const entry: Route = { method, path, handle, ...(when ? { when } : {}) };
     this.overrides.unshift(entry);
     return () => {
       const index = this.overrides.indexOf(entry);
@@ -293,7 +314,7 @@ export class FakeGitHub {
       at: Date.now(),
     });
     for (const candidate of [...this.overrides, ...routes]) {
-      if (candidate.method !== request.method) continue;
+      if (candidate.method !== request.method || (candidate.when && !candidate.when(request))) continue;
       const params = matchPath(candidate.path, url.pathname);
       if (params) return candidate.handle({ request, url, params, github: this });
     }

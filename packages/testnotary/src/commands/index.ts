@@ -5,6 +5,7 @@ import { exec } from "./exec.ts";
 import { login } from "./login.ts";
 import { logout } from "./logout.ts";
 import { run } from "./run.ts";
+import { sandboxKey } from "./sandbox-key.ts";
 import { whoami } from "./whoami.ts";
 
 export const commands: readonly Command[] = [
@@ -12,5 +13,6 @@ export const commands: readonly Command[] = [
   login,
   logout,
   run,
+  sandboxKey,
   whoami,
 ];

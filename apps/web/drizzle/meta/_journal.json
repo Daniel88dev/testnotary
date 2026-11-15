@@ -78,6 +78,13 @@
       "when": 1794780365812,
       "tag": "0010_verification_ci_run",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794783381843,
+      "tag": "0011_attestation_signatures",
+      "breakpoints": true
     }
   ]
 }

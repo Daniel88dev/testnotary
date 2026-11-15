@@ -14,6 +14,15 @@ export {
 } from "./attestation.ts";
 export { mismatchesPageUrl, runPagePath, runPageUrl } from "./run-page.ts";
 export {
+  attestationSignature,
+  attestationSignatureUpload,
+  sandboxTokensResponse,
+  signer,
+  type AttestationSignature,
+  type AttestationSignatureUpload,
+  type SandboxTokensResponse,
+} from "./signature.ts";
+export {
   SERVICE_REFUSALS,
   completedRunUpload,
   preflightRequest,

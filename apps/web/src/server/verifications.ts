@@ -183,6 +183,7 @@ export async function readVerification(db: Executor, id: string, repoId: number)
           run: { id: attestation.runId, environment: run?.environment ?? null, session: run?.session ?? null },
           format: attestation.format,
           payload: attestation.payload.toString("utf8"),
+          signature: attestation.signature ?? null,
           endedAt: attestation.endedAt.toISOString(),
           attester: {
             account: await accountAsOf(db, attestation.accountId, attestation.createdAt),
