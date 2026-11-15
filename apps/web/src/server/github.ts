@@ -1,3 +1,4 @@
+import { createPrivateKey, createSign } from "node:crypto";
 import { serviceConfig } from "./config.ts";
 
 // The service's calls to GitHub. Every call has a timeout; nothing here retries.
@@ -86,6 +87,79 @@ export async function pollDeviceCode(deviceCode: string): Promise<DevicePoll> {
 export type GitHubUser =
   | { kind: "user"; id: number; login: string }
   | { kind: "denied"; status: number; message: string };
+
+/** GitHub refused an installation-token call with 403 (an IP allow list, for one). Its message is kept. */
+export class GitHubDenied extends Error {}
+
+/**
+ * The App JWT (§10): RS256 over `{iat, exp, iss: <App id>}`, back-dated 60 s for clock drift and
+ * valid for 9 minutes. Its times are GitHub's real time, not the service clock: GitHub checks them.
+ */
+function appJwt(): string {
+  const { githubAppId, githubAppPrivateKey } = serviceConfig();
+  if (!githubAppId || !githubAppPrivateKey) throw new GitHubNotConfigured("GITHUB_APP_ID or GITHUB_APP_PRIVATE_KEY is not set");
+  const seconds = Math.floor(Date.now() / 1000);
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const unsigned = `${encode({ alg: "RS256", typ: "JWT" })}.${encode({ iat: seconds - 60, exp: seconds + 540, iss: githubAppId })}`;
+  const signature = createSign("RSA-SHA256").update(unsigned).sign(createPrivateKey(githubAppPrivateKey)).toString("base64url");
+  return `${unsigned}.${signature}`;
+}
+
+async function failure(response: Response, what: string): Promise<never> {
+  let message = `${what} answered ${response.status}`;
+  try {
+    const body = (await response.json()) as { message?: unknown };
+    if (typeof body.message === "string") message = body.message;
+  } catch {
+    // Keep the status line.
+  }
+  if (response.status === 403 && response.headers.get("x-ratelimit-remaining") !== "0") throw new GitHubDenied(message);
+  throw new GitHubUnavailable(message);
+}
+
+/**
+ * A fresh installation token (`contents: read`, `metadata: read`) for one installation. Bought for
+ * each request that needs one; nothing caches it yet.
+ */
+export async function installationToken(installationId: number): Promise<string> {
+  const response = await call(`${serviceConfig().githubApiUrl}/app/installations/${installationId}/access_tokens`, {
+    method: "POST",
+    headers: { accept: "application/vnd.github+json", authorization: `Bearer ${appJwt()}` },
+  });
+  if (response.status !== 201) return failure(response, "the installation token request");
+  const body = await jsonBody(response);
+  if (typeof body.token !== "string") throw new GitHubUnavailable("the installation token answer has no token");
+  return body.token;
+}
+
+function withToken(token: string): RequestInit {
+  return { headers: { accept: "application/vnd.github+json", authorization: `Bearer ${token}` } };
+}
+
+/** `GET /user/{id}` (§8): the account's login now, or undefined when GitHub knows no such id. */
+export async function userById(token: string, accountId: number): Promise<{ id: number; login: string } | undefined> {
+  const response = await call(`${serviceConfig().githubApiUrl}/user/${accountId}`, withToken(token));
+  if (response.status === 404) return undefined;
+  if (!response.ok) return failure(response, `GET /user/${accountId}`);
+  const body = await jsonBody(response);
+  if (typeof body.id !== "number" || typeof body.login !== "string") throw new GitHubUnavailable(`GET /user/${accountId} answered without a login`);
+  return { id: body.id, login: body.login };
+}
+
+export type CollaboratorPermission = "admin" | "write" | "read" | "none";
+
+/**
+ * `GET /repos/{owner}/{repo}/collaborators/{login}/permission` (§7). A login GitHub calls "not a
+ * user" reads `none`. Note `read` is what anyone gets on a public repo.
+ */
+export async function collaboratorPermission(token: string, fullName: string, login: string): Promise<CollaboratorPermission> {
+  const response = await call(`${serviceConfig().githubApiUrl}/repos/${fullName}/collaborators/${encodeURIComponent(login)}/permission`, withToken(token));
+  if (response.status === 404) return "none";
+  if (!response.ok) return failure(response, "the collaborator permission call");
+  const body = await jsonBody(response);
+  const permission = body.permission;
+  return permission === "admin" || permission === "write" || permission === "read" ? permission : "none";
+}
 
 /** `GET /user` with the person's `ghu_` token, the one call the service ever makes with it. */
 export async function fetchUser(userToken: string): Promise<GitHubUser> {

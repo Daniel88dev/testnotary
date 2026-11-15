@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { GitHubNotConfigured, GitHubUnavailable } from "./github.ts";
+import { GitHubDenied, GitHubNotConfigured, GitHubUnavailable } from "./github.ts";
 
 // Small helpers every API route shares. Error bodies are `{ error, message? }` (protocol `apiError`).
 
@@ -24,12 +24,16 @@ export async function readBody<T extends z.ZodType>(request: Request, schema: T)
   return { body: parsed.data };
 }
 
-/** Turns GitHub being down or the service missing a GitHub setting into a 502 or 503. */
+/**
+ * Turns GitHub being down, GitHub refusing the App (403, e.g. an IP allow list) or the service
+ * missing a GitHub setting into a 502 or 503. None of them is a clear no: a run goes on unattested.
+ */
 export async function withGitHubErrors(handle: () => Promise<Response>): Promise<Response> {
   try {
     return await handle();
   } catch (error) {
     if (error instanceof GitHubUnavailable) return apiError(502, "github_unavailable", error.message);
+    if (error instanceof GitHubDenied) return apiError(502, "github_denied", error.message);
     if (error instanceof GitHubNotConfigured) return apiError(503, "not_configured");
     throw error;
   }

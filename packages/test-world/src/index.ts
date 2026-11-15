@@ -9,7 +9,9 @@ import { startNextService } from "./next-service.ts";
 import { startPostgresServer, type PostgresServer } from "./postgres-server.ts";
 import { cleanEnv, runAction, runNode, type ActionResult, type ProcessResult, type RunActionOptions, type RunOptions } from "./processes.ts";
 import { paths } from "./paths.ts";
-import { startInProcessService } from "./service.ts";
+import { startInProcessService, type ServiceRequest } from "./service.ts";
+import type { AddRepoOptions } from "./github/server.ts";
+import type { FakeRepo } from "./github/state.ts";
 import { createMachine, type Machine, type MachineOptions } from "./machine.ts";
 import { createClock, type WorldClock } from "./clock.ts";
 import { configToEnv, type ServiceConfig } from "@testnotary/web/config";
@@ -18,7 +20,8 @@ export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-
 export { FakeGitHub, type AddRepoOptions, type InstallAppOptions, type RecordedRequest, type RepositoryAction } from "./github/server.ts";
 export type { DeliverOptions, FakeAccount, FakeApp, FakeInstallation, WebhookDelivery } from "./github/app.ts";
 export type { DeviceFlow, DevicePlan, IssuedDeviceCode } from "./github/device-flow.ts";
-export type { FakeRepo } from "./github/state.ts";
+export type { FakeRepo, RepoPermission } from "./github/state.ts";
+export type { ServiceRequest } from "./service.ts";
 export { OIDC_LIFETIME_SECONDS, type ActionsJob } from "./github/oidc.ts";
 export { json, githubError, notFound, route, type Route, type RouteContext } from "./github/router.ts";
 export type { ActionResult, Env, ProcessResult, RunActionOptions, RunOptions } from "./processes.ts";
@@ -44,13 +47,23 @@ export interface WorldOptions {
  * shared with another world, so test files and worktrees run side by side.
  */
 export interface World {
-  service: { url: string };
+  /**
+   * The service. `requests` holds every request it received, body text included, in order (the
+   * in-process service only): assert on what a run sent here, never on what it stored.
+   */
+  service: { url: string; requests: ServiceRequest[] };
   github: FakeGitHub;
   db: WorldDatabase;
   /** The service's clock: set or advance it to test expiry and renewal (in-process service only). */
   clock: WorldClock;
   /** Builds a fixture repo (see FixtureRepo). It is deleted when the world closes. */
   fixtureRepo(options?: FixtureRepoOptions): Promise<FixtureRepo>;
+  /**
+   * Puts a fixture repo on the fake GitHub as `owner/name` (`github.addRepo`) and makes its clone's
+   * `origin` read `https://github.com/owner/name.git`, as a real clone's would, so `run` can name
+   * the repo to the service. Fetches and pushes still go to the fixture's bare origin.
+   */
+  hostOnGitHub(fixture: FixtureRepo, options?: AddRepoOptions): Promise<FakeRepo>;
   /** A developer machine for `runCli`: a lasting HOME and a keychain stub (see Machine). */
   machine(options?: MachineOptions): Promise<Machine>;
   /** Runs `testnotary <args>` as a process, pointed at this world's service. */
@@ -87,14 +100,15 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       githubWebUrl: github.url,
       githubClientId: github.app.clientId,
       githubWebhookSecret: github.app.webhookSecret,
-      githubAppId: undefined,
-      githubAppPrivateKey: undefined,
+      githubAppId: String(github.app.id),
+      githubAppPrivateKey: github.app.privateKey,
       now: () => clock.now(),
     };
+    const requests: ServiceRequest[] = [];
     if (options.service === "next") {
       service = await startNextService(configToEnv(config));
     } else {
-      service = await startInProcessService(config);
+      service = await startInProcessService(config, requests);
     }
     cleanups.push(() => service.close());
     github.app.webhookUrl = `${service.url}/api/v1/github/webhooks`;
@@ -105,13 +119,18 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     });
 
     return {
-      service: { url: service.url },
+      service: { url: service.url, requests },
       github,
       db,
       clock,
       async fixtureRepo(repoOptions) {
         const repo = await FixtureRepo.create(repoOptions);
         repos.push(repo);
+        return repo;
+      },
+      async hostOnGitHub(fixture, repoOptions) {
+        const repo = github.addRepo(fixture, repoOptions);
+        await fixture.pointOriginAt(`https://github.com/${repo.fullName}.git`);
         return repo;
       },
       machine(machineOptions) {

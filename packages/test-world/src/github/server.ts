@@ -14,12 +14,13 @@ import { OidcIssuer } from "./oidc.ts";
 import { matchPath, notFound, type Route, type RouteHandler } from "./router.ts";
 import { DeviceFlow } from "./device-flow.ts";
 import { gitRoutes } from "./routes/git.ts";
+import { installationRoutes } from "./routes/installation.ts";
 import { loginRoutes } from "./routes/login.ts";
 import { oidcRoutes } from "./routes/oidc.ts";
-import { GitHubState, type FakeRepo } from "./state.ts";
+import { GitHubState, type FakeRepo, type RepoPermission } from "./state.ts";
 
 /** Every endpoint the fake serves. Add a file under routes/ and list it here. */
-const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes];
+const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes, ...installationRoutes];
 
 export interface RecordedRequest {
   method: string;
@@ -97,6 +98,19 @@ export class FakeGitHub {
       defaultBranch: fixture.defaultBranch,
       gitDir: fixture.remoteDir,
     });
+  }
+
+  /**
+   * Gives a person a role on a repo (`admin`, `maintain`, `write`, `triage`, `read`, `none`). Without
+   * one they read `read` on a public repo and `none` on a private one (§7).
+   */
+  setPermission(repo: FakeRepo, account: FakeAccount, permission: RepoPermission): void {
+    let roles = this.state.permissions.get(repo.id);
+    if (!roles) {
+      roles = new Map();
+      this.state.permissions.set(repo.id, roles);
+    }
+    roles.set(account.id, permission);
   }
 
   /** A person on GitHub, who can sign in through the device flow. */
