@@ -1,0 +1,68 @@
+import type { Suite, TestnotaryConfig } from "../config.ts";
+import type { RepoMode, TokenKind } from "../index.ts";
+import type { FallbackReason } from "./reasons.ts";
+
+/** An attestation the service holds for the repo, suite and tree CI builds. */
+export interface AttestationCandidate {
+  id: string;
+  /** The attester: the token's account, for a sandbox token the account that created it. */
+  accountId: number;
+  tokenId: string;
+  tokenKind: TokenKind;
+  /** The run's end: the attestation's age counts from here. */
+  endedAt: Date;
+  /** The command the attested run executed, from its payload. */
+  command: string[];
+}
+
+/**
+ * What a verification reads from outside, supplied by the service. Every source is asked for only
+ * when a step needs it, so a verification that stops early makes no further GitHub calls. Later
+ * steps add sources here (changed paths, the audit key, revocations).
+ */
+export interface VerificationSources {
+  /** The text of `testnotary.json` at the built commit's first parent, or undefined when it has none. */
+  configAtBase(): Promise<string | undefined>;
+  /** The newest attestation for the repo and suite that names `tree`, if any. */
+  newestAttestation(suite: string): Promise<AttestationCandidate | undefined>;
+  /** Whether the account has `admin` or `write` on the repo, checked live with GitHub. */
+  hasWriteAccess(accountId: number): Promise<boolean>;
+}
+
+/** What a verification starts from: who asks about which commit, and the repo's mode. */
+export interface VerificationInput {
+  /** The suite the job named, or null to take the config's only suite. */
+  requestedSuite: string | null;
+  /** The commit CI builds (the OIDC `sha`) and its tree, as GitHub's commits API gives it. */
+  commit: string;
+  tree: string;
+  /** The OIDC `event_name`. */
+  event: string;
+  mode: RepoMode;
+  /** The service clock's now. */
+  now: Date;
+  sources: VerificationSources;
+}
+
+/**
+ * The verification as its steps go: the input plus what each step found, for the steps after it.
+ * A step fills its field before it may stop the verification, so a stopped verification still
+ * records, say, the attestation that turned out too old.
+ */
+export interface VerificationState extends VerificationInput {
+  /** The config at the first parent, once the suite step has read it. */
+  config?: TestnotaryConfig;
+  /** The suite in that config, once the suite step has found it. */
+  suite?: Suite;
+  /** The attestation the attestation step matched. */
+  attestation?: AttestationCandidate;
+}
+
+/**
+ * One step of the decision order. It answers a fallback reason to stop the verification there, or
+ * undefined to pass it on to the next step.
+ */
+export interface VerificationStep {
+  name: string;
+  decide(state: VerificationState): Promise<FallbackReason | undefined>;
+}

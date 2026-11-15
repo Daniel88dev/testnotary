@@ -10,10 +10,11 @@ import { rememberAccount } from "./tokens.ts";
 /**
  * Whether the account (for a sandbox token, the account that created it) can write to the repo.
  * The login is looked up by id first, since a person may have renamed themselves since signing in;
- * an id GitHub no longer knows has no access.
+ * an id GitHub no longer knows has no access. A caller that already bought an installation token
+ * for the repo passes it.
  */
-export async function hasWriteAccess(db: Executor, repo: RepoView, accountId: number): Promise<boolean> {
-  const token = await installationToken(repo.installationId);
+export async function hasWriteAccess(db: Executor, repo: RepoView, accountId: number, installation?: string): Promise<boolean> {
+  const token = installation ?? (await installationToken(repo.installationId));
   const user = await userById(token, accountId);
   if (!user) return false;
   await rememberAccount(db, user);

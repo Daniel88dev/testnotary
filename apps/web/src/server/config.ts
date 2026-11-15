@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { ACTIONS_OIDC_ISSUER } from "@testnotary/protocol";
 
 /** What the service needs from its surroundings. Later tickets add fields here. */
 export interface ServiceConfig {
@@ -16,6 +17,12 @@ export interface ServiceConfig {
   githubAppId: string | undefined;
   /** The App's private key, PEM (a secret). Without it the service can't check write access. */
   githubAppPrivateKey: string | undefined;
+  /**
+   * GitHub Actions' OIDC issuer, which every verification token's `iss` must name. Its keys come
+   * from `<issuer>/.well-known/jwks` only, never from discovery on a token's `iss`. Production keeps
+   * the default; the test world points it at its fake GitHub.
+   */
+  actionsOidcIssuer: string;
   /**
    * The service's clock. Everything the service decides by time (token renewal and expiry, run
    * receipt, attestation age) reads it here, never `new Date()`, so the test world can move it.
@@ -37,6 +44,7 @@ const ENV = {
   githubWebhookSecret: "GITHUB_WEBHOOK_SECRET",
   githubAppId: "GITHUB_APP_ID",
   githubAppPrivateKey: "GITHUB_APP_PRIVATE_KEY",
+  actionsOidcIssuer: "ACTIONS_OIDC_ISSUER",
 } as const satisfies Record<EnvSetting, string>;
 
 export function realClock(): Date {
@@ -52,6 +60,7 @@ export function configFromEnv(env: Readonly<Record<string, string | undefined>>)
     githubWebhookSecret: env[ENV.githubWebhookSecret] || undefined,
     githubAppId: env[ENV.githubAppId] || undefined,
     githubAppPrivateKey: env[ENV.githubAppPrivateKey] || undefined,
+    actionsOidcIssuer: (env[ENV.actionsOidcIssuer] || ACTIONS_OIDC_ISSUER).replace(/\/+$/, ""),
     now: realClock,
   };
 }

@@ -133,8 +133,12 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       githubWebhookSecret: github.app.webhookSecret,
       githubAppId: String(github.app.id),
       githubAppPrivateKey: github.app.privateKey,
+      actionsOidcIssuer: github.oidc.issuer,
       now: () => clock.now(),
     };
+    // GitHub's OIDC issuer keeps the world's time too, so a job after `clock.advance` gets a token
+    // the service (on the same clock) finds fresh.
+    github.oidc.now = () => Math.floor(clock.now().getTime() / 1000);
     const requests: ServiceRequest[] = [];
     if (options.service === "next") {
       const env: Record<string, string | undefined> = {
