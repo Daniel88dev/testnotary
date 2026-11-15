@@ -223,6 +223,96 @@ describe("an audited job", () => {
   });
 });
 
+describe("an audit that fails after merge", () => {
+  test("on the default branch's push: the run stays red with the mismatch line in its summary, a mismatch is recorded, the repo returns to shadow, and nothing is commented or reverted", async () => {
+    const s = await story();
+    await featureWithTree(s, drawnAt(s, "laptop"));
+    await s.attest();
+    await s.fixture.checkout("main");
+    await s.fixture.git("merge", "--quiet", "--no-ff", "--no-edit", "feature");
+    await s.fixture.push("main");
+    const head = await s.fixture.revParse("main");
+    const githubFrom = world.github.requests.length;
+
+    const result = await s.ci(head, { fails: true, event: "push", ref: "refs/heads/main" });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.outputs).toEqual({ result: "audit", reason: "audit", ran: "true" });
+    expect(result.summary).toMatch(/\*\*Mismatch: the audit failed · .+ · the repo is back in shadow mode\*\*/);
+    expect(result.summary).toContain("- Mismatch: recorded against");
+    const [check] = world.github.checkRuns(s.repo);
+    expect(check).toMatchObject({ headSha: head, conclusion: "failure" });
+    // Besides reads and tokens, the only call to GitHub is the check run: no comment on the merged
+    // pull request, and no push or ref change that would revert it.
+    const writes = world.github.requests
+      .slice(githubFrom)
+      .filter((request) => request.method !== "GET" && !request.path.includes("/oidc") && !request.path.endsWith("/access_tokens"))
+      .map((request) => `${request.method} ${request.path}`);
+    expect(writes).toEqual([`POST /repos/${s.repo.fullName}/check-runs`]);
+    expect(await s.fixture.git("ls-remote", "origin", "refs/heads/main")).toContain(head);
+
+    const verificationId = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    const token = await world.github.oidc.tokenFor({ repo: s.repo, sha: head, ref: "refs/heads/main", eventName: "push" }, "https://testnotary.dev");
+    const read = await fetch(`${world.service.url}/api/v1/verifications/${verificationId}`, { headers: { authorization: `Bearer ${token}` } });
+    const { verification } = (await read.json()) as { verification: Verification };
+    expect(verification.mismatch).toMatchObject({ result: "audit", commit: head, event: "push" });
+    expect((await s.gate(head, { event: "push", ref: "refs/heads/main" })).outputs.result).toBe("would_skip");
+  });
+});
+
+describe("a mismatch is self-contained", () => {
+  test("it copies the account, token, payload, both environments and the commits skipped since the account's last agreeing audit, and outlives the rows it came from", async () => {
+    const s = await story();
+    // Skipped before the account's last agreeing audit: not listed.
+    const early = await attestedPullRequest(s, { drawn: false, branch: "early", number: 1 });
+    expect((await s.gate(early.sha)).outputs.result).toBe("skip");
+    // An audit that agrees.
+    const agreeing = await attestedPullRequest(s, { branch: "agreeing", number: 2 });
+    expect((await s.ci(agreeing.sha)).outputs.result).toBe("audit");
+    // Skipped since: listed, once, though verified twice.
+    const later = await attestedPullRequest(s, { drawn: false, branch: "later", number: 3 });
+    expect((await s.gate(later.sha)).outputs.result).toBe("skip");
+    expect((await s.gate(later.sha)).outputs.result).toBe("skip");
+    // The audit that fails.
+    const failing = await attestedPullRequest(s, { branch: "failing", number: 4 });
+    const result = await s.ci(failing.sha, { fails: true });
+    expect(result.outputs.result).toBe("audit");
+
+    const verificationId = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    const recorded = await readBack(s.repo, failing.sha, verificationId);
+    const mismatch = recorded.mismatch!;
+    expect(mismatch).toMatchObject({
+      result: "audit",
+      suite: SUITE,
+      commit: failing.sha,
+      tree: failing.tree,
+      event: "pull_request",
+      account: { id: s.user.id, login: s.user.login },
+      token: { kind: "laptop", name: recorded.attestation!.attester.token.name },
+      attestation: { id: recorded.attestation!.id, runId: recorded.attestation!.run.id, commit: failing.parents[1], format: "testnotary.attestation/v1", signature: null },
+      environments: { run: recorded.attestation!.run.environment, ci: { os: "Linux", arch: "X64", image: null, imageVersion: null } },
+      tests: { outcome: "failed" },
+    });
+    expect(mismatch.attestation.payload).toBe(recorded.attestation!.payload);
+    expect(mismatch.environments.run).toMatchObject({ os: process.platform, arch: process.arch });
+    expect(mismatch.skippedCommits.map((skipped) => skipped.commit)).toEqual([later.sha]);
+    expect(mismatch.skippedCommits[0]).toMatchObject({ tree: later.tree, suite: SUITE, event: "pull_request" });
+
+    // Retention prunes the rows the mismatch came from (at 90 days); nothing in the mismatch row
+    // points at them, so it stays, with its copies.
+    const retention = world.db.connect("retention");
+    await retention`delete from job_reports where verification_id in (select id from verifications where repo_id = ${s.repo.id})`;
+    await retention`delete from verifications where repo_id = ${s.repo.id}`;
+    await retention`delete from attestations where repo_id = ${s.repo.id}`;
+    await retention`delete from runs where repo_id = ${s.repo.id}`;
+    const [kept] = await retention<{ payload: Buffer; ciEnvironment: unknown; skippedCommits: unknown[]; accountId: number; tokenKind: string }[]>`
+      select attestation_payload as payload, ci_environment as "ciEnvironment", skipped_commits as "skippedCommits", account_id::int as "accountId", token_kind as "tokenKind"
+      from mismatches where id = ${mismatch.id}`;
+    expect(kept!.payload.toString("utf8")).toBe(mismatch.attestation.payload);
+    expect(kept).toMatchObject({ ciEnvironment: mismatch.environments.ci, skippedCommits: mismatch.skippedCommits, accountId: s.user.id, tokenKind: "laptop" });
+  });
+});
+
 describe("in shadow mode", () => {
   test("no audit is drawn: a tree the draw would pick reads would_skip", async () => {
     const s = await story({ mode: "shadow" });
