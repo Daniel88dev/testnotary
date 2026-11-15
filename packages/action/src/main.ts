@@ -62,8 +62,9 @@ async function run(env: RunnerEnv): Promise<number> {
       `the testnotary library was not found with \`${result.command}\`. Add testnotary to devDependencies and install dependencies before this step. The tests did not run: the action never runs the suite's command outside the library's stripped environment.`,
     );
   }
-  const tests: TestsRan = { outcome: result.outcome, exitCode: result.exitCode, durationMs: result.durationMs };
-  if (verdict.record) await sendJobReport(env, verdict.record.id, tests);
+  const ran = { outcome: result.outcome, exitCode: result.exitCode, durationMs: result.durationMs };
+  const report = verdict.record ? await sendJobReport(env, verdict.record.id, ran) : undefined;
+  const tests: TestsRan = { ...ran, mismatch: report?.mismatch ?? false };
   const presentation = presentJob(env, verdict, tests);
   setOutputs(env, presentation.outputs);
   await publish(env, verdict, presentation, { checkRun: true });

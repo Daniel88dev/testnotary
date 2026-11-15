@@ -8,6 +8,12 @@ export function runPagePath(repository: string, runId: string): string {
   return `/${encodeURIComponent(owner ?? "")}/${encodeURIComponent(name ?? "")}/runs/${encodeURIComponent(runId)}`;
 }
 
+/** A repo's Mismatches page, `/<owner>/<repo>/mismatches`, where an admin explains each one. */
+export function mismatchesPageUrl(siteUrl: string, repository: string): string {
+  const [owner, name] = repository.split("/");
+  return `${siteUrl.replace(/\/+$/, "")}/${encodeURIComponent(owner ?? "")}/${encodeURIComponent(name ?? "")}/mismatches`;
+}
+
 /** The run page on the site the service runs at (`https://testnotary.dev` in production). */
 export function runPageUrl(siteUrl: string, repository: string, runId: string): string {
   return `${siteUrl.replace(/\/+$/, "")}${runPagePath(repository, runId)}`;

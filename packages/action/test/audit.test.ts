@@ -1,5 +1,9 @@
+import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import type { FakeAccount, FakeRepo, FixtureRepo, Machine } from "@testnotary/test-world";
+import type { Verification } from "@testnotary/protocol";
+import { installLibrary, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
 
 // The audit draw: in enforce mode CI runs the tests anyway on a random share of the trees an
@@ -9,7 +13,15 @@ import { useWorld } from "@testnotary/test-world/vitest";
 const world = useWorld();
 
 const SUITE = "test";
-const PASSING = { suites: { [SUITE]: { command: ["node", "-e", "require('fs').writeFileSync('ran.txt', 'x')"] } } };
+/**
+ * Leaves `ran.txt`, so a test sees whether the command ran, and fails (exit 1) where a file named
+ * `fails-here` exists: a test drops it in CI's workspace to make CI disagree with the laptop.
+ */
+const PASSING = {
+  suites: {
+    [SUITE]: { command: ["node", "-e", "const fs = require('fs'); fs.writeFileSync('ran.txt', 'x'); process.exit(fs.existsSync('fails-here') ? 1 : 0)"] },
+  },
+};
 
 interface Story {
   fixture: FixtureRepo;
@@ -20,6 +32,11 @@ interface Story {
   attest(): Promise<void>;
   /** The action in a gate job (`mode: verify`) on a commit. */
   gate(sha: string, options?: { event?: string; ref?: string }): ReturnType<typeof world.runAction>;
+  /**
+   * The action's run-mode step on a commit, in a fresh checkout with the library installed. With
+   * `fails`, the tests fail in CI although they passed on the laptop.
+   */
+  ci(sha: string, options?: { fails?: boolean; event?: string; ref?: string }): Promise<Awaited<ReturnType<typeof world.runAction>> & { workspace: string }>;
 }
 
 let repos = 0;
@@ -29,7 +46,7 @@ async function story(): Promise<Story> {
   const n = ++repos;
   const fixture = await world.fixtureRepo({
     config: PASSING,
-    files: { "package.json": '{ "name": "widgets", "private": true, "packageManager": "pnpm@10.34.9" }\n', ".gitignore": "node_modules\nran.txt\n" },
+    files: { "package.json": '{ "name": "widgets", "private": true, "packageManager": "pnpm@10.34.9" }\n', ".gitignore": "node_modules\nran.txt\nfails-here\n" },
   });
   const repo = await world.hostOnGitHub(fixture, { owner: `audit-${n}`, name: "widgets" });
   await world.github.installApp({ account: { login: `audit-${n}`, type: "Organization" }, repos: [repo] });
@@ -50,7 +67,21 @@ async function story(): Promise<Story> {
       expect(result.exitCode).toBe(0);
     },
     gate: (sha, { event, ref } = {}) => world.runAction({ repo, sha, event, ref, workspace: fixture.dir, inputs: { suite: SUITE, mode: "verify" } }),
+    async ci(sha, { fails = false, event, ref } = {}) {
+      const workspace = await fixture.ciCheckout(sha);
+      await installLibrary(workspace);
+      if (fails) await writeFile(join(workspace, "fails-here"), "");
+      return { ...(await world.runAction({ repo, sha, event, ref, workspace, inputs: { suite: SUITE } })), workspace };
+    },
   };
+}
+
+/** What a later step of the same repo's CI reads back about a verification, with its own fresh OIDC token. */
+async function readBack(repo: FakeRepo, sha: string, id: string): Promise<Verification> {
+  const token = await world.github.oidc.tokenFor({ repo, sha, ref: "refs/pull/1/merge", eventName: "pull_request" }, "https://testnotary.dev");
+  const response = await fetch(`${world.service.url}/api/v1/verifications/${id}`, { headers: { authorization: `Bearer ${token}` } });
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { verification: Verification }).verification;
 }
 
 /** A setting change, as an admin's would be (the Settings page comes with T-828). */
@@ -81,6 +112,13 @@ async function featureWithTree(s: Story, wanted: (tree: string) => Promise<boole
 
 const drawnAt = (s: Story, tokenKind: "laptop" | "sandbox") => (tree: string) => world.audits.drawn(s.repo, { tree, suite: SUITE, tokenKind });
 
+/** A pull request whose tree the draw picks at 1 in 10, attested on the laptop, and its test merge commit. */
+async function auditedPullRequest(s: Story) {
+  await featureWithTree(s, drawnAt(s, "laptop"));
+  await s.attest();
+  return s.fixture.testMerge({ base: "main", head: "feature" });
+}
+
 describe("the audit draw, under the world's fixed master key", () => {
   test("at 1 in 10, a tree the draw picks reads audit, every time, and a tree it doesn't pick skips", async () => {
     const drawn = await story();
@@ -101,5 +139,88 @@ describe("the audit draw, under the world's fixed master key", () => {
     const other = await skipped.fixture.testMerge({ base: "main", head: "feature" });
 
     expect((await skipped.gate(other.sha)).outputs).toMatchObject({ result: "skip", skip: "true" });
+  });
+
+  test("at 1 in 5 for a sandbox token: a tree drawn at 1 in 5 but not at 1 in 10 skips on a laptop token and is audited on a sandbox token", async () => {
+    const s = await story();
+    await featureWithTree(s, async (tree) => (await drawnAt(s, "sandbox")(tree)) && !(await drawnAt(s, "laptop")(tree)));
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+    expect((await s.gate(merge.sha)).outputs).toMatchObject({ result: "skip" });
+
+    // An agent attests the same tree with a sandbox token: the newest attestation is matched.
+    const token = await world.sandboxToken({ creator: s.user, repo: s.repo, name: "agent" });
+    const sandbox = await world.machine();
+    const run = await world.runCli(["run"], { cwd: s.fixture.dir, machine: sandbox, env: { TESTNOTARY_SANDBOX: "1", TESTNOTARY_TOKEN: token } });
+    expect(run.stderr).toMatch(/attested=true/);
+
+    expect((await s.gate(merge.sha)).outputs).toMatchObject({ result: "audit", reason: "audit" });
+  });
+});
+
+describe("an audited job", () => {
+  test("runs the tests, outputs audit, and has its own line; when they pass the check succeeds and the repo stays in enforce", async () => {
+    const s = await story();
+    const merge = await auditedPullRequest(s);
+
+    const result = await s.ci(merge.sha);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs).toEqual({ result: "audit", reason: "audit", ran: "true" });
+    expect(existsSync(join(result.workspace, "ran.txt"))).toBe(true);
+    const [check, ...more] = world.github.checkRuns(s.repo);
+    expect(more).toEqual([]);
+    expect(check).toMatchObject({ name: "Testnotary / test", conclusion: "success" });
+    expect(check!.output.title).toMatch(new RegExp(`^Audit · test passed .+ ago · attested by @${s.user.login} · laptop token "[^"]+" · .+ · the tests passed in [\\d.]+ s$`));
+    expect(result.summary).toContain(check!.output.title);
+    const read = await readBack(s.repo, merge.sha, (await s.gate(merge.sha)).outputs.verification!);
+    expect(read).toMatchObject({ mode: "enforce", result: "audit", mismatch: null });
+  });
+
+  test("whose tests fail: the step fails, the check fails with the mismatch line, a mismatch is recorded and the repo returns to shadow mode", async () => {
+    const s = await story();
+    const merge = await auditedPullRequest(s);
+
+    const result = await s.ci(merge.sha, { fails: true });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.outputs).toEqual({ result: "audit", reason: "audit", ran: "true" });
+    const [check] = world.github.checkRuns(s.repo);
+    expect(check).toMatchObject({ conclusion: "failure" });
+    expect(check!.output.title).toMatch(
+      new RegExp(`^Mismatch: the audit failed · test passed .+ ago · attested by @${s.user.login} · laptop token "[^"]+" · .+ · the tests failed in [\\d.]+ s \\(exit code 1\\) · the repo is back in shadow mode$`),
+    );
+    expect(result.summary).toContain(check!.output.title);
+    expect(result.summary).toContain(`${world.service.url}/${s.repo.fullName}/mismatches`);
+
+    // Back in shadow mode at once: the same tree would skip now, and doesn't.
+    const next = await s.gate(merge.sha);
+    expect(next.outputs).toMatchObject({ result: "would_skip", skip: "false" });
+  });
+});
+
+describe("audit rates", () => {
+  test("can be raised: at 1 in 1 every tree is audited, on any token", async () => {
+    const s = await story();
+    await featureWithTree(s, async (tree) => !(await drawnAt(s, "sandbox")(tree)));
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    expect((await s.gate(merge.sha)).outputs).toMatchObject({ result: "skip" });
+
+    await setMode(s.repo, "enforce", { auditOneIn: 1, sandboxAuditOneIn: 1 });
+
+    expect((await s.gate(merge.sha)).outputs).toMatchObject({ result: "audit" });
+  });
+
+  test.each([
+    { auditOneIn: 11, sandboxAuditOneIn: 5 },
+    { auditOneIn: 20, sandboxAuditOneIn: 5 },
+    { auditOneIn: 10, sandboxAuditOneIn: 6 },
+    { auditOneIn: 0, sandboxAuditOneIn: 5 },
+  ])("a setting below the defaults is refused: 1 in $auditOneIn, sandbox 1 in $sandboxAuditOneIn", async (rates) => {
+    const s = await story();
+
+    await expect(setMode(s.repo, "enforce", rates)).rejects.toThrow(/repo_setting_changes_(sandbox_)?audit_rate/);
   });
 });

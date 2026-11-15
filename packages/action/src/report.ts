@@ -9,10 +9,17 @@ import { ciEnvironment } from "./verify.ts";
 // environment against the verification id. A report that doesn't arrive only warns: the
 // verification then shows "outcome unknown", and the step still exits with the tests' exit code.
 
-export async function sendJobReport(env: RunnerEnv, verificationId: string, tests: TestsRan): Promise<boolean> {
+/**
+ * Sends the report. Answers whether it arrived and whether the service recorded a mismatch from it
+ * (a failing report on an audit or a *would skip*, which sends the repo back to shadow mode).
+ */
+export async function sendJobReport(env: RunnerEnv, verificationId: string, tests: Omit<TestsRan, "mismatch">): Promise<{ sent: boolean; mismatch: boolean }> {
   const body: JobReportRequest = { outcome: tests.outcome, durationMs: Math.round(tests.durationMs), environment: ciEnvironment(env) };
   const answer = await callService(env, "POST", `/verifications/${encodeURIComponent(verificationId)}/report`, body);
-  if (answer.kind === "answer" && answer.status === 201 && jobReportResponse.safeParse(answer.body).success) return true;
+  if (answer.kind === "answer" && answer.status === 201) {
+    const parsed = jobReportResponse.safeParse(answer.body);
+    if (parsed.success) return { sent: true, mismatch: parsed.data.mismatch !== null };
+  }
   const why =
     answer.kind === "answer"
       ? `the service answered ${answer.status}`
@@ -24,5 +31,5 @@ export async function sendJobReport(env: RunnerEnv, verificationId: string, test
             ? `the service answered ${answer.status}`
             : "the service could not be reached";
   command("warning", `Testnotary: the job report did not reach the service (${why}); the verification shows "outcome unknown".`);
-  return false;
+  return { sent: false, mismatch: false };
 }

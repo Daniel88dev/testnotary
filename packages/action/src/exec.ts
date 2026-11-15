@@ -44,7 +44,7 @@ export function suiteToRun(workspace: string, named: string | null, verified: st
   }
 }
 
-export type ExecResult = ({ kind: "ran" } & TestsRan) | { kind: "library_not_found"; command: string };
+export type ExecResult = ({ kind: "ran" } & Omit<TestsRan, "mismatch">) | { kind: "library_not_found"; command: string };
 
 /** Runs `testnotary exec <suite> --json` through the package manager, after checking the library answers. */
 export async function execSuite(env: RunnerEnv, workspace: string, suite: string): Promise<ExecResult> {

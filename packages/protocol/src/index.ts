@@ -12,7 +12,7 @@ export {
   type AttestationPayload,
   type AttestationPayloadV1,
 } from "./attestation.ts";
-export { runPagePath, runPageUrl } from "./run-page.ts";
+export { mismatchesPageUrl, runPagePath, runPageUrl } from "./run-page.ts";
 export {
   SERVICE_REFUSALS,
   completedRunUpload,

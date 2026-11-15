@@ -73,10 +73,6 @@ export const jobReport = z.object({
 });
 export type JobReport = z.infer<typeof jobReport>;
 
-/** 201 from `POST /api/v1/verifications/<id>/report`. */
-export const jobReportResponse = z.object({ jobReport });
-export type JobReportResponse = z.infer<typeof jobReportResponse>;
-
 /** A commit CI skipped on an account's attestation, as a mismatch copies it in. */
 export const skippedCommit = z.object({
   commit: z.string(),
@@ -129,6 +125,13 @@ export const mismatch = z.object({
   createdAt: z.string(),
 });
 export type Mismatch = z.infer<typeof mismatch>;
+
+/**
+ * 201 from `POST /api/v1/verifications/<id>/report`: the stored report, and the mismatch it
+ * recorded (the repo is then back in shadow mode), or null.
+ */
+export const jobReportResponse = z.object({ jobReport, mismatch: mismatch.nullable().default(null) });
+export type JobReportResponse = z.infer<typeof jobReportResponse>;
 
 /** A verification as the service decided and recorded it. */
 export const verification = z.object({
