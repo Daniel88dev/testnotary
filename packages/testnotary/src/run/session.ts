@@ -31,7 +31,7 @@ const AGENTS: Agent[] = [
   },
   {
     vendor: "Codex",
-    detect: (env) => !!(set(env.CODEX_CI) ?? set(env.CODEX_THREAD_ID) ?? set(env.CODEX_SESSION_ID)),
+    detect: (env) => !!set(env.CODEX_CI),
     id: (env) => set(env.CODEX_THREAD_ID) ?? set(env.CODEX_SESSION_ID),
     url: () => undefined,
   },

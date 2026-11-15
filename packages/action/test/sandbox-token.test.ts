@@ -21,7 +21,7 @@ interface Scene {
   /** `testnotary run` in the agent's sandbox, on the pull request's branch; must attest. */
   attest(): Promise<void>;
   /** The test merge commit of the pull request, and the action's run-mode step on it. */
-  ci(): Promise<ReturnType<typeof world.runAction>>;
+  ci(): ReturnType<typeof world.runAction>;
 }
 
 let repos = 0;

@@ -102,7 +102,8 @@ const AGENTS: { agent: string; env: Record<string, string>; session: { vendor: s
   },
   { agent: "Claude Code on a laptop", env: { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "6f1c2b9e" }, session: { vendor: "Claude Code", id: "6f1c2b9e", url: null } },
   { agent: "Codex cloud", env: { CODEX_CI: "1", CODEX_THREAD_ID: "thr_6f2e91ac" }, session: { vendor: "Codex", id: "thr_6f2e91ac", url: null } },
-  { agent: "Codex with a session id", env: { CODEX_SESSION_ID: "sess-42" }, session: { vendor: "Codex", id: "sess-42", url: null } },
+  { agent: "Codex with a session id", env: { CODEX_CI: "1", CODEX_SESSION_ID: "sess-42" }, session: { vendor: "Codex", id: "sess-42", url: null } },
+  { agent: "a Codex session id alone", env: { CODEX_SESSION_ID: "sess-42" }, session: null },
   {
     agent: "Copilot cloud agent",
     env: { GITHUB_ACTIONS: "true", COPILOT_AGENT_SESSION_ID: "cps-7" },
