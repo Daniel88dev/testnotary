@@ -92,6 +92,9 @@ importers:
 
   packages/test-world:
     dependencies:
+      '@playwright/test':
+        specifier: ^1.65.0
+        version: 1.65.0
       '@testnotary/web':
         specifier: workspace:*
         version: link:../../apps/web
