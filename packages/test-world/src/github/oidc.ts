@@ -67,9 +67,12 @@ export class OidcIssuer {
     const { repo } = job;
     const iat = this.now();
     const actor = job.actor ?? "octocat";
+    // Repos created after 2026-07-15 get the id form of `sub` (github-behaviours §2). Testnotary
+    // keys on `repository_id`, never on `sub`.
+    const subject = `repo:${repo.owner}@${repo.ownerId}/${repo.name}@${repo.id}`;
     const claims: JWTPayload = {
       jti: randomUUID(),
-      sub: job.eventName === "pull_request" ? `repo:${repo.fullName}:pull_request` : `repo:${repo.fullName}:ref:${job.ref}`,
+      sub: job.eventName === "pull_request" ? `${subject}:pull_request` : `${subject}:ref:${job.ref}`,
       aud: audience ?? `https://github.com/${repo.owner}`,
       ref: job.ref,
       sha: job.sha,
@@ -92,7 +95,10 @@ export class OidcIssuer {
       workflow_sha: job.sha,
       job_workflow_ref: `${repo.fullName}/.github/workflows/ci.yml@${job.ref}`,
       job_workflow_sha: job.sha,
+      check_run_id: String(job.runId ?? 1),
       runner_environment: "github-hosted",
+      ...(job.enterpriseSlug ? { enterprise: job.enterpriseSlug, enterprise_id: "123" } : {}),
+      // An enterprise slug issuer is signed by the same keys as the root issuer.
       iss: job.enterpriseSlug ? `${this.issuer}/${job.enterpriseSlug}` : this.issuer,
       nbf: iat - OIDC_LIFETIME_SECONDS,
       iat,

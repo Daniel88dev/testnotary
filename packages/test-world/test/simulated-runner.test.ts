@@ -54,6 +54,17 @@ describe("simulated runner", () => {
     expect(payload.iss).toBe(`${world.github.oidc.issuer}/acme-corp`);
   });
 
+  test("any slug's discovery document names the slug but points at the root JWKS; the slug JWKS path is 404", async () => {
+    const discovery = await fetch(`${world.github.oidc.issuer}/made-up/.well-known/openid-configuration`);
+    const slugJwks = await fetch(`${world.github.oidc.issuer}/made-up/.well-known/jwks`);
+
+    expect(await discovery.json()).toMatchObject({
+      issuer: `${world.github.oidc.issuer}/made-up`,
+      jwks_uri: world.github.oidc.jwksUrl,
+    });
+    expect(slugJwks.status).toBe(404);
+  });
+
   test("a Dependabot run gets a token, a fork run gets none", async () => {
     const { fixture, merge, repo } = await pullRequest();
 

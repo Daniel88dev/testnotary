@@ -1,16 +1,28 @@
 import { githubError, json, route } from "../router.ts";
+import type { FakeGitHub } from "../server.ts";
 
 // The Actions OIDC issuer (token.actions.githubusercontent.com in production), mounted under /oidc.
+// See NOTES/github-behaviours.md §1 and §2.
+
+function discovery(github: FakeGitHub, issuer: string) {
+  return json(200, {
+    issuer,
+    // Always the root JWKS, also for a slug issuer.
+    jwks_uri: github.oidc.jwksUrl,
+    subject_types_supported: ["public", "pairwise"],
+    response_types_supported: ["id_token"],
+    id_token_signing_alg_values_supported: ["RS256"],
+  });
+}
 
 export const oidcRoutes = [
-  route("GET", "/oidc/.well-known/openid-configuration", ({ github }) =>
-    json(200, {
-      issuer: github.oidc.issuer,
-      jwks_uri: github.oidc.jwksUrl,
-      subject_types_supported: ["public", "pairwise"],
-      response_types_supported: ["id_token"],
-      id_token_signing_alg_values_supported: ["RS256"],
-    }),
+  route("GET", "/oidc/.well-known/openid-configuration", ({ github }) => discovery(github, github.oidc.issuer)),
+
+  // Any slug, even a made-up one, gets a discovery document naming it as the issuer. Its own
+  // `/<slug>/.well-known/jwks` has no route and so answers 404, as GitHub's does: a service that
+  // trusts discovery on `iss`, or appends the JWKS path to it, fails.
+  route("GET", "/oidc/:slug/.well-known/openid-configuration", ({ github, params }) =>
+    discovery(github, `${github.oidc.issuer}/${params.slug}`),
   ),
 
   route("GET", "/oidc/.well-known/jwks", async ({ github }) => json(200, await github.oidc.jwks())),
