@@ -11,7 +11,8 @@ export const paths = {
   migrations: `${repoRoot}/apps/web/drizzle`,
   cli: `${repoRoot}/packages/testnotary/src/cli.ts`,
   keychainStub: `${repoRoot}/packages/test-world/src/keychain-stub.ts`,
-  packageManagerStub: `${repoRoot}/packages/test-world/src/package-manager-stub.ts`,
+  rootFilesPreload: `${repoRoot}/packages/test-world/src/root-files-preload.ts`,
+  packageManagerStub:`${repoRoot}/packages/test-world/src/package-manager-stub.ts`,
   actionEntry: `${repoRoot}/packages/action/src/main.ts`,
 };
 

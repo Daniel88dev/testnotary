@@ -63,6 +63,8 @@ export interface RunContext {
 export interface Refusal {
   refusal: RefusalCode;
   lines: string[];
+  /** False: the refused run is not uploaded (the token must not be sent). Uploaded by default. */
+  upload?: boolean;
 }
 
 /**

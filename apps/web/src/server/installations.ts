@@ -1,7 +1,7 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { INITIAL_REPO_SETTINGS, type RepoMode } from "@testnotary/core";
 import type { Database } from "../db/client.ts";
-import { installationEvents, installations, repoSettingChanges, repoStates, repos } from "../db/schema.ts";
+import { installationEvents, installations, repoSettingChanges, repoStates, repos, tokenRevocations, tokens } from "../db/schema.ts";
 
 // Installations and their repos, as the App's webhooks leave them. Every change is a new row (the
 // app role cannot update), and the latest row per installation or repo is its current state.
@@ -178,6 +178,7 @@ export async function recordRepoState(
     change: input.change,
     deliveryId: input.deliveryId,
   });
+  if (!input.installed) await revokeSandboxTokens(db, input.repo.id);
   if (input.change !== "added") return;
   const [current] = await db
     .select()
@@ -194,6 +195,24 @@ export async function recordRepoState(
     changedBy: null,
     reason: current ? "reinstalled" : "installed",
   });
+}
+
+/**
+ * A repo that leaves Testnotary (removed from the installation, uninstalled, deleted, transferred)
+ * takes its sandbox tokens with it: each is revoked (reason `repo_removed`), so a reinstall does not
+ * bring them back. A suspension revokes nothing; the repo just stops until it is lifted.
+ */
+async function revokeSandboxTokens(db: Executor, repoId: number): Promise<void> {
+  const live = await db
+    .select({ id: tokens.id })
+    .from(tokens)
+    .leftJoin(tokenRevocations, eq(tokenRevocations.tokenId, tokens.id))
+    .where(and(eq(tokens.repoId, repoId), eq(tokens.kind, "sandbox"), isNull(tokenRevocations.id)));
+  if (live.length === 0) return;
+  await db
+    .insert(tokenRevocations)
+    .values(live.map((token) => ({ tokenId: token.id, reason: "repo_removed", revokedBy: null })))
+    .onConflictDoNothing();
 }
 
 /** The latest recorded state of a repo, whatever its installation. */
