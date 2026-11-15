@@ -199,6 +199,49 @@ export async function changedPaths(token: string, fullName: string, base: string
   return { paths, count: body.files.length };
 }
 
+/** A commit's author as GitHub shows it: the GitHub account it linked the commit to, if any, and the git author's name. */
+export interface CommitAuthor {
+  /** The GitHub account, when GitHub matched the author's email to one. */
+  account: { id: number; login: string } | null;
+  /** The git author's name, as written in the commit. */
+  name: string;
+  /** The commit's parents, to find a pull request's head under GitHub's test merge commit. */
+  parents: string[];
+}
+
+/**
+ * `GET /repos/{owner}/{repo}/commits/{sha}` (Contents read): who wrote the commit. Undefined when
+ * GitHub has no such commit. Shown on the commit page beside the attester; never used to decide.
+ */
+export async function commitAuthor(token: string, fullName: string, sha: string): Promise<CommitAuthor | undefined> {
+  const response = await call(`${serviceConfig().githubApiUrl}/repos/${fullName}/commits/${encodeURIComponent(sha)}`, withToken(token));
+  if (response.status === 404 || response.status === 422) return undefined;
+  if (!response.ok) return failure(response, "the commits call");
+  const body = await jsonBody(response);
+  const author = body.author as { id?: unknown; login?: unknown } | null | undefined;
+  const commit = body.commit as { author?: { name?: unknown } } | undefined;
+  const parents = Array.isArray(body.parents) ? body.parents.map((parent: { sha?: unknown }) => parent.sha).filter((sha): sha is string => typeof sha === "string") : [];
+  return {
+    account: author && typeof author.id === "number" && typeof author.login === "string" ? { id: author.id, login: author.login } : null,
+    name: typeof commit?.author?.name === "string" ? commit.author.name : "",
+    parents,
+  };
+}
+
+/**
+ * `GET /repos/{owner}/{repo}/compare/{base}...{head}`: how many commits `base` has that `head`
+ * lacks (`behind_by`). The commit page's *base moved* flag: CI's base had commits the attested
+ * commit did not.
+ */
+export async function behindBy(token: string, fullName: string, base: string, head: string): Promise<number> {
+  const basehead = `${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+  const response = await call(`${serviceConfig().githubApiUrl}/repos/${fullName}/compare/${basehead}`, withToken(token));
+  if (!response.ok) return failure(response, "the compare call");
+  const body = await jsonBody(response);
+  if (typeof body.behind_by !== "number") throw new GitHubUnavailable("the compare call answered without behind_by");
+  return body.behind_by;
+}
+
 /**
  * `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}` (§6): one file's text at a commit, or
  * undefined when the commit has no such file.
