@@ -91,3 +91,77 @@ describe("the gate job", () => {
     expect(result.outputs.verification).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
+
+describe("the gate job falls back", () => {
+  /** An attested pull request in enforce mode, and its test merge commit. */
+  async function attestedPullRequest() {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    await enforce(s.repo);
+    return { s, merge: await s.fixture.testMerge({ base: "main", head: "feature" }) };
+  }
+
+  test("when no attestation names the tree CI builds: no_attestation", async () => {
+    const { s } = await attestedPullRequest();
+    await s.fixture.commit("Change a again", { "src/a.js": "export const a = 2;\n" });
+    await s.fixture.push();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+    const result = await s.gate({ sha: merge.sha });
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", skip: "false" });
+    expect(result.outputs.verification).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("when the base config declares no such suite: unknown_suite", async () => {
+    const { s, merge } = await attestedPullRequest();
+
+    const result = await s.gate({ sha: merge.sha, suite: "e2e" });
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "unknown_suite", skip: "false" });
+  });
+
+  test("when the attestation's run ended 24 h ago or more: attestation_expired", async () => {
+    const { s, merge } = await attestedPullRequest();
+    try {
+      world.clock.advance(24 * 3_600_000 - 60_000);
+      const young = await s.gate({ sha: merge.sha });
+      world.clock.advance(60_000);
+      const old = await s.gate({ sha: merge.sha });
+
+      expect(young.outputs).toMatchObject({ result: "skip", skip: "true" });
+      expect(old.outputs).toMatchObject({ result: "fallback", reason: "attestation_expired", skip: "false" });
+    } finally {
+      world.clock.reset();
+    }
+  });
+
+  test.each(["read", "triage", "none"] as const)("when the attester now has only %s: attester_no_write", async (permission) => {
+    const { s, merge } = await attestedPullRequest();
+    world.github.setPermission(s.repo, s.user, permission);
+
+    const result = await s.gate({ sha: merge.sha });
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "attester_no_write", skip: "false" });
+  });
+
+  test("an attester with maintain still counts as write", async () => {
+    const { s, merge } = await attestedPullRequest();
+    world.github.setPermission(s.repo, s.user, "maintain");
+
+    const result = await s.gate({ sha: merge.sha });
+
+    expect(result.outputs).toMatchObject({ result: "skip", skip: "true" });
+  });
+
+  test("in shadow mode a fallback reads would_fall_back", async () => {
+    const s = await story();
+    await featureBranch(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+    const result = await s.gate({ sha: merge.sha });
+
+    expect(result.outputs).toMatchObject({ result: "would_fall_back", reason: "no_attestation", skip: "false" });
+  });
+});
