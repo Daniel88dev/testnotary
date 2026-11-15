@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { installLibrary } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
 
 // Sentry is for the service only. The library and the action send nothing anywhere but the
@@ -26,7 +27,9 @@ describe("the library and the action send no telemetry", () => {
   });
 
   test("the action sends nothing to Sentry, even with SENTRY_DSN set", async () => {
-    const repo = await world.fixtureRepo();
+    // Run mode (the default) runs the suite through the installed library, so install it.
+    const repo = await world.fixtureRepo({ config: { suites: { test: { command: ["node", "-e", "process.exit(0)"] } } } });
+    await installLibrary(repo.dir);
     const remote = world.github.addRepo(repo, { owner: "acme", name: "widgets" });
 
     const result = await world.runAction({

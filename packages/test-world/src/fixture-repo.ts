@@ -137,6 +137,19 @@ export class FixtureRepo {
     return (await this.git("rev-parse", "--verify", `${ref}^{tree}`)).trim();
   }
 
+  /**
+   * What `actions/checkout` leaves in `GITHUB_WORKSPACE`: a fresh clone of origin with `sha`
+   * checked out, detached (on `pull_request`, the test merge commit). Full history; a
+   * `fetch-depth: 2` shallow variant is for the signature-check ticket. Removed with the fixture.
+   */
+  async ciCheckout(sha: string): Promise<string> {
+    const dir = await mkdtemp(join(this.root, "ci-"));
+    await git(dir, ["clone", "--quiet", "--no-checkout", this.remoteDir, "."]);
+    await git(dir, ["fetch", "--quiet", "origin", "+refs/pull/*:refs/remotes/origin/pull/*"]);
+    await git(dir, ["checkout", "--quiet", "--detach", sha]);
+    return dir;
+  }
+
   async remove(): Promise<void> {
     await rm(this.root, { recursive: true, force: true });
   }

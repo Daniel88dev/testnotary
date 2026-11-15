@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { git } from "./git.ts";
 import type { FakeGitHub } from "./github/server.ts";
 import type { FakeRepo } from "./github/state.ts";
 import type { Machine } from "./machine.ts";
@@ -95,6 +96,11 @@ export interface RunActionOptions {
   fork?: boolean;
   /** `permissions: id-token: write` granted. Default true. */
   idToken?: boolean;
+  /**
+   * `permissions: checks: write` granted to the job's `GITHUB_TOKEN`. Default true, as the
+   * snippet grants it. A fork pull request's token is read-only whatever this says.
+   */
+  checks?: boolean;
   enterpriseSlug?: string;
   /** Replaces the generated `GITHUB_EVENT_PATH` payload. */
   eventPayload?: unknown;
@@ -107,6 +113,52 @@ export interface ActionResult extends ProcessResult {
   outputs: Record<string, string>;
   /** What the step wrote to `GITHUB_STEP_SUMMARY`. */
   summary: string;
+  /**
+   * Every call the step made to `npx`, `pnpm` or `yarn`, as argv with the tool first. The runner's
+   * PATH starts with stand-ins for the three (package-manager-stub.ts), so no real package
+   * manager runs.
+   */
+  packageManagerCalls: string[][];
+}
+
+/**
+ * Installs the library in a workspace the way `pnpm install` / `npm ci` would leave it for the
+ * action to find: `node_modules/.bin/testnotary` (here a script running the library's source).
+ * List `node_modules` in the fixture's `.gitignore` when the tree must stay clean.
+ */
+export async function installLibrary(workspace: string): Promise<void> {
+  const bin = join(workspace, "node_modules", ".bin");
+  await mkdir(bin, { recursive: true });
+  const script = join(bin, "testnotary");
+  await writeFile(script, `#!/bin/sh\nexec ${quote(process.execPath)} --disable-warning=ExperimentalWarning ${quote(paths.cli)} "$@"\n`);
+  await chmod(script, 0o755);
+}
+
+function quote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** `npx`, `pnpm` and `yarn` stand-ins in `dir`, each logging its argv to `log`. */
+async function packageManagerStubs(dir: string, log: string): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  await writeFile(log, "");
+  for (const tool of ["npx", "pnpm", "yarn"]) {
+    const script = join(dir, tool);
+    await writeFile(
+      script,
+      `#!/bin/sh\nexec ${quote(process.execPath)} --disable-warning=ExperimentalWarning ${quote(paths.packageManagerStub)} ${tool} ${quote(log)} "$@"\n`,
+    );
+    await chmod(script, 0o755);
+  }
+}
+
+/** The pull request's head commit: the test merge commit's second parent, when it has one. */
+async function pullRequestHead(repo: FakeRepo, sha: string): Promise<string | undefined> {
+  try {
+    return (await git(repo.gitDir, ["rev-parse", "--verify", `${sha}^2`])).trim();
+  } catch {
+    return undefined;
+  }
 }
 
 /** Runs the action's entry point as a process inside a simulated runner. */
@@ -131,13 +183,18 @@ export async function runAction(
     state: join(runner, "state"),
     path: join(runner, "path"),
     event: join(runner, "event.json"),
+    packageManagers: join(runner, "package-managers.log"),
   };
   await Promise.all([files.output, files.summary, files.env, files.state, files.path].map((file) => writeFile(file, "")));
-  const payload = options.eventPayload ?? eventPayload(event, repo, options);
+  await packageManagerStubs(join(runner, "bin"), files.packageManagers);
+  const headSha = event === "pull_request" ? await pullRequestHead(repo, options.sha) : undefined;
+  const payload = options.eventPayload ?? eventPayload(event, repo, options, headSha ?? options.sha);
   await writeFile(files.event, JSON.stringify(payload));
+  const base = cleanEnv(join(runner, "home"), world.serviceUrl);
 
   const env: Record<string, string> = {
-    ...cleanEnv(join(runner, "home"), world.serviceUrl),
+    ...base,
+    PATH: `${join(runner, "bin")}:${base.PATH}`,
     CI: "true",
     GITHUB_ACTIONS: "true",
     RUNNER_OS: "Linux",
@@ -165,6 +222,9 @@ export async function runAction(
     GITHUB_STATE: files.state,
     GITHUB_PATH: files.path,
   };
+  // The runner evaluates the `github-token` input's default, `${{ github.token }}`: the job's
+  // GITHUB_TOKEN, read-only on a fork pull request.
+  env["INPUT_GITHUB-TOKEN"] = world.github.jobToken(repo, { checks: options.checks !== false && !options.fork ? "write" : "read" });
   for (const [name, value] of Object.entries(options.inputs ?? {})) {
     env[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`] = value;
   }
@@ -190,17 +250,21 @@ export async function runAction(
     ...result,
     outputs: parseCommandFile(await readFile(files.output, "utf8")),
     summary: await readFile(files.summary, "utf8"),
+    packageManagerCalls: (await readFile(files.packageManagers, "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as string[]),
   };
 }
 
-function eventPayload(event: string, repo: FakeRepo, options: RunActionOptions): unknown {
+function eventPayload(event: string, repo: FakeRepo, options: RunActionOptions, headSha: string): unknown {
   const repository = { id: repo.id, full_name: repo.fullName, name: repo.name, owner: { login: repo.owner, id: repo.ownerId }, private: repo.visibility === "private", default_branch: repo.defaultBranch };
   if (event !== "pull_request") return { repository };
   const head = options.fork ? { full_name: `fork-owner/${repo.name}`, fork: true } : repository;
   return {
     action: "synchronize",
     number: 1,
-    pull_request: { number: 1, head: { ref: "feature", repo: head }, base: { ref: repo.defaultBranch, repo: repository } },
+    pull_request: { number: 1, head: { ref: "feature", sha: headSha, repo: head }, base: { ref: repo.defaultBranch, repo: repository } },
     repository,
   };
 }

@@ -1,14 +1,22 @@
 import { and, desc, eq } from "drizzle-orm";
 import { CONFIG_FILE, decideVerification, type AttestationCandidate } from "@testnotary/core";
-import { VERIFY_REFUSALS, decodeAttestationPayload, type Verification, type VerifyRefusal, type VerifyRequest } from "@testnotary/protocol";
+import {
+  VERIFY_REFUSALS,
+  decodeAttestationPayload,
+  type JobReport,
+  type JobReportRequest,
+  type Verification,
+  type VerifyRefusal,
+  type VerifyRequest,
+} from "@testnotary/protocol";
 import type { Database } from "../db/client.ts";
-import { attestations, tokens, verifications } from "../db/schema.ts";
+import { attestations, jobReports, runs, tokens, verifications } from "../db/schema.ts";
 import { now } from "./config.ts";
 import { GitHubUnavailable, fileAt, gitCommit, installationToken } from "./github.ts";
 import { apiError } from "./http.ts";
 import { installedRepo, latestRepoState, type Executor, type RepoView } from "./installations.ts";
 import { acceptActionsToken, type ActionsClaims } from "./oidc.ts";
-import { bearer } from "./tokens.ts";
+import { accountLogin, bearer, currentNames } from "./tokens.ts";
 import { hasWriteAccess } from "./write-access.ts";
 
 // Verification: a CI job, identified only by its Actions OIDC token, asks whether an attestation
@@ -94,15 +102,44 @@ async function attestationsOfTree(db: Executor, repoId: number, suite: string, t
   }));
 }
 
+/**
+ * Stores a CI job's report of its tests against one of its repo's verifications. The token must be
+ * of the verification's commit: a job reports only on what it built. Undefined when it isn't.
+ */
+export async function recordJobReport(db: Database, job: { claims: ActionsClaims; repo: RepoView }, verificationId: string, report: JobReportRequest): Promise<JobReport | undefined> {
+  const [verification] = await db
+    .select({ id: verifications.id })
+    .from(verifications)
+    .where(and(eq(verifications.id, verificationId), eq(verifications.repoId, job.repo.id), eq(verifications.commit, job.claims.sha)));
+  if (!verification) return undefined;
+  const [row] = await db
+    .insert(jobReports)
+    .values({ verificationId: verification.id, outcome: report.outcome, durationMs: report.durationMs, environment: report.environment, createdAt: now() })
+    .returning();
+  return jobReportView(row!);
+}
+
+function jobReportView(row: typeof jobReports.$inferSelect): JobReport {
+  return { id: row.id, outcome: row.outcome as JobReport["outcome"], durationMs: row.durationMs, createdAt: row.createdAt.toISOString() };
+}
+
 /** One of the repo's verifications, with the matched attestation's payload exactly as stored. */
 export async function readVerification(db: Executor, id: string, repoId: number): Promise<Verification | undefined> {
   const [row] = await db
-    .select({ verification: verifications, attestation: attestations })
+    .select({ verification: verifications, attestation: attestations, run: runs, token: tokens })
     .from(verifications)
     .leftJoin(attestations, eq(attestations.id, verifications.attestationId))
+    .leftJoin(runs, eq(runs.id, attestations.runId))
+    .leftJoin(tokens, eq(tokens.id, attestations.tokenId))
     .where(and(eq(verifications.id, id), eq(verifications.repoId, repoId)));
   if (!row) return undefined;
-  const { verification, attestation } = row;
+  const { verification, attestation, run, token } = row;
+  const [report] = await db
+    .select()
+    .from(jobReports)
+    .where(eq(jobReports.verificationId, verification.id))
+    .orderBy(desc(jobReports.seq))
+    .limit(1);
   return {
     id: verification.id,
     repository: { id: verification.repoId, fullName: (await latestRepoState(db, verification.repoId))?.fullName ?? "" },
@@ -117,12 +154,17 @@ export async function readVerification(db: Executor, id: string, repoId: number)
     attestation: attestation
       ? {
           id: attestation.id,
-          run: { id: attestation.runId },
+          run: { id: attestation.runId, environment: run?.environment ?? null, session: run?.session ?? null },
           format: attestation.format,
           payload: attestation.payload.toString("utf8"),
           endedAt: attestation.endedAt.toISOString(),
+          attester: {
+            account: { id: attestation.accountId, login: (await accountLogin(db, attestation.accountId)) ?? null },
+            token: { kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: token ? ((await currentNames(db, [token])).get(token.id) ?? token.name) : "" },
+          },
         }
       : null,
+    jobReport: report ? jobReportView(report) : null,
     createdAt: verification.createdAt.toISOString(),
   };
 }

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { serve, type HttpServer } from "../http.ts";
 import {
   deliver,
@@ -13,18 +14,19 @@ import {
 import { OidcIssuer } from "./oidc.ts";
 import { matchPath, notFound, type Route, type RouteHandler } from "./router.ts";
 import { DeviceFlow } from "./device-flow.ts";
+import { checkRoutes } from "./routes/checks.ts";
 import { gitRoutes } from "./routes/git.ts";
 import { installationRoutes } from "./routes/installation.ts";
 import { loginRoutes } from "./routes/login.ts";
 import { oidcRoutes } from "./routes/oidc.ts";
 import { avatarRoutes } from "./routes/avatars.ts";
 import { userAccessRoutes } from "./routes/user-access.ts";
-import { GitHubState, type FakeRepo, type RepoPermission } from "./state.ts";
+import { GitHubState, type FakeCheckRun, type FakeRepo, type RepoPermission } from "./state.ts";
 import { WebFlow } from "./web-flow.ts";
 
 /** Every endpoint the fake serves. Add a file under routes/ and list it here. */
 // `GET /user/installations` (user-access) must come before `GET /user/:id` (installation).
-const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes, ...userAccessRoutes, ...installationRoutes, ...avatarRoutes];
+const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes, ...userAccessRoutes, ...installationRoutes, ...avatarRoutes, ...checkRoutes];
 
 export interface RecordedRequest {
   method: string;
@@ -119,6 +121,21 @@ export class FakeGitHub {
       this.state.permissions.set(repo.id, roles);
     }
     roles.set(account.id, permission);
+  }
+
+  /**
+   * A job's `GITHUB_TOKEN` for `repo`. `checks: "write"` when the workflow grants `checks: write`
+   * (the snippet does); a fork pull request's token is always read-only (§9).
+   */
+  jobToken(repo: FakeRepo, options: { checks: "write" | "read" }): string {
+    const value = `ghs_job_${randomBytes(18).toString("base64url")}`;
+    this.state.jobTokens.set(value, { repoId: repo.id, checks: options.checks });
+    return value;
+  }
+
+  /** The check runs made on a repo, oldest first. */
+  checkRuns(repo: FakeRepo): FakeCheckRun[] {
+    return this.state.checkRuns.filter((run) => run.repoId === repo.id);
   }
 
   /** A person on GitHub, who can sign in through the device flow or in the browser. */

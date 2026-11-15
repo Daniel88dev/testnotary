@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { runEnvironment, sessionLabels } from "./run.ts";
 
 // Verification: the action asks the service whether an attestation names the tree of the commit CI
 // builds. It sends its Actions OIDC token as `Authorization: Bearer`, the suite and the runner's
@@ -42,6 +43,40 @@ export type VerifyRequest = z.infer<typeof verifyRequest>;
 
 export const verificationResult = z.enum(["skip", "audit", "fallback", "would_skip", "would_fall_back"]);
 
+/**
+ * How the CI job's tests ended, as `exec` reported it: `passed`, `failed`, or `refused` when `exec`
+ * would not start the command (`config_invalid`, `command_not_found`).
+ */
+export const jobOutcome = z.enum(["passed", "failed", "refused"]);
+export type JobOutcome = z.infer<typeof jobOutcome>;
+
+/**
+ * `POST /api/v1/verifications/<id>/report`: one call after the tests ran, with a fresh Actions OIDC
+ * token of the same commit. The wall-clock duration is the test command's; the environment is the
+ * runner's. Stored as an append-only job report.
+ */
+export const jobReportRequest = z
+  .object({
+    outcome: jobOutcome,
+    durationMs: z.number().int().min(0).max(7 * 24 * 3_600_000),
+    environment: ciEnvironment,
+  })
+  .strict();
+export type JobReportRequest = z.infer<typeof jobReportRequest>;
+
+/** A stored job report. */
+export const jobReport = z.object({
+  id: z.string(),
+  outcome: jobOutcome,
+  durationMs: z.number(),
+  createdAt: z.string(),
+});
+export type JobReport = z.infer<typeof jobReport>;
+
+/** 201 from `POST /api/v1/verifications/<id>/report`. */
+export const jobReportResponse = z.object({ jobReport });
+export type JobReportResponse = z.infer<typeof jobReportResponse>;
+
 /** A verification as the service decided and recorded it. */
 export const verification = z.object({
   id: z.string(),
@@ -63,12 +98,23 @@ export const verification = z.object({
   attestation: z
     .object({
       id: z.string(),
-      run: z.object({ id: z.string() }),
+      /** The attested run: its id (the run page), its environment and its unverified session labels. */
+      run: z.object({ id: z.string(), environment: runEnvironment.nullable(), session: sessionLabels.nullable() }),
       format: z.string(),
       payload: z.string(),
       endedAt: z.string(),
+      /**
+       * Who the PR line names: the token's account (for a sandbox token, its creator) with the login
+       * GitHub last gave the service (null when it never did), and the token's kind and name.
+       */
+      attester: z.object({
+        account: z.object({ id: z.number(), login: z.string().nullable() }),
+        token: z.object({ kind: z.enum(["laptop", "sandbox"]), name: z.string() }),
+      }),
     })
     .nullable(),
+  /** The CI job's own report of its tests, the latest one; null while none arrived ("outcome unknown"). */
+  jobReport: jobReport.nullable(),
   createdAt: z.string(),
 });
 export type Verification = z.infer<typeof verification>;
