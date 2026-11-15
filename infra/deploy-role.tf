@@ -92,6 +92,13 @@ resource "aws_iam_role_policy" "deploy" {
         ])
         Condition = { StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" } }
       },
+      {
+        Sid       = "PassImagePullRole"
+        Effect    = "Allow"
+        Action    = ["iam:PassRole"]
+        Resource  = [aws_iam_role.apprunner_access.arn]
+        Condition = { StringEquals = { "iam:PassedToService" = "build.apprunner.amazonaws.com" } }
+      },
     ]
   })
 }
