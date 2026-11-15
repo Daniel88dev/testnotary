@@ -5,7 +5,8 @@
 // Where something changes over time (a repo's name or visibility, its settings, an account's
 // login), each change is a row carrying the whole state after it, and the latest row per key is
 // the current state. GitHub ids are the keys for everything that comes from GitHub.
-import { bigint, boolean, index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, customType, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import type { RunEnvironment } from "@testnotary/protocol";
 
 const githubId = (name: string) => bigint(name, { mode: "number" });
 const at = (name = "at") => timestamp(name, { withTimezone: true, mode: "date" }).notNull().defaultNow();
@@ -165,6 +166,86 @@ export const tokenUses = pgTable(
     at: at(),
   },
   (table) => [index("token_uses_latest").on(table.tokenId, table.id)],
+);
+
+/** Bytes kept exactly as they came: an attestation's canonical payload. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+const jsonList = (name: string) => jsonb(name).$type<string[]>().notNull();
+
+/**
+ * One run, for every outcome. A refused run carries only its refusal, tree and commit (the
+ * library sends nothing else); a run whose command ran carries the whole record "What a run
+ * uploads" lists. `receivedAt` is the service clock's time of the upload; the other times are the
+ * library's. Hard-deleted at 90 days with its attestation (retention ticket).
+ */
+export const runs = pgTable(
+  "runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    repoId: githubId("repo_id")
+      .notNull()
+      .references(() => repos.githubId),
+    tokenId: uuid("token_id")
+      .notNull()
+      .references(() => tokens.id),
+    /** The token's account: for a sandbox token, the account that created it. */
+    accountId: githubId("account_id")
+      .notNull()
+      .references(() => accounts.githubId),
+    outcome: text("outcome").notNull(),
+    refusal: text("refusal"),
+    suite: text("suite"),
+    tree: text("tree"),
+    commit: text("commit"),
+    command: jsonb("command").$type<string[]>(),
+    exitCode: integer("exit_code"),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }),
+    durationMs: integer("duration_ms"),
+    environment: jsonb("environment").$type<RunEnvironment>(),
+    session: jsonb("session").$type<{ vendor: string; id: string | null; url: string | null }>(),
+    passedEnv: jsonList("passed_env"),
+    guardedMatched: jsonList("guarded_matched"),
+    warnings: jsonList("warnings"),
+    notPinned: jsonList("not_pinned"),
+    baselineOverrides: jsonList("baseline_overrides"),
+    receivedAt: at("received_at"),
+  },
+  (table) => [index("runs_repo").on(table.repoId, table.receivedAt), index("runs_account").on(table.accountId)],
+);
+
+/**
+ * A passed run's attestation: exactly one per passed run. `payload` is the canonical payload's
+ * bytes as uploaded, in the `format` it names; the columns beside it are copies for lookups and
+ * must never be used to rebuild it. Signature fields arrive with signature mode (T-829).
+ */
+export const attestations = pgTable(
+  "attestations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .unique()
+      .references(() => runs.id),
+    repoId: githubId("repo_id")
+      .notNull()
+      .references(() => repos.githubId),
+    suite: text("suite").notNull(),
+    tree: text("tree").notNull(),
+    commit: text("commit").notNull(),
+    tokenId: uuid("token_id")
+      .notNull()
+      .references(() => tokens.id),
+    accountId: githubId("account_id")
+      .notNull()
+      .references(() => accounts.githubId),
+    /** The run's end, from the payload: the attestation's age counts from here. */
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }).notNull(),
+    format: text("format").notNull(),
+    payload: bytea("payload").notNull(),
+    createdAt: at("created_at"),
+  },
+  (table) => [index("attestations_lookup").on(table.repoId, table.suite, table.tree)],
 );
 
 /** The token was revoked. One row ends the token for good. */

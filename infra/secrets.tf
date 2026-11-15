@@ -7,7 +7,7 @@
 # more entry in `service_secrets`.
 
 locals {
-  # Variables `configFromEnv` reads today: DATABASE_URL, GITHUB_WEBHOOK_SECRET. The others are the
+  # Variables `configFromEnv` reads today: DATABASE_URL, GITHUB_WEBHOOK_SECRET, GITHUB_APP_PRIVATE_KEY. The others are the
   # spec's remaining secrets, named ahead of the tickets that add them to `ServiceConfig`; rename
   # an entry here if that ticket picks another variable name.
   service_secrets = {

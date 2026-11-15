@@ -118,6 +118,16 @@ export class FixtureRepo {
     return { sha, tree, parents: [base, head], ref };
   }
 
+  /**
+   * Makes `origin` read as `url` (e.g. `https://github.com/acme/widgets.git`), as in a clone from
+   * GitHub, while git still fetches from and pushes to the bare `remoteDir` (`url.<dir>.insteadOf`
+   * in the clone's own config). `world.hostOnGitHub` calls this.
+   */
+  async pointOriginAt(url: string): Promise<void> {
+    await this.git("config", "remote.origin.url", url);
+    await this.git("config", `url.${this.remoteDir}.insteadOf`, url);
+  }
+
   async revParse(ref: string): Promise<string> {
     return (await this.git("rev-parse", "--verify", `${ref}^{commit}`)).trim();
   }

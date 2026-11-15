@@ -1,5 +1,14 @@
 import type { FakeAccount, FakeInstallation } from "./app.ts";
 
+/** A person's role on a repo, as GitHub's roles go. */
+export type RepoPermission = "admin" | "maintain" | "write" | "triage" | "read" | "none";
+
+export interface InstallationToken {
+  installationId: number;
+  /** ms since the epoch; GitHub's last an hour. */
+  expiresAt: number;
+}
+
 /** A repo the fake GitHub knows, backed by a fixture repo's bare `origin`. */
 export interface FakeRepo {
   /** GitHub's numeric repo id (what the OIDC `repository_id` claim carries). */
@@ -26,6 +35,13 @@ export class GitHubState {
   readonly installations = new Map<number, FakeInstallation>();
   /** GitHub accounts by lowercased login: people (device flow, `/user`) and organizations. */
   readonly accounts = new Map<string, FakeAccount>();
+  /** Installation access tokens (`ghs_…`) the App bought, by value (§10). */
+  readonly installationTokens = new Map<string, InstallationToken>();
+  /**
+   * Collaborator permissions set by tests, by repo id then account id. Anyone not listed reads
+   * `read` on a public repo and `none` on a private one (§7).
+   */
+  readonly permissions = new Map<number, Map<number, RepoPermission>>();
   private nextId = 1000;
 
   id(): number {
@@ -49,6 +65,20 @@ export class GitHubState {
     repo.name = name;
     repo.fullName = `${owner}/${name}`;
     this.repos.set(repo.fullName.toLowerCase(), repo);
+  }
+
+  /** The account with this numeric id, if GitHub knows one. */
+  accountById(id: number): FakeAccount | undefined {
+    return [...this.accounts.values()].find((account) => account.id === id);
+  }
+
+  /** What `GET …/collaborators/{login}/permission` reports: `maintain` folds into `write`, `triage` into `read` (§7). */
+  permission(repo: FakeRepo, account: FakeAccount): "admin" | "write" | "read" | "none" {
+    const set = this.permissions.get(repo.id)?.get(account.id);
+    if (set === "maintain") return "write";
+    if (set === "triage") return "read";
+    if (set) return set;
+    return repo.visibility === "public" ? "read" : "none";
   }
 
   /** The account with this login, made up (with a fresh id) the first time it is named. */

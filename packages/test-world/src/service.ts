@@ -5,7 +5,18 @@ import { closeDatabase } from "@testnotary/web/db";
 import { serve, type HttpServer } from "./http.ts";
 import { paths } from "./paths.ts";
 
-type Handler = (request: Request, context: { params: Promise<Record<string, string | string[]>> }) => Promise<Response>;
+/** One request that reached the service, exactly as sent: for asserting on what left a machine. */
+export interface ServiceRequest {
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  /** The raw body text ("" for GET). */
+  text: string;
+  /** ms since the epoch, real time. */
+  at: number;
+}
+
+type Handler =(request: Request, context: { params: Promise<Record<string, string | string[]>> }) => Promise<Response>;
 type RouteModule = Partial<Record<string, Handler>>;
 
 interface MountedRoute {
@@ -19,10 +30,12 @@ interface MountedRoute {
  * process without Next.js. New routes are picked up automatically. Each request runs under this
  * world's config, so the handlers talk to this world's database and fake GitHub.
  */
-export async function startInProcessService(config: ServiceConfig): Promise<HttpServer> {
+export async function startInProcessService(config: ServiceConfig, requests: ServiceRequest[] = []): Promise<HttpServer> {
   const routes = await mountRoutes();
   const server = await serve(async (request) => {
     const { pathname } = new URL(request.url);
+    const text = request.method === "GET" || request.method === "HEAD" ? "" : await request.clone().text();
+    requests.push({ method: request.method, path: pathname, headers: Object.fromEntries(request.headers), text, at: Date.now() });
     for (const route of routes) {
       const match = route.pattern.exec(pathname);
       if (!match) continue;

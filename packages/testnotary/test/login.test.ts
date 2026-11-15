@@ -220,3 +220,48 @@ describe("testnotary login when GitHub says no", () => {
     expect(world.github.requestsTo("POST", "/login/device/code")).toHaveLength(before);
   });
 });
+
+describe("laptop token renewal", () => {
+  const DAY_MS = 86_400_000;
+  const HOUR_MS = 3_600_000;
+
+  async function whoami(machine: Machine) {
+    const result = await world.runCli(["whoami", "--json"], { cwd: machine.home, machine });
+    return { exitCode: result.exitCode, out: JSON.parse(result.stdout) as { token?: { expiresAt: string }; error?: string } };
+  }
+
+  test("each use within 90 days renews a laptop token for 90 days from that use", async () => {
+    const { machine } = await signedInMachine("renewer");
+    const signedIn = world.clock.now().getTime();
+    try {
+      world.clock.advance(60 * DAY_MS);
+      const day60 = await whoami(machine);
+      world.clock.advance(89 * DAY_MS);
+      const day149 = await whoami(machine);
+
+      expect(day60.exitCode).toBe(0);
+      expect(Date.parse(day60.out.token!.expiresAt) - signedIn).toBe(150 * DAY_MS);
+      // Day 149 is long past the first 90 days: the use on day 60 kept the token alive.
+      expect(day149.exitCode).toBe(0);
+      expect(Date.parse(day149.out.token!.expiresAt) - signedIn).toBe(239 * DAY_MS);
+    } finally {
+      world.clock.reset();
+    }
+  });
+
+  test("a laptop token unused for 90 days is rejected", async () => {
+    const { machine } = await signedInMachine("sleeper");
+    try {
+      world.clock.advance(90 * DAY_MS - HOUR_MS);
+      const justBefore = await whoami(machine);
+      world.clock.advance(90 * DAY_MS);
+      const atExpiry = await whoami(machine);
+
+      expect(justBefore.exitCode).toBe(0);
+      expect(atExpiry.exitCode).toBe(1);
+      expect(atExpiry.out).toMatchObject({ error: "token_rejected" });
+    } finally {
+      world.clock.reset();
+    }
+  });
+});

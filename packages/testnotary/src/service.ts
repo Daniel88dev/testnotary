@@ -19,7 +19,7 @@ export async function callService<T extends z.ZodType>(
   serviceUrl: string,
   path: string,
   schema: T,
-  options: { method?: string; token?: string; body?: unknown; okStatus?: number } = {},
+  options: { method?: string; token?: string; body?: unknown; okStatus?: number; timeoutMs?: number } = {},
 ): Promise<ServiceAnswer<z.infer<T>>> {
   const headers: Record<string, string> = { accept: "application/json" };
   if (options.token) headers.authorization = `Bearer ${options.token}`;
@@ -30,7 +30,7 @@ export async function callService<T extends z.ZodType>(
       method: options.method ?? "GET",
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS),
     });
   } catch (error) {
     throw new ServiceUnreachable(error instanceof Error ? error.message : String(error));
@@ -38,7 +38,8 @@ export async function callService<T extends z.ZodType>(
   let raw: unknown;
   try {
     raw = await response.json();
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") throw new ServiceUnreachable(error.message);
     raw = undefined;
   }
   if (response.status !== (options.okStatus ?? 200)) return { status: response.status, body: undefined, raw };

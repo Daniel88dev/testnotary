@@ -96,6 +96,7 @@ resource "aws_apprunner_service" "web" {
           {
             AWS_REGION         = var.region
             GITHUB_CLIENT_ID   = var.github_client_id
+            GITHUB_APP_ID      = var.github_app_id
             SENTRY_DSN         = var.sentry_dsn
             SENTRY_ENVIRONMENT = "production"
           },

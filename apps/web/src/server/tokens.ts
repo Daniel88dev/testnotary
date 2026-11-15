@@ -3,6 +3,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { LAPTOP_TOKEN_LIFETIME_DAYS, tokenKind, type TokenKind } from "@testnotary/core";
 import type { Account, TokenInfo } from "@testnotary/protocol";
 import { database } from "../db/client.ts";
+import { now } from "./config.ts";
 import { accountLogins, accounts, tokenRevocations, tokenSecrets, tokenUses, tokens } from "../db/schema.ts";
 import type { Executor } from "./installations.ts";
 
@@ -53,7 +54,7 @@ export async function accountLogin(db: Executor, accountId: number): Promise<str
 /** Issues a laptop token. The value is returned once and only its hash is kept. */
 export async function issueLaptopToken(db: Executor, account: Account, name: string): Promise<{ value: string; info: TokenInfo }> {
   const value = newTokenValue("laptop");
-  const [row] = await db.insert(tokens).values({ kind: "laptop", accountId: account.id, name }).returning();
+  const [row] = await db.insert(tokens).values({ kind: "laptop", accountId: account.id, name, createdAt: now() }).returning();
   await db.insert(tokenSecrets).values({ tokenId: row!.id, hash: hashToken(value) });
   return { value, info: { id: row!.id, kind: "laptop", name, expiresAt: expiry(row!, row!.createdAt).toISOString() } };
 }
@@ -75,12 +76,12 @@ export async function authenticateToken(db: Executor, value: string): Promise<Au
   const token = row.token;
   const [lastUse] = await db.select({ at: tokenUses.at }).from(tokenUses).where(eq(tokenUses.tokenId, token.id)).orderBy(desc(tokenUses.id)).limit(1);
   const lastSeen = lastUse?.at ?? token.createdAt;
-  const now = new Date();
-  if (expiry(token, lastSeen) <= now) return undefined;
+  const at = now();
+  if (expiry(token, lastSeen) <= at) return undefined;
   let renewedFrom = lastSeen;
-  if (now.getTime() - lastSeen.getTime() >= USE_GRANULARITY_MS) {
-    await db.insert(tokenUses).values({ tokenId: token.id, at: now });
-    renewedFrom = now;
+  if (at.getTime() - lastSeen.getTime() >= USE_GRANULARITY_MS) {
+    await db.insert(tokenUses).values({ tokenId: token.id, at });
+    renewedFrom = at;
   }
   const login = await accountLogin(db, token.accountId);
   return {

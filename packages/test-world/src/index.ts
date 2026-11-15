@@ -11,15 +11,19 @@ import { FakeSentry } from "./sentry.ts";
 import { startPostgresServer, type PostgresServer } from "./postgres-server.ts";
 import { cleanEnv, runAction, runNode, type ActionResult, type ProcessResult, type RunActionOptions, type RunOptions } from "./processes.ts";
 import { paths } from "./paths.ts";
-import { startInProcessService } from "./service.ts";
+import { startInProcessService, type ServiceRequest } from "./service.ts";
+import type { AddRepoOptions } from "./github/server.ts";
+import type { FakeRepo } from "./github/state.ts";
 import { createMachine, type Machine, type MachineOptions } from "./machine.ts";
+import { createClock, type WorldClock } from "./clock.ts";
 import { configToEnv, type ServiceConfig } from "@testnotary/web/config";
 
 export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-repo.ts";
 export { FakeGitHub, type AddRepoOptions, type InstallAppOptions, type RecordedRequest, type RepositoryAction } from "./github/server.ts";
 export type { DeliverOptions, FakeAccount, FakeApp, FakeInstallation, WebhookDelivery } from "./github/app.ts";
 export type { DeviceFlow, DevicePlan, IssuedDeviceCode } from "./github/device-flow.ts";
-export type { FakeRepo } from "./github/state.ts";
+export type { FakeRepo, RepoPermission } from "./github/state.ts";
+export type { ServiceRequest } from "./service.ts";
 export { FakeSecretsManager, type SecretsManagerRequest } from "./aws/secrets-manager.ts";
 export { FakeSentry, type SentryEnvelope, type SentryEvent } from "./sentry.ts";
 export { OIDC_LIFETIME_SECONDS, type ActionsJob } from "./github/oidc.ts";
@@ -28,6 +32,7 @@ export type { ActionResult, Env, ProcessResult, RunActionOptions, RunOptions } f
 export type { PostgresServer, Role } from "./postgres-server.ts";
 export { startPostgresServer } from "./postgres-server.ts";
 export type { WorldDatabase } from "./database.ts";
+export type { WorldClock } from "./clock.ts";
 export { CREDENTIALS_FILE, type KeychainEntry, type Machine, type MachineOptions } from "./machine.ts";
 
 export interface WorldOptions {
@@ -59,15 +64,27 @@ export function worldSecretId(name: string): string {
  * shared with another world, so test files and worktrees run side by side.
  */
 export interface World {
-  service: { url: string };
+  /**
+   * The service. `requests` holds every request it received, body text included, in order (the
+   * in-process service only): assert on what a run sent here, never on what it stored.
+   */
+  service: { url: string; requests: ServiceRequest[] };
   github: FakeGitHub;
   /** AWS Secrets Manager, for the `next` service (the in-process service reads no secrets). */
   secretsManager: FakeSecretsManager;
   /** Sentry's ingest endpoint; the `next` service's `SENTRY_DSN` points here. */
   sentry: FakeSentry;
   db: WorldDatabase;
+  /** The service's clock: set or advance it to test expiry and renewal (in-process service only). */
+  clock: WorldClock;
   /** Builds a fixture repo (see FixtureRepo). It is deleted when the world closes. */
   fixtureRepo(options?: FixtureRepoOptions): Promise<FixtureRepo>;
+  /**
+   * Puts a fixture repo on the fake GitHub as `owner/name` (`github.addRepo`) and makes its clone's
+   * `origin` read `https://github.com/owner/name.git`, as a real clone's would, so `run` can name
+   * the repo to the service. Fetches and pushes still go to the fixture's bare origin.
+   */
+  hostOnGitHub(fixture: FixtureRepo, options?: AddRepoOptions): Promise<FakeRepo>;
   /** A developer machine for `runCli`: a lasting HOME and a keychain stub (see Machine). */
   machine(options?: MachineOptions): Promise<Machine>;
   /** Runs `testnotary <args>` as a process, pointed at this world's service. */
@@ -106,6 +123,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     );
 
     let service: HttpServer;
+    const clock = createClock();
     // The fake GitHub serves both api.github.com and github.com (device flow) at one URL.
     const config: ServiceConfig = {
       databaseUrl: db.urls.app,
@@ -113,7 +131,11 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       githubWebUrl: github.url,
       githubClientId: github.app.clientId,
       githubWebhookSecret: github.app.webhookSecret,
+      githubAppId: String(github.app.id),
+      githubAppPrivateKey: github.app.privateKey,
+      now: () => clock.now(),
     };
+    const requests: ServiceRequest[] = [];
     if (options.service === "next") {
       const env: Record<string, string | undefined> = {
         ...configToEnv(config),
@@ -137,7 +159,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
         Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
       );
     } else {
-      service = await startInProcessService(config);
+      service = await startInProcessService(config, requests);
     }
     cleanups.push(() => service.close());
     github.app.webhookUrl = `${service.url}/api/v1/github/webhooks`;
@@ -148,14 +170,20 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     });
 
     return {
-      service: { url: service.url },
+      service: { url: service.url, requests },
       github,
       secretsManager,
       sentry,
       db,
+      clock,
       async fixtureRepo(repoOptions) {
         const repo = await FixtureRepo.create(repoOptions);
         repos.push(repo);
+        return repo;
+      },
+      async hostOnGitHub(fixture, repoOptions) {
+        const repo = github.addRepo(fixture, repoOptions);
+        await fixture.pointOriginAt(`https://github.com/${repo.fullName}.git`);
         return repo;
       },
       machine(machineOptions) {
