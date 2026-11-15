@@ -90,6 +90,9 @@ export async function verifyJob(db: Database, job: { claims: ActionsClaims; repo
       detail: decision.detail,
       attestationId: decision.attestation?.id ?? null,
       environment: request.environment,
+      ciRunId: claims.ciRun?.runId ?? null,
+      ciRunAttempt: claims.ciRun?.attempt ?? null,
+      ciJobId: claims.ciRun?.jobId ?? null,
       createdAt: now(),
     })
     .returning({ id: verifications.id });

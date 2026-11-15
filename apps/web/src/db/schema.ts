@@ -329,6 +329,10 @@ export const verifications = pgTable(
     detail: text("detail"),
     attestationId: uuid("attestation_id").references(() => attestations.id),
     environment: jsonb("environment").$type<CiEnvironment>().notNull(),
+    /** The Actions run, its attempt and the job (`run_id`, `run_attempt`, `check_run_id` from the OIDC token): the CI log link. */
+    ciRunId: bigint("ci_run_id", { mode: "number" }),
+    ciRunAttempt: integer("ci_run_attempt"),
+    ciJobId: bigint("ci_job_id", { mode: "number" }),
     createdAt: at("created_at"),
   },
   (table) => [index("verifications_repo").on(table.repoId, table.createdAt)],

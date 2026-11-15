@@ -68,6 +68,29 @@ export const gitRoutes = [
     });
   }),
 
+  // https://docs.github.com/rest/commits/commits#get-a-commit
+  // The commit page reads who wrote a commit through this. GitHub links the author to an account
+  // by email; here a no-reply address (`<id>+<login>@users.noreply.github.com`) of a known user
+  // links, and any other address (the fixtures' `author@fixture.test`) leaves `author` null.
+  route("GET", "/repos/:owner/:repo/commits/:ref", async (context) => {
+    const { params, github } = context;
+    const repo = readableRepo(context);
+    if (repo instanceof Response) return repo;
+    const commit = await readCommit(repo.gitDir, params.ref!);
+    if (!commit) return githubError(422, `No commit found for SHA: ${params.ref}`);
+    const noReply = /^(\d+)\+[^@]+@users\.noreply\.github\.com$/.exec(commit.author.email);
+    const account = noReply ? github.state.accountById(Number(noReply[1])) : undefined;
+    return json(200, {
+      sha: commit.sha,
+      url: `${github.url}/repos/${repo.fullName}/commits/${commit.sha}`,
+      html_url: `https://github.com/${repo.fullName}/commit/${commit.sha}`,
+      commit: { author: commit.author, committer: commit.committer, message: commit.message.replace(/\n$/, ""), tree: { sha: commit.tree } },
+      author: account ? { login: account.login, id: account.id, type: account.type } : null,
+      committer: null,
+      parents: commit.parents.map((sha) => ({ sha, url: `${github.url}/repos/${repo.fullName}/commits/${sha}`, html_url: `https://github.com/${repo.fullName}/commit/${sha}` })),
+    });
+  }),
+
   // https://docs.github.com/rest/commits/commits#compare-two-commits (github-behaviours §5)
   // `{base}...{head}`: the changes from their merge base to `head`, as GitHub lists them. From a
   // pull request's merge commit to its first parent that is the PR's own files, never the

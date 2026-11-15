@@ -21,6 +21,16 @@ export interface ActionsClaims {
   repositoryId: number;
   eventName: string;
   exp: number;
+  /**
+   * Where the job's log is: `run_id`, `run_attempt` and `check_run_id` (the job's id), when the
+   * token carries them as decimal strings. Shown as the CI log link, never used to decide.
+   */
+  ciRun: { runId: number; attempt: number | null; jobId: number | null } | null;
+}
+
+/** A claim GitHub sends as a decimal string (`run_id`, `run_attempt`, `check_run_id`), or null. */
+function numericClaim(value: unknown): number | null {
+  return typeof value === "string" && /^[1-9][0-9]{0,15}$/.test(value) ? Number(value) : null;
 }
 
 // One key set per JWKS URL, so its keys are cached between requests (jose refetches on an unknown
@@ -98,5 +108,7 @@ export async function acceptActionsToken(db: Executor, token: string | undefined
     .onConflictDoNothing()
     .returning({ jti: oidcTokenUses.jti });
   if (spent.length === 0) return rejected("replayed_jti");
-  return { iss, jti, sha, repositoryId: Number(repositoryId), eventName, exp };
+  const runId = numericClaim(payload.run_id);
+  const ciRun = runId === null ? null : { runId, attempt: numericClaim(payload.run_attempt), jobId: numericClaim(payload.check_run_id) };
+  return { iss, jti, sha, repositoryId: Number(repositoryId), eventName, exp, ciRun };
 }
