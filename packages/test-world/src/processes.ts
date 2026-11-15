@@ -3,6 +3,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FakeGitHub } from "./github/server.ts";
 import type { FakeRepo } from "./github/state.ts";
+import type { Machine } from "./machine.ts";
 import { paths } from "./paths.ts";
 
 export type Env = Record<string, string | undefined>;
@@ -20,6 +21,11 @@ export interface RunOptions {
   env?: Env;
   input?: string;
   timeoutMs?: number;
+  /**
+   * The machine to run on (`world.machine()`): its HOME and keychain stub last across calls.
+   * Without one, each call gets a fresh machine.
+   */
+  machine?: Machine;
 }
 
 /**

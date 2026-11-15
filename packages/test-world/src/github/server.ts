@@ -12,12 +12,14 @@ import {
 } from "./app.ts";
 import { OidcIssuer } from "./oidc.ts";
 import { matchPath, notFound, type Route, type RouteHandler } from "./router.ts";
+import { DeviceFlow } from "./device-flow.ts";
 import { gitRoutes } from "./routes/git.ts";
+import { loginRoutes } from "./routes/login.ts";
 import { oidcRoutes } from "./routes/oidc.ts";
 import { GitHubState, type FakeRepo } from "./state.ts";
 
 /** Every endpoint the fake serves. Add a file under routes/ and list it here. */
-const routes: Route[] = [...gitRoutes, ...oidcRoutes];
+const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes];
 
 export interface RecordedRequest {
   method: string;
@@ -25,6 +27,8 @@ export interface RecordedRequest {
   query: Record<string, string>;
   headers: Record<string, string>;
   body: unknown;
+  /** When it arrived, in ms since the epoch. */
+  at: number;
 }
 
 export interface InstallAppOptions {
@@ -62,6 +66,8 @@ export class FakeGitHub {
   readonly requests: RecordedRequest[] = [];
   /** The Testnotary App: client id, webhook secret and webhook URL. */
   readonly app: FakeApp = newApp(this.state.id());
+  /** The device flow behind `testnotary login`: plan approvals with `approveNext`. */
+  readonly deviceFlow = new DeviceFlow();
   /** Every webhook delivered to the App, with the service's answer. */
   readonly deliveries: WebhookDelivery[] = [];
   private readonly overrides: Route[] = [];
@@ -91,6 +97,11 @@ export class FakeGitHub {
       defaultBranch: fixture.defaultBranch,
       gitDir: fixture.remoteDir,
     });
+  }
+
+  /** A person on GitHub, who can sign in through the device flow. */
+  addUser(options: { login: string; id?: number }): FakeAccount {
+    return this.state.account(options.login, "User", options.id);
   }
 
   /**
@@ -235,6 +246,7 @@ export class FakeGitHub {
       query: Object.fromEntries(url.searchParams),
       headers: Object.fromEntries(request.headers),
       body: parseBody(text),
+      at: Date.now(),
     });
     for (const candidate of [...this.overrides, ...routes]) {
       if (candidate.method !== request.method) continue;
