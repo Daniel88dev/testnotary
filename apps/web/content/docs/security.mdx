@@ -1,0 +1,76 @@
+<Lede>How to keep a malicious release or a compromised service out of your CI, and the limits Testnotary accepts.</Lede>
+
+## Pin the action to a commit
+
+<Fact name="actionRef" code /> follows the `v1` tag, which moves with every release. That is convenient, and it means a malicious release would reach your CI with the next job. Pin the action to a full commit SHA instead, with the version in a comment:
+
+<Code snippet="pinned" lang="yaml" file=".github/workflows/ci.yml" />
+
+Take the SHA from the release page of the version you reviewed. Dependabot keeps both the SHA and the comment current: it opens a pull request for each new release, which you read before merging. Turn it on for actions in `.github/dependabot.yml`:
+
+```yaml .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+```
+
+Each release is built from reviewed source by a release job onto its own tagged commit, as an immutable GitHub release, and the npm package is published from the same run with provenance. Pinning is still the only thing that protects you from a release you didn’t read: signatures don’t cover it.
+
+Pin the library too: it is a dev dependency, so your lockfile already holds its exact version and integrity hash, and a change to the lockfile always runs CI.
+
+## Signature mode
+
+By default the action trusts the service’s answer. A repo can remove the service from its trust path by requiring signatures in `testnotary.json` on its base branch:
+
+```json testnotary.json
+{
+  "signatures": "required",
+  "suites": {
+    "unit": { "command": {{test}} }
+  }
+}
+```
+
+The setting lives in the guarded config, never in the service, so a compromised service can’t switch it off.
+
+- **Signing.** On a laptop, the library signs each attestation with the attester’s own **SSH signing key**, the one GitHub lists for their account, using `ssh-keygen -Y sign` under the namespace `attestation@testnotary.dev`. A sandbox signs with its own Ed25519 key made by `testnotary sandbox-key`, whose public half is listed in `.testnotary/allowed_signers` on the base branch. The service stores the signature with the attestation and never sees a private key.
+- **Checking.** Before it trusts a skip, the action checks the signature itself, against keys from GitHub or from `.testnotary/allowed_signers` at the base commit. It passes only when the signature is valid over the exact bytes; the signed tree is the tree CI checked out; the repo id and suite match; the command equals the base config’s; the signature is under <Fact name="attestationAge" /> old and not from the future; the signer can write to the repo; and the pull request changes no guarded file. The checkout needs `fetch-depth: 2`.
+- **Failing.** No signature falls back with `signature_missing`, an invalid one with `signature_invalid` (the line names the failed condition), and a failed or rate-limited GitHub call with `github_unavailable`. The tests run.
+
+A run with no usable key in signature mode still uploads an unsigned attestation, with a warning; it just can’t skip there. In signature mode the service is trusted only for the audit draw and for revocations that don’t remove a key. Deleting a key from GitHub, or a line from `allowed_signers`, stops its attestations within a day at most.
+
+`.testnotary/allowed_signers` is a guarded file: adding a key to it is a pull request your reviewers read, and it never skips its own tests.
+
+## Tokens and credentials
+
+- Tokens are stored only as hashes. A laptop token starts with `tnl_`, a sandbox token with `tns_`, so a leaked one is easy to spot. The hash is cleared when a token is revoked or expires.
+- A laptop token lives in the system keychain (or a file only you can read), lasts <Fact name="laptopTokenLifetime" /> from its last use, and is refused inside an agent sandbox.
+- A sandbox token works for one repo, uploads runs and nothing else, and is shown once.
+- The token never reaches your tests: it isn’t in the stripped environment.
+- The GitHub App asks for **Contents: read** and **Metadata: read** only, and never writes to your repo. The action writes its check run with the workflow’s own `GITHUB_TOKEN`.
+- The action proves which workflow is asking with a short-lived Actions OIDC token, checked against GitHub’s keys only, and used once.
+
+## The limits we accept
+
+Testnotary is open about where its protection ends:
+
+- **A person who controls their machine can fake a pass.** Audits make that detectable, not impossible.
+- **A compromised service can leave audits out undetected in signature mode.** It can no longer make CI skip without a real writer’s signature, but it decides the audit draw.
+- **A repo that doesn’t opt into signatures trusts the service.**
+- **The stale-base hole without strict mode or a merge queue:** a pull request tested against an older base can skip and merge. See [Merge queues and up-to-date branches](/docs/queue).
+- **Codex cloud has no sandbox marker,** so `TESTNOTARY_SANDBOX=1` covers it; a sandbox without a marker or that variable would accept a laptop token.
+- **Hand edits inside `node_modules` go unnoticed.**
+- **A history flag hidden deeper than one script level is left to audits.**
+- An agent that holds a sandbox key can sign anything; the signature protects the record, not the run.
+- Signing doesn’t cover a malicious action release; only pinning to a SHA does.
+
+## Reporting a vulnerability
+
+Please report security problems privately through GitHub’s **Report a vulnerability** on the [Testnotary repository](https://github.com/Daniel88dev/testnotary/security), not in a public issue.
+
+<Next pages="limit data limits audits" />

@@ -1,0 +1,28 @@
+<Lede>When the test job’s setup is the expensive part (containers, a seeded database, a big build), a small gate job asks first, and the whole test job skips.</Lede>
+
+The [inline shape](/docs/setup#action) skips only the test step: checkout, Node setup and the install still run. That’s cheap for most suites. When the setup costs minutes, verify in a job of its own with `mode: verify`, and let the test job depend on it.
+
+<Code snippet="gate" lang="yaml" file=".github/workflows/ci.yml" />
+
+## How it works
+
+- **The gate job** runs only the action, in `mode: verify`. It needs no checkout and no install, and verify mode works on any runner. It outputs `skip` (`true` only for a skip) and `verification` (the id of the verification it made).
+- **The test job** keeps its name, so the required check stays the same. When `skip` is `true`, the job is skipped, and GitHub counts a skipped required check as passing.
+- **When the tests do run,** the test step passes the gate’s `verification` id, so there is still exactly one verification for the job, and the step reports the outcome against it. An audit drawn by the gate runs here too.
+- **If the gate failed** and its `verification` is empty, the test step verifies on its own. Either way the tests run whenever the answer wasn’t a skip.
+
+## Why `!cancelled()` matters
+
+```yaml .github/workflows/ci.yml
+    if: ${{ !cancelled() && needs.testnotary.outputs.skip != 'true' }}
+```
+
+Leave out `!cancelled()` and the condition quietly gains GitHub’s default `success()`. Then, when the gate job fails (an outage, a typo, a runner that died), the test job is skipped instead of run, and a skipped job passes its required check. Every pull request would be waved through with no tests at all. With `!cancelled()` a failed gate means the tests run, which is what Testnotary does with every doubtful case.
+
+## What it doesn’t do
+
+- **No matrix.** A job-level skip on a matrix job breaks its check names; use the inline shape in every leg instead. See [Matrix jobs](/docs/matrix).
+- **Less time saved on the dashboard.** “Test time saved” counts the test command’s duration from job reports, not the setup the gate spared you, so it reads low for this recipe.
+- **Coverage and reports** still need their guard, on `steps.testnotary.outputs.ran` inside the test job. See [Coverage and test reports](/docs/coverage).
+
+<Next pages="matrix coverage how inputs" />

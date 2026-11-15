@@ -4,6 +4,7 @@ export {
   CONFIG_FILE,
   LAPTOP_TOKEN_LIFETIME_DAYS,
   REFUSAL_CODES,
+  SANDBOX_MARKERS,
   baselineOverrides,
   parseConfig,
   strippedEnvironment,

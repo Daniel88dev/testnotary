@@ -1,0 +1,44 @@
+<Lede>Each run gets a fresh, empty `HOME`. Tools that cache under your home directory, such as Playwright’s browsers, need to be told where their cache is.</Lede>
+
+## The scratch HOME
+
+`testnotary run` and `testnotary exec` start the suite in a stripped environment, so your machine’s state doesn’t leak into the result. Here is everything the tests see before your config adds to it:
+
+<BaselineEnvironment />
+
+Then `env.pass` adds the names you list, with their values from the shell, and `env.set` adds fixed values. Nothing else from your shell reaches the tests, and the Testnotary token never does.
+
+Because `HOME` is new each time, anything a tool keeps under `~` starts empty: `~/.cache`, `~/.npmrc`, `~/.config`, a git identity, credentials helpers. Most test suites don’t notice. The ones that do usually want a cache.
+
+## Playwright’s browsers
+
+Playwright looks for its browsers under the home directory by default (`~/.cache/ms-playwright` on Linux, `~/Library/Caches/ms-playwright` on macOS). With a scratch `HOME` it finds none and fails with *Executable doesn’t exist*. Point it at a fixed directory with `PLAYWRIGHT_BROWSERS_PATH` and pass that name through:
+
+```json testnotary.json
+{
+  "env": { "pass": ["PLAYWRIGHT_BROWSERS_PATH"] },
+  "suites": {
+    "e2e": { "command": ["{{pm}}", "run", "test:e2e"] }
+  }
+}
+```
+
+```sh terminal
+$ export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"
+$ {{x}} playwright install chromium
+$ {{x}} testnotary run e2e
+```
+
+Put the `export` in your shell profile. In CI, set the same variable in the job’s `env:` and install the browsers before the action, or cache that directory with `actions/cache`.
+
+## Other caches
+
+The same pattern works for any tool with a cache-location variable: list the variable under `env.pass` and set it in your shell and in CI. For example `CYPRESS_CACHE_FOLDER`, `PUPPETEER_CACHE_DIR`, or a test runner’s own cache directory. Caches inside the repo (such as `node_modules/.vite`) are unaffected, as long as they are ignored by git.
+
+Keep the cache to things that don’t change results: browsers and compilers, not test fixtures or snapshots.
+
+## Locale and time zone
+
+`TZ=UTC` and `LANG=C.UTF-8` make date and string-sorting tests behave the same on every machine. If your suite really needs another value, set it with `env.set`; the run then records the override, and the run page shows it.
+
+<Next pages="services shell build config" />
