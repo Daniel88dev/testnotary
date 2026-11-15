@@ -1,6 +1,6 @@
-# Vouch
+# Testnotary
 
-Vouch lets CI skip its test job for a commit whose tests already passed on a developer's or an agent's machine. "Vouch" is a working name.
+Testnotary lets CI skip its test job for a commit whose tests already passed on a developer's or an agent's machine.
 
 ## Language
 
@@ -10,7 +10,7 @@ _Avoid_: Test result, execution, job
 
 **Attestation**:
 The signed record that a run passed for one commit.
-_Avoid_: Test result, signoff, proof, certificate
+_Avoid_: Test result, signoff, proof, certificate, notarization, seal
 
 **Verification**:
 The CI action asking the service whether a valid attestation covers the commit CI is building.

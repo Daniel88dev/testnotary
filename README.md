@@ -1,2 +1,3 @@
-# vouch
-Working name. Local test attestations that let CI skip checks it can trust.
+# Testnotary
+
+Local test attestations that let CI skip a test job it can trust.
