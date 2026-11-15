@@ -7,7 +7,7 @@ import { UsageError, parseCommandArgs, type Command } from "../command.ts";
 import { readCheckout } from "../git.ts";
 import { finish, say, type RunReport } from "../report.ts";
 import { CONFIG_FILE, parseConfig, suiteFromConfig, suiteNames, type RefusalCode } from "../shared.ts";
-import { runSuiteCommand } from "../suite-command.ts";
+import { displayArgv, runSuiteCommand } from "../suite-command.ts";
 
 export const exec: Command = {
   name: "exec",
@@ -66,8 +66,3 @@ export const exec: Command = {
     return report({ outcome: passed ? "passed" : "failed", exitCode: result.exitCode, durationMs: result.durationMs });
   },
 };
-
-/** The argv as a reader would type it: arguments with spaces or quotes in single quotes. */
-function displayArgv(argv: string[]): string {
-  return argv.map((arg) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`)).join(" ");
-}

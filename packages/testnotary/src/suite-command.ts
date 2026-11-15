@@ -64,6 +64,11 @@ export async function runSuiteCommand(options: SuiteCommandOptions): Promise<Sui
   }
 }
 
+/** The argv as a reader would type it: arguments with spaces or quotes in single quotes. */
+export function displayArgv(argv: string[]): string {
+  return argv.map((arg) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`)).join(" ");
+}
+
 /** Whether `program` resolves to an executable file: as a path when it has a slash, else on `PATH`. */
 async function findProgram(program: string, cwd: string, path: string | undefined): Promise<boolean> {
   if (program.includes("/")) return isExecutableFile(isAbsolute(program) ? program : resolve(cwd, program));

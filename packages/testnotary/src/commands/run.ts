@@ -17,7 +17,7 @@ import {
   type CompletedRunUpload,
   type RefusalCode,
 } from "../shared.ts";
-import { runSuiteCommand } from "../suite-command.ts";
+import { displayArgv, runSuiteCommand } from "../suite-command.ts";
 
 export const run: Command = {
   name: "run",
@@ -190,9 +190,4 @@ function completedRecord(
     };
   }
   return record;
-}
-
-/** The argv as a reader would type it: arguments with spaces or quotes in single quotes. */
-function displayArgv(argv: string[]): string {
-  return argv.map((arg) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`)).join(" ");
 }
