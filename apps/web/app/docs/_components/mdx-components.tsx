@@ -51,10 +51,11 @@ function Part({ id, title, lede, children }: { id: string; title: string; lede?:
   );
 }
 
-/** A numbered step; numbering continues across parts. */
-function Step({ id, title, who, where, children }: { id: string; title: string; who: string; where: string; children: ReactNode }) {
+/** A numbered step; the number (set by src/docs/mdx.ts) continues across parts. */
+function Step({ id, title, who, where, number, children }: { id: string; title: string; who: string; where: string; number?: string; children: ReactNode }) {
   return (
     <li className="step" id={id}>
+      <span className="num">{number}</span>
       <h3>{title}</h3>
       <p className="who">
         {who} · {where}

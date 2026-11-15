@@ -17,6 +17,12 @@ importers:
       '@playwright/test':
         specifier: ^1.65.0
         version: 1.65.0
+      '@testnotary/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@testnotary/protocol':
+        specifier: workspace:*
+        version: link:packages/protocol
       '@testnotary/test-world':
         specifier: workspace:*
         version: link:packages/test-world

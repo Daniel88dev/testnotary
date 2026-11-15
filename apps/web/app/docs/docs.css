@@ -48,7 +48,7 @@ html:has(.docs) { scroll-padding-top: 96px; }
 .docs .no-match { font-size: 15px; color: var(--muted); }
 
 /* The page */
-.docs .article { padding: 56px 0 160px; min-width: 0; max-width: 780px; counter-reset: s; }
+.docs .article { padding: 56px 0 160px; min-width: 0; max-width: 780px; }
 .docs .a-head h1 { font-size: clamp(40px, 5vw, 64px); letter-spacing: -0.045em; }
 .docs .crumb { font-size: 15px; color: var(--muted); margin-bottom: 12px; }
 .docs .prose { margin-top: 28px; display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
@@ -67,8 +67,8 @@ html:has(.docs) { scroll-padding-top: 96px; }
 .docs .part > h2 { font-size: clamp(30px, 3.2vw, 40px); }
 .docs .part-lede { margin-top: 10px; color: var(--muted); font-size: 18px; }
 .docs .steps { list-style: none; margin: 40px 0 0; padding: 0; display: grid; gap: 72px; }
-.docs .step { counter-increment: s; position: relative; padding-left: 56px; }
-.docs .step::before { content: counter(s); position: absolute; left: 0; top: -2px; width: 34px; height: 34px; border-radius: 50%; background: var(--raised); color: var(--skip); font: 600 16px/34px var(--sans); text-align: center; }
+.docs .step { position: relative; padding-left: 56px; }
+.docs .step > .num { position: absolute; left: 0; top: -2px; width: 34px; height: 34px; border-radius: 50%; background: var(--raised); color: var(--skip); font: 600 16px/34px var(--sans); text-align: center; }
 .docs .step h3 { font-size: 26px; letter-spacing: -0.025em; line-height: 1.2; }
 .docs .who { margin-top: 6px; font-size: 15px; color: var(--muted); }
 .docs .flow { margin-top: 20px; display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); min-width: 0; }

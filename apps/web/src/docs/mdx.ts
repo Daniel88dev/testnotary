@@ -50,6 +50,7 @@ function remarkDocs() {
   return (tree: Node, file: { data: Record<string, unknown> }) => {
     const toc: TocEntry[] = [];
     const slugger = new GithubSlugger();
+    let steps = 0;
     const visit = (node: Node, parent: Node | undefined, index: number) => {
       if (node.type === "code" && parent?.children) {
         const attributes = [{ type: "mdxJsxAttribute", name: "text", value: node.value ?? "" }];
@@ -68,6 +69,8 @@ function remarkDocs() {
         const id = attribute(node, "id");
         const title = attribute(node, "title");
         if (id && title) toc.push({ id, title, level: node.name === "Part" ? 2 : 3 });
+        // Steps are numbered through the whole page, across parts.
+        if (node.name === "Step") node.attributes?.push({ type: "mdxJsxAttribute", name: "number", value: String(++steps) });
       }
       node.children?.forEach((child, i) => visit(child, node, i));
     };

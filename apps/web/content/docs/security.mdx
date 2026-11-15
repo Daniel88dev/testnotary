@@ -42,7 +42,7 @@ The setting lives in the guarded config, never in the service, so a compromised 
 - **Checking.** Before it trusts a skip, the action checks the signature itself, against keys from GitHub or from `.testnotary/allowed_signers` at the base commit. It passes only when the signature is valid over the exact bytes; the signed tree is the tree CI checked out; the repo id and suite match; the command equals the base config’s; the signature is under <Fact name="attestationAge" /> old and not from the future; the signer can write to the repo; and the pull request changes no guarded file. The checkout needs `fetch-depth: 2`.
 - **Failing.** No signature falls back with `signature_missing`, an invalid one with `signature_invalid` (the line names the failed condition), and a failed or rate-limited GitHub call with `github_unavailable`. The tests run.
 
-A run with no usable key in signature mode still uploads an unsigned attestation, with a warning; it just can’t skip there. In signature mode the service is trusted only for the audit draw and for revocations that don’t remove a key. Deleting a key from GitHub, or a line from `allowed_signers`, stops its attestations within a day at most.
+A run with no usable key in signature mode still uploads an unsigned attestation, with a warning; it just can’t skip there. In signature mode the service is trusted only for the audit draw and for revocations that don’t remove a key. Deleting a key from GitHub, or a line from `.testnotary/allowed_signers`, stops its attestations within a day at most.
 
 `.testnotary/allowed_signers` is a guarded file: adding a key to it is a pull request your reviewers read, and it never skips its own tests.
 
