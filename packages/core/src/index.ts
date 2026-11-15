@@ -16,6 +16,23 @@ export {
 } from "./config.ts";
 export { REFUSAL_CODES, type Outcome, type RefusalCode } from "./outcome.ts";
 export {
+  ATTESTATION_MAX_AGE_MS,
+  FALLBACK_REASONS,
+  VERIFICATION_RESULTS,
+  VERIFICATION_STEPS,
+  decideVerification,
+  resultFor,
+  type AttestationCandidate,
+  type FallbackReason,
+  type VerificationDecision,
+  type VerificationInput,
+  type VerificationOrder,
+  type VerificationResult,
+  type VerificationSources,
+  type VerificationState,
+  type VerificationStep,
+} from "./verification/index.ts";
+export {
   BASELINE_FIXED,
   BASELINE_NAMES,
   BASELINE_OVERRIDABLE,

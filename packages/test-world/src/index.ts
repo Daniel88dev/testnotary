@@ -16,7 +16,7 @@ import type { AddRepoOptions } from "./github/server.ts";
 import type { FakeRepo } from "./github/state.ts";
 import { createMachine, type Machine, type MachineOptions } from "./machine.ts";
 import { createClock, type WorldClock } from "./clock.ts";
-import { configToEnv, type ServiceConfig } from "@testnotary/web/config";
+import { configToEnv, type LogEntry, type ServiceConfig } from "@testnotary/web/config";
 
 export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-repo.ts";
 export { FakeGitHub, type AddRepoOptions, type InstallAppOptions, type RecordedRequest, type RepositoryAction } from "./github/server.ts";
@@ -24,6 +24,7 @@ export type { DeliverOptions, FakeAccount, FakeApp, FakeInstallation, WebhookDel
 export type { DeviceFlow, DevicePlan, IssuedDeviceCode } from "./github/device-flow.ts";
 export type { FakeRepo, RepoPermission } from "./github/state.ts";
 export type { ServiceRequest } from "./service.ts";
+export type { LogEntry } from "@testnotary/web/config";
 export { FakeSecretsManager, type SecretsManagerRequest } from "./aws/secrets-manager.ts";
 export { FakeSentry, type SentryEnvelope, type SentryEvent } from "./sentry.ts";
 export { OIDC_LIFETIME_SECONDS, type ActionsJob } from "./github/oidc.ts";
@@ -66,9 +67,11 @@ export function worldSecretId(name: string): string {
 export interface World {
   /**
    * The service. `requests` holds every request it received, body text included, in order (the
-   * in-process service only): assert on what a run sent here, never on what it stored.
+   * in-process service only): assert on what a run sent here, never on what it stored. `logs`
+   * holds every entry the service wrote to its log (in-process service only; under `next` the
+   * entries go to the child's stdout as in production).
    */
-  service: { url: string; requests: ServiceRequest[] };
+  service: { url: string; requests: ServiceRequest[]; logs: LogEntry[] };
   github: FakeGitHub;
   /** AWS Secrets Manager, for the `next` service (the in-process service reads no secrets). */
   secretsManager: FakeSecretsManager;
@@ -124,6 +127,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
 
     let service: HttpServer;
     const clock = createClock();
+    const logs: LogEntry[] = [];
     // The fake GitHub serves both api.github.com and github.com (device flow) at one URL.
     const config: ServiceConfig = {
       databaseUrl: db.urls.app,
@@ -133,8 +137,13 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       githubWebhookSecret: github.app.webhookSecret,
       githubAppId: String(github.app.id),
       githubAppPrivateKey: github.app.privateKey,
+      actionsOidcIssuer: github.oidc.issuer,
       now: () => clock.now(),
+      log: (entry) => logs.push(entry),
     };
+    // GitHub's OIDC issuer keeps the world's time too, so a job after `clock.advance` gets a token
+    // the service (on the same clock) finds fresh.
+    github.oidc.now = () => Math.floor(clock.now().getTime() / 1000);
     const requests: ServiceRequest[] = [];
     if (options.service === "next") {
       const env: Record<string, string | undefined> = {
@@ -170,7 +179,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     });
 
     return {
-      service: { url: service.url, requests },
+      service: { url: service.url, requests, logs },
       github,
       secretsManager,
       sentry,

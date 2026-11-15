@@ -36,6 +36,21 @@ export {
   type ServiceRefusal,
 } from "./run.ts";
 export {
+  ACTIONS_OIDC_ISSUER,
+  OIDC_AUDIENCE,
+  VERIFY_REFUSALS,
+  ciEnvironment,
+  verification,
+  verificationResult,
+  verifyRequest,
+  verifyResponse,
+  type CiEnvironment,
+  type Verification,
+  type VerifyRefusal,
+  type VerifyRequest,
+  type VerifyResponse,
+} from "./verification.ts";
+export {
   LINKS,
   account,
   apiError,

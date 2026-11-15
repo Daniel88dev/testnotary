@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { ACTIONS_OIDC_ISSUER } from "@testnotary/protocol";
 
 /** What the service needs from its surroundings. Later tickets add fields here. */
 export interface ServiceConfig {
@@ -17,17 +18,41 @@ export interface ServiceConfig {
   /** The App's private key, PEM (a secret). Without it the service can't check write access. */
   githubAppPrivateKey: string | undefined;
   /**
+   * GitHub Actions' OIDC issuer, which every verification token's `iss` must name. Its keys come
+   * from `<issuer>/.well-known/jwks` only, never from discovery on a token's `iss`. Production keeps
+   * the default; the test world points it at its fake GitHub.
+   */
+  actionsOidcIssuer: string;
+  /**
    * The service's clock. Everything the service decides by time (token renewal and expiry, run
    * receipt, attestation age) reads it here, never `new Date()`, so the test world can move it.
    * Not an environment setting: a deployment always uses real time.
    */
   now: () => Date;
+  /**
+   * Where the service's log goes (`logEvent` in log.ts). Not an environment setting: a deployment
+   * writes JSON lines to stdout, which the host keeps; the test world collects the entries.
+   */
+  log: (entry: LogEntry) => void;
+}
+
+/** One line of the service's log. */
+export interface LogEntry {
+  level: "info" | "warn";
+  /** A stable snake_case name, e.g. `token_rejected`. */
+  event: string;
+  [field: string]: unknown;
+}
+
+/** The deployed service's log: a JSON line on stdout, with the real time. */
+export function stdoutLog(entry: LogEntry): void {
+  process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
 }
 
 const scoped = new AsyncLocalStorage<ServiceConfig>();
 
-/** The settings that come from the environment, by variable name. `now` is not one of them. */
-type EnvSetting = Exclude<keyof ServiceConfig, "now">;
+/** The settings that come from the environment, by variable name. `now` and `log` are not. */
+type EnvSetting = Exclude<keyof ServiceConfig, "now" | "log">;
 
 const ENV = {
   databaseUrl: "DATABASE_URL",
@@ -37,6 +62,7 @@ const ENV = {
   githubWebhookSecret: "GITHUB_WEBHOOK_SECRET",
   githubAppId: "GITHUB_APP_ID",
   githubAppPrivateKey: "GITHUB_APP_PRIVATE_KEY",
+  actionsOidcIssuer: "ACTIONS_OIDC_ISSUER",
 } as const satisfies Record<EnvSetting, string>;
 
 export function realClock(): Date {
@@ -52,7 +78,9 @@ export function configFromEnv(env: Readonly<Record<string, string | undefined>>)
     githubWebhookSecret: env[ENV.githubWebhookSecret] || undefined,
     githubAppId: env[ENV.githubAppId] || undefined,
     githubAppPrivateKey: env[ENV.githubAppPrivateKey] || undefined,
+    actionsOidcIssuer: (env[ENV.actionsOidcIssuer] || ACTIONS_OIDC_ISSUER).replace(/\/+$/, ""),
     now: realClock,
+    log: stdoutLog,
   };
 }
 

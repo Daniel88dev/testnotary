@@ -161,6 +161,38 @@ export async function collaboratorPermission(token: string, fullName: string, lo
   return permission === "admin" || permission === "write" || permission === "read" ? permission : "none";
 }
 
+/**
+ * `GET /repos/{owner}/{repo}/git/commits/{sha}` (§4): the commit's tree and parents, or undefined
+ * when GitHub has no such commit. A commit object never changes, so this answer can't go stale.
+ */
+export async function gitCommit(token: string, fullName: string, sha: string): Promise<{ tree: string; parents: string[] } | undefined> {
+  const response = await call(`${serviceConfig().githubApiUrl}/repos/${fullName}/git/commits/${encodeURIComponent(sha)}`, withToken(token));
+  if (response.status === 404 || response.status === 422) return undefined;
+  if (!response.ok) return failure(response, "the git commits call");
+  const body = await jsonBody(response);
+  const tree = (body.tree as { sha?: unknown } | undefined)?.sha;
+  const parents: unknown[] | undefined = Array.isArray(body.parents) ? body.parents.map((parent: { sha?: unknown }) => parent.sha) : undefined;
+  if (typeof tree !== "string" || !parents?.every((sha): sha is string => typeof sha === "string")) {
+    throw new GitHubUnavailable("the git commits call answered without a tree or parents");
+  }
+  return { tree, parents };
+}
+
+/**
+ * `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}` (§6): one file's text at a commit, or
+ * undefined when the commit has no such file.
+ */
+export async function fileAt(token: string, fullName: string, path: string, ref: string): Promise<string | undefined> {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const response = await call(`${serviceConfig().githubApiUrl}/repos/${fullName}/contents/${encoded}?ref=${encodeURIComponent(ref)}`, withToken(token));
+  if (response.status === 404) return undefined;
+  if (!response.ok) return failure(response, "the contents call");
+  const body = await jsonBody(response);
+  if (body.type !== "file" || typeof body.content !== "string") return undefined;
+  if (body.encoding !== "base64") throw new GitHubUnavailable(`the contents call answered in ${String(body.encoding)} encoding`);
+  return Buffer.from(body.content, "base64").toString("utf8");
+}
+
 /** `GET /user` with the person's `ghu_` token, the one call the service ever makes with it. */
 export async function fetchUser(userToken: string): Promise<GitHubUser> {
   const response = await call(`${serviceConfig().githubApiUrl}/user`, {

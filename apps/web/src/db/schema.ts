@@ -6,7 +6,7 @@
 // login), each change is a row carrying the whole state after it, and the latest row per key is
 // the current state. GitHub ids are the keys for everything that comes from GitHub.
 import { bigint, boolean, customType, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
-import type { RunEnvironment } from "@testnotary/protocol";
+import type { CiEnvironment, RunEnvironment } from "@testnotary/protocol";
 
 const githubId = (name: string) => bigint(name, { mode: "number" });
 const at = (name = "at") => timestamp(name, { withTimezone: true, mode: "date" }).notNull().defaultNow();
@@ -261,3 +261,42 @@ export const tokenRevocations = pgTable("token_revocations", {
   reason: text("reason").notNull(),
   at: at(),
 });
+
+/**
+ * Every Actions OIDC token the service accepted, by its `jti`: a second use of one is a replay and
+ * is rejected. `expiresAt` is the token's `exp`; the retention job may delete rows once it has passed.
+ */
+export const oidcTokenUses = pgTable("oidc_token_uses", {
+  jti: text("jti").primaryKey(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  at: at(),
+});
+
+/**
+ * One verification: a CI job asked whether an attestation names the tree it builds. `commit` is the
+ * OIDC `sha`, `tree` its tree from GitHub's commits API, `iss` the token's issuer. `result` is the
+ * action's result (`skip`, `would_skip`, `fallback`, …) and `reason` its fallback reason code.
+ * `attestationId` is the attestation matched, also when a later step refused it. `environment` is
+ * the runner's, as the action sent it. Hard-deleted at 90 days (retention ticket).
+ */
+export const verifications = pgTable(
+  "verifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    repoId: githubId("repo_id")
+      .notNull()
+      .references(() => repos.githubId),
+    suite: text("suite"),
+    commit: text("commit").notNull(),
+    tree: text("tree").notNull(),
+    event: text("event").notNull(),
+    iss: text("iss").notNull(),
+    mode: text("mode").notNull(),
+    result: text("result").notNull(),
+    reason: text("reason"),
+    attestationId: uuid("attestation_id").references(() => attestations.id),
+    environment: jsonb("environment").$type<CiEnvironment>().notNull(),
+    createdAt: at("created_at"),
+  },
+  (table) => [index("verifications_repo").on(table.repoId, table.createdAt)],
+);
