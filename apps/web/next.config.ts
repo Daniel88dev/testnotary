@@ -7,8 +7,9 @@ const nextConfig: NextConfig = {
   // `next dev` otherwise writes an AGENTS.md into apps/web on every start.
   agentRules: false,
   transpilePackages: ["@testnotary/core", "@testnotary/protocol"],
-  // The docs read their MDX from content/docs; keep it in the standalone output too.
-  outputFileTracingIncludes: { "/docs/**": ["./content/docs/**/*"] },
+  // The docs read their MDX from content/docs, and the legal pages and the dashboard's
+  // material-change line read content/legal; keep both in the standalone output too.
+  outputFileTracingIncludes: { "/docs/**": ["./content/docs/**/*"], "/**": ["./content/legal/**/*"] },
 };
 
 export default nextConfig;

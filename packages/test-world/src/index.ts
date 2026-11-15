@@ -159,6 +159,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       githubAppId: String(github.app.id),
       githubAppPrivateKey: github.app.privateKey,
       actionsOidcIssuer: github.oidc.issuer,
+      legalDir: undefined,
       now: () => clock.now(),
       log: (entry) => logs.push(entry),
     };

@@ -1,5 +1,6 @@
 import type { DevicePollRequest, DevicePollResponse, DeviceStartResponse, GitHubDeniedCause } from "@testnotary/protocol";
 import { database } from "../db/client.ts";
+import { isSuspended } from "./accounts.ts";
 import { fetchUser, GitHubUnavailable, pollDeviceCode, requestDeviceCode } from "./github.ts";
 import { authenticateToken, issueLaptopToken, rememberAccount, revokeToken } from "./tokens.ts";
 
@@ -37,6 +38,9 @@ export async function pollLogin(request: DevicePollRequest): Promise<DevicePollR
   }
 
   const account = { id: user.id, login: user.login };
+  if (await isSuspended(database(), account.id)) {
+    return failed("account_suspended", "The operator has suspended this account for breaking the terms, so it is issued no token.");
+  }
   return database().transaction(async (tx) => {
     await rememberAccount(tx, account);
     // One laptop token per machine: the one this machine held before is revoked.
@@ -56,6 +60,6 @@ function deniedCause(message: string): GitHubDeniedCause {
   return "unknown";
 }
 
-function failed(error: "expired_token" | "access_denied" | "github_unavailable", message: string): DevicePollResponse {
+function failed(error: "expired_token" | "access_denied" | "github_unavailable" | "account_suspended", message: string): DevicePollResponse {
   return { status: "failed", error, message };
 }
