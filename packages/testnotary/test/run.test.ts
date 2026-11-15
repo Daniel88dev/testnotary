@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { FakeAccount, FakeRepo, FixtureRepo, Machine, ProcessResult } from "@testnotary/test-world";
@@ -178,6 +179,87 @@ describe("what a run uploads", () => {
     const [upload] = uploadsSince(mark);
     expect(upload).toMatchObject({ outcome: "failed", exitCode: 3, suite: "test", tree: await dev.fixture.tree() });
     expect(upload).not.toHaveProperty("attestation");
+  });
+
+  test("nothing on the never-sent list leaves the machine: log, file lists, env values, hostname, username, local paths", async () => {
+    const LOG = "log-line-7f3a9c";
+    const VALUE = "secret-value-41d2e8";
+    const USERNAME = "maria-local-5b1c";
+    const FILE = "src/only-on-this-machine-93ac.js";
+    const config = { env: { pass: ["DATABASE_PASSWORD"] }, suites: { test: { command: ["node", "print.js"] } } };
+    // The test prints the log line without spelling it out in the command or a file name.
+    const print = `const line = ["log", "line", "7f3a9c"].join("-"); console.log(line); console.error(line);\n`;
+    const dev = await developer({ config, files: { "print.js": print, [FILE]: "export {};\n", ".gitignore": ".env.local\n" } });
+    await dev.fixture.write({ ".env.local": `DATABASE_PASSWORD=${VALUE}\n` });
+    const mark = world.service.requests.length;
+
+    const result = await dev.run([], { DATABASE_PASSWORD: VALUE, USER: USERNAME, LOGNAME: USERNAME });
+
+    expect(result.exitCode).toBe(0);
+    expect(summary(result).attested).toBe("true");
+    expect(result.stdout + result.stderr).toContain(LOG);
+    const sent = world.service.requests.slice(mark);
+    expect(sent.map((request) => request.path)).toEqual(["/api/v1/preflight", "/api/v1/runs"]);
+    const everything = JSON.stringify(sent.map((request) => ({ headers: request.headers, body: request.text })));
+    const never = [LOG, VALUE, USERNAME, "only-on-this-machine", ".env.local", dev.fixture.dir, dev.fixture.remoteDir, dev.machine.home, tmpdir()];
+    if (hostname().length >= 4) never.push(hostname());
+    for (const text of never) expect(everything).not.toContain(text);
+    const [upload] = uploadsSince(mark);
+    // Names of passed variables are recorded; their values never are.
+    expect(upload!.passedEnv).toEqual(["DATABASE_PASSWORD"]);
+    expect(Object.keys(upload!).sort()).toEqual(
+      [
+        "attestation",
+        "baselineOverrides",
+        "command",
+        "commit",
+        "durationMs",
+        "endedAt",
+        "environment",
+        "exitCode",
+        "guardedMatched",
+        "notPinned",
+        "outcome",
+        "passedEnv",
+        "repository",
+        "session",
+        "startedAt",
+        "suite",
+        "tree",
+        "warnings",
+      ].sort(),
+    );
+    expect(Object.keys(upload!.environment as object).sort()).toEqual(["arch", "locale", "node", "os", "osVersion", "packageManager", "tz"]);
+  });
+
+  test("the stored attestation keeps the canonical payload's bytes exactly as uploaded", async () => {
+    const command = ["node", "-e", "process.exit(0)", "žluťoučký kůň 🐎"];
+    const dev = await developer({ config: { suites: { unit: { command } } } });
+    const mark = world.service.requests.length;
+
+    const result = await dev.run();
+
+    expect(summary(result).attested).toBe("true");
+    const [upload] = uploadsSince(mark);
+    const sent = (upload!.attestation as { payload: string }).payload;
+    const stored = await storedRun(await dev.token(), summary(result).url!);
+    expect(stored.attestation!.format).toBe("testnotary.attestation/v1");
+    expect(Buffer.from(stored.attestation!.payload, "utf8").equals(Buffer.from(sent, "utf8"))).toBe(true);
+    // Canonical v1: fixed key order, no whitespace, ASCII only (the label's letters as \u escapes).
+    expect(sent).toBe(
+      JSON.stringify({
+        format: "testnotary.attestation/v1",
+        repository: dev.repo.id,
+        suite: "unit",
+        command,
+        tree: await dev.fixture.tree(),
+        commit: await dev.fixture.revParse("HEAD"),
+        outcome: "passed",
+        attester: { account: dev.user.id, token: (stored.run.token as { id: string }).id, tokenKind: "laptop" },
+        endedAt: upload!.endedAt,
+      }).replace("žluťoučký kůň 🐎", "\\u017elu\\u0165ou\\u010dk\\u00fd k\\u016f\\u0148 \\ud83d\\udc0e"),
+    );
+    expect(/^[\x20-\x7e]*$/.test(sent)).toBe(true);
   });
 
   test("a refused run uploads only its refusal code, tree and commit", async () => {
