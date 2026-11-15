@@ -257,7 +257,7 @@ export const tokenRevocations = pgTable("token_revocations", {
     .references(() => tokens.id),
   /** The account that revoked it, when an admin or owner did so in the dashboard; null when the bearer did (`logout`, or a new sign-in on the same machine). */
   revokedBy: githubId("revoked_by").references(() => accounts.githubId),
-  /** `logout`, `replaced` (a new sign-in on the same machine), `revoked` (its owner, on the Tokens page), and whatever later tickets add. */
+  /** `logout`, `replaced` (a new sign-in on the same machine), `revoked` (its owner, in the dashboard), `repo_removed` (a sandbox token whose repo left Testnotary), and whatever later tickets add. */
   reason: text("reason").notNull(),
   at: at(),
 });

@@ -17,7 +17,10 @@ import type { AddRepoOptions } from "./github/server.ts";
 import type { FakeRepo } from "./github/state.ts";
 import { createMachine, type Machine, type MachineOptions } from "./machine.ts";
 import { createClock, type WorldClock } from "./clock.ts";
-import { configToEnv, type LogEntry, type ServiceConfig } from "@testnotary/web/config";
+import { configToEnv, withServiceConfig, type LogEntry, type ServiceConfig } from "@testnotary/web/config";
+import { closeDatabase, database } from "@testnotary/web/db";
+import { issueSandboxToken } from "@testnotary/web/tokens";
+import type { FakeAccount } from "./github/app.ts";
 
 export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-repo.ts";
 export { FakeGitHub, type AddRepoOptions, type InstallAppOptions, type RecordedRequest, type RepositoryAction } from "./github/server.ts";
@@ -93,6 +96,12 @@ export interface World {
   hostOnGitHub(fixture: FixtureRepo, options?: AddRepoOptions): Promise<FakeRepo>;
   /** A developer machine for `runCli`: a lasting HOME and a keychain stub (see Machine). */
   machine(options?: MachineOptions): Promise<Machine>;
+  /**
+   * A sandbox token `creator` made for `repo`, as the dashboard makes one once it has checked their
+   * write access (the browser tests create them through the dashboard itself). Returns the value,
+   * the one time it is shown. `days` defaults to 90.
+   */
+  sandboxToken(options: { creator: FakeAccount; repo: FakeRepo; name?: string; days?: number }): Promise<string>;
   /** Runs `testnotary <args>` as a process, pointed at this world's service. */
   runCli(args: string[], options: RunOptions): Promise<ProcessResult>;
   /** Runs the action's entry point as a process in a simulated runner. */
@@ -188,6 +197,8 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     cleanups.push(() => service.close());
     github.app.webhookUrl = `${service.url}/api/v1/github/webhooks`;
 
+    // The `next` service has its own connections; this process opens one only for `sandboxToken`.
+    let sandboxTokensUsed = false;
     const repos: FixtureRepo[] = [];
     cleanups.push(async () => {
       await Promise.all(repos.map((repo) => repo.remove()));
@@ -212,6 +223,16 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       },
       machine(machineOptions) {
         return createMachine(tmp, machineOptions);
+      },
+      async sandboxToken({ creator, repo, name = "agent sandbox", days = 90 }) {
+        if (options.service === "next" && !sandboxTokensUsed) {
+          sandboxTokensUsed = true;
+          cleanups.push(() => closeDatabase(config.databaseUrl));
+        }
+        const issued = await withServiceConfig(config, () =>
+          issueSandboxToken(database(), { creator: { id: creator.id, login: creator.login }, repoId: repo.id, name, days }),
+        );
+        return issued.value;
       },
       async runCli(args, runOptions) {
         const machine = runOptions.machine ?? (await createMachine(tmp));

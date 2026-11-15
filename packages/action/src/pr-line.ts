@@ -142,9 +142,22 @@ function details(env: RunnerEnv, verdict: Verdict, tests: TestsRan | null): stri
   if (record?.attestation) {
     const url = runPageUrl(resolveServiceUrl(env), record.repository.fullName, record.attestation.run.id);
     lines.push(`- Attested run: [${escape(record.attestation.run.id)}](${url})`);
+    const session = record.attestation.run.session;
+    if (session) lines.push(`- Agent session (unverified): ${sessionLabels(session)}`);
   }
   if (record) lines.push(`- Verification: \`${record.id}\``);
   return lines.join("\n");
+}
+
+/**
+ * The labels the run uploaded about its agent session. Anything can set them, so none is trusted
+ * with Markdown: the URL sits in a code span, which GitHub never turns into a link.
+ */
+function sessionLabels(session: { vendor: string; id: string | null; url: string | null }): string {
+  const parts = [escape(oneLine(session.vendor))];
+  if (session.id) parts.push(`session ${escape(oneLine(session.id))}`);
+  if (session.url) parts.push(`\`${oneLine(session.url).replace(/`/g, "")}\``);
+  return parts.join(", ");
 }
 
 /** `just now`, `9 min ago`, `3 h ago`, `25 h ago`. */

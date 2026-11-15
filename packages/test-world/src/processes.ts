@@ -27,6 +27,11 @@ export interface RunOptions {
    * Without one, each call gets a fresh machine.
    */
   machine?: Machine;
+  /**
+   * Absolute paths that exist on this machine for the process (`existsSync` sees them), such as
+   * `/opt/.devin`, the file a Devin sandbox has. Nothing is written there.
+   */
+  rootFiles?: string[];
 }
 
 /**
@@ -39,8 +44,13 @@ export function runNode(entry: string, args: string[], options: RunOptions & { b
     if (value === undefined) delete env[key];
     else env[key] = value;
   }
+  const preload: string[] = [];
+  if (options.rootFiles?.length) {
+    preload.push("--import", paths.rootFilesPreload);
+    env.TESTNOTARY_WORLD_ROOT_FILES = JSON.stringify(options.rootFiles);
+  }
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", entry, ...args], {
+    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", ...preload, entry, ...args], {
       cwd: options.cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],

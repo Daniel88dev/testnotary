@@ -11,6 +11,7 @@
   "exports": {
     "./config": "./src/server/config.ts",
     "./db": "./src/db/client.ts",
+    "./tokens": "./src/server/tokens.ts",
     "./migrate": "./src/db/migrate.ts",
     "./package.json": "./package.json"
   },
