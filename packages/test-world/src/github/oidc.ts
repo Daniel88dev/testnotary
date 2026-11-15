@@ -2,6 +2,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { exportJWK, generateKeyPair, SignJWT, type JWK, type JWTPayload } from "jose";
 import type { FakeRepo } from "./state.ts";
 
+type SigningKey = Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
+
 /** What a simulated Actions job looks like to the OIDC issuer. */
 export interface ActionsJob {
   repo: FakeRepo;
@@ -29,12 +31,16 @@ export const OIDC_LIFETIME_SECONDS = 300;
  * runner exposes as `ACTIONS_ID_TOKEN_REQUEST_URL` / `ACTIONS_ID_TOKEN_REQUEST_TOKEN`.
  */
 export class OidcIssuer {
-  private keys: Promise<{ privateKey: CryptoKey; jwk: JWK }> | undefined;
+  private keys: Promise<{ privateKey: SigningKey; jwk: JWK }> | undefined;
   private readonly jobs = new Map<string, ActionsJob>();
   /** Seconds since the epoch; replace to issue tokens from another moment. */
   now: () => number = () => Math.floor(Date.now() / 1000);
 
-  constructor(private readonly baseUrl: () => string) {}
+  private readonly baseUrl: () => string;
+
+  constructor(baseUrl: () => string) {
+    this.baseUrl = baseUrl;
+  }
 
   /** `https://token.actions.githubusercontent.com` in production. */
   get issuer(): string {

@@ -58,6 +58,7 @@ export async function startPostgresServer(runner: string): Promise<StartedPostgr
   } catch (error) {
     throw new Error(
       `The test world could not start Postgres in Docker (compose project ${project}). Is Docker running?\n${describe(error)}`,
+      { cause: error },
     );
   }
   const { stdout } = await compose("port", "postgres", "5432");

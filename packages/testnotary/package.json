@@ -18,6 +18,7 @@
   },
   "devDependencies": {
     "@testnotary/core": "workspace:*",
-    "@testnotary/protocol": "workspace:*"
+    "@testnotary/protocol": "workspace:*",
+    "@testnotary/test-world": "workspace:*"
   }
 }

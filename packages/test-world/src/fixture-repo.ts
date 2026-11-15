@@ -24,17 +24,22 @@ export interface FixtureRepoOptions {
  * `.gitignore` in `files` when they must not dirty the tree.
  */
 export class FixtureRepo {
-  private constructor(
-    readonly dir: string,
-    readonly remoteDir: string,
-    readonly defaultBranch: string,
-    private readonly root: string,
-  ) {}
+  readonly dir: string;
+  readonly remoteDir: string;
+  readonly defaultBranch: string;
+  private readonly root: string;
+
+  private constructor(root: string, defaultBranch: string) {
+    this.root = root;
+    this.dir = join(root, "work");
+    this.remoteDir = join(root, "origin.git");
+    this.defaultBranch = defaultBranch;
+  }
 
   static async create(options: FixtureRepoOptions = {}): Promise<FixtureRepo> {
     const root = await realpath(await mkdtemp(join(tmpdir(), "tnw-repo-")));
     const defaultBranch = options.defaultBranch ?? "main";
-    const repo = new FixtureRepo(join(root, "work"), join(root, "origin.git"), defaultBranch, root);
+    const repo = new FixtureRepo(root, defaultBranch);
     await mkdir(repo.dir);
     await git(root, ["init", "--quiet", "--bare", `--initial-branch=${defaultBranch}`, repo.remoteDir]);
     await git(repo.dir, ["init", "--quiet", `--initial-branch=${defaultBranch}`]);

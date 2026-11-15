@@ -25,7 +25,7 @@ export async function git(cwd: string, args: string[], env: Record<string, strin
     return stdout;
   } catch (error) {
     const stderr = error && typeof error === "object" && "stderr" in error ? String(error.stderr) : "";
-    throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${stderr || String(error)}`);
+    throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${stderr || String(error)}`, { cause: error });
   }
 }
 

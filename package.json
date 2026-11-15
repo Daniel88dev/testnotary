@@ -8,7 +8,7 @@
   },
   "scripts": {
     "lint": "eslint --max-warnings=0 .",
-    "typecheck": "pnpm -r --parallel typecheck",
+    "typecheck": "pnpm -r --parallel typecheck && tsc -p .",
     "test": "pnpm test:world && pnpm test:browser",
     "test:world": "vitest run",
     "test:browser": "playwright test",

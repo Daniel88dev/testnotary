@@ -18,7 +18,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "next typegen && tsc -p .",
+    "typecheck": "next typegen && tsc -p . && tsc -p test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.ts"
   },
@@ -32,6 +32,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@testnotary/test-world": "workspace:*",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "drizzle-kit": "^0.31.11"
