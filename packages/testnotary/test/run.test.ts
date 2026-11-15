@@ -449,4 +449,90 @@ describe("when the service can't say", () => {
     expect(preflight?.headers).not.toHaveProperty("authorization");
     expect(uploadsSince(mark)).toEqual([]);
   });
+
+  test("GitHub refusing the service's permission check is not a no: the tests run unattested", async () => {
+    const dev = await developer();
+    const restore = world.github.override("GET", "/repos/:owner/:repo/collaborators/:username/permission", () =>
+      Response.json(
+        { message: `The \`${dev.repo.owner}\` organization has an IP allow list enabled, and your IP address is not permitted to access this resource.`, status: "403" },
+        { status: 403 },
+      ),
+    );
+    try {
+      const result = await dev.run(["--json"]);
+
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "passed", attested: false, warnings: ["service_unreachable"] });
+      expect(result.stderr).toMatch(/github_denied: .*IP allow list/);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("the base and its config", () => {
+  test("run fetches the base and reads testnotary.json from origin's tip, not a stale local ref", async () => {
+    const dev = await developer();
+    const oldBase = await dev.fixture.revParse("HEAD");
+    await dev.fixture.commit("Add the unit suite on main", { "testnotary.json": JSON.stringify({ suites: { ...PASSING.suites, unit: PASSING.suites.test } }) });
+    await dev.fixture.push("main");
+    await dev.fixture.git("update-ref", "refs/remotes/origin/main", oldBase);
+    await dev.fixture.branch("feature", oldBase);
+
+    const result = await dev.run(["unit"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(summary(result)).toMatchObject({ suite: "unit", attested: "true" });
+  });
+
+  test("the config's base names the branch whose config counts", async () => {
+    const dev = await developer({ config: { base: "release", suites: { main: PASSING.suites.test } } });
+    await dev.fixture.branch("release");
+    await dev.fixture.commit("Release config", { "testnotary.json": JSON.stringify({ base: "release", suites: { release: PASSING.suites.test } }) });
+    await dev.fixture.push("release");
+    await dev.fixture.checkout("main");
+
+    const fromRelease = await dev.run(["release"]);
+    const fromMain = await dev.run(["main", "--json"]);
+
+    expect(fromRelease.exitCode).toBe(0);
+    expect(fromMain.exitCode).toBe(2);
+    expect(JSON.parse(fromMain.stdout)).toMatchObject({ refusal: "config_invalid" });
+    expect(fromMain.stderr).toContain("on origin/release declares no suite \"main\"");
+  });
+
+  test("--base wins over the default branch", async () => {
+    const dev = await developer({ config: { suites: { main: PASSING.suites.test } } });
+    await dev.fixture.branch("next");
+    await dev.fixture.commit("Next config", { "testnotary.json": JSON.stringify({ suites: { next: PASSING.suites.test } }) });
+    await dev.fixture.push("next");
+
+    const withBase = await dev.run(["next", "--base", "next"]);
+    const without = await dev.run(["next", "--json"]);
+
+    expect(withBase.exitCode).toBe(0);
+    expect(summary(withBase)).toMatchObject({ suite: "next", attested: "true" });
+    expect(JSON.parse(without.stdout)).toMatchObject({ refusal: "config_invalid" });
+  });
+
+  test("without origin/HEAD the default branch comes from asking origin", async () => {
+    const dev = await developer();
+    await dev.fixture.git("remote", "set-head", "origin", "--delete");
+
+    const result = await dev.run();
+
+    expect(result.exitCode).toBe(0);
+    expect(summary(result).attested).toBe("true");
+  });
+
+  test("when origin can't be fetched the last fetched base is used", async () => {
+    const dev = await developer();
+    await dev.fixture.git("config", `url.${dev.fixture.remoteDir}-gone.insteadOf`, `https://github.com/${dev.repo.fullName}.git`);
+    await dev.fixture.git("config", "--unset", `url.${dev.fixture.remoteDir}.insteadOf`);
+
+    const result = await dev.run();
+
+    expect(result.exitCode).toBe(0);
+    expect(summary(result)).toMatchObject({ outcome: "passed", attested: "true" });
+  });
 });
