@@ -318,6 +318,8 @@ export const jobReports = pgTable(
     durationMs: integer("duration_ms").notNull(),
     environment: jsonb("environment").$type<CiEnvironment>().notNull(),
     createdAt: at("created_at"),
+    /** Arrival order, so the latest report is well defined even within one millisecond. */
+    seq: bigint("seq", { mode: "number" }).notNull().generatedAlwaysAsIdentity(),
   },
-  (table) => [index("job_reports_verification").on(table.verificationId, table.createdAt)],
+  (table) => [index("job_reports_verification").on(table.verificationId, table.seq)],
 );

@@ -138,7 +138,7 @@ export async function readVerification(db: Executor, id: string, repoId: number)
     .select()
     .from(jobReports)
     .where(eq(jobReports.verificationId, verification.id))
-    .orderBy(desc(jobReports.createdAt), desc(jobReports.id))
+    .orderBy(desc(jobReports.seq))
     .limit(1);
   return {
     id: verification.id,

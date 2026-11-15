@@ -1,5 +1,5 @@
 {
-  "id": "e9391d51-5103-4d80-b53a-4696da9c2b4c",
+  "id": "e47a7535-58ce-423a-b762-a7b5ee44d8f9",
   "prevId": "9700d029-cd34-46eb-9884-9a1360d687db",
   "version": "7",
   "dialect": "postgresql",
@@ -467,6 +467,23 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "job_reports_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
         }
       },
       "indexes": {
@@ -480,7 +497,7 @@
               "nulls": "last"
             },
             {
-              "expression": "created_at",
+              "expression": "seq",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
