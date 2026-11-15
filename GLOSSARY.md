@@ -54,6 +54,10 @@ _Avoid_: Disagreement, false pass, violation
 The repo state in which verification reports what it would have skipped while CI still runs every test job.
 _Avoid_: Dry run, observe mode, trial
 
+**Signature**:
+The attester's own key's mark over an attestation, which the CI action checks against keys from GitHub or from the repo's base branch without asking the service. A repo may require one, and then an attestation without a valid signature never lets CI skip. Checking it is a *signature check*, never a verification.
+_Avoid_: Proof, seal, notarization, signoff
+
 ## Identity
 
 **Installation**:
