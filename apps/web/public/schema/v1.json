@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "base": {
+      "description": "The base branch. Default: the remote's default branch.",
+      "type": "string",
+      "minLength": 1
+    },
+    "platforms": {
+      "description": "Platforms a run may attest on, such as linux/x64. A bare OS allows any architecture.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(aix|android|cygwin|darwin|freebsd|haiku|linux|netbsd|openbsd|sunos|win32)(\\/(arm|arm64|ia32|loong64|mips|mipsel|ppc|ppc64|riscv64|s390|s390x|x64))?$"
+      }
+    },
+    "env": {
+      "type": "object",
+      "properties": {
+        "pass": {
+          "description": "Names whose values come from the shell.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?!TESTNOTARY_)[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        },
+        "set": {
+          "description": "Fixed public values. May override CI, TZ and LANG.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?!TESTNOTARY_)[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Variables the tests see on top of the stripped environment."
+    },
+    "guarded": {
+      "description": "Globs added to the guarded-file defaults.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "nodeVersionFile": {
+      "description": "The file the Node version is read from.",
+      "type": "string",
+      "minLength": 1
+    },
+    "signatures": {
+      "description": "\"required\" turns signature mode on.",
+      "type": "string",
+      "const": "required"
+    },
+    "suites": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "The argv, spawned with no shell. For pipes or &&, point it at a package.json script."
+          },
+          "env": {
+            "description": "Adds to the top-level env for this suite.",
+            "type": "object",
+            "properties": {
+              "pass": {
+                "description": "Names whose values come from the shell.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^(?!TESTNOTARY_)[A-Za-z_][A-Za-z0-9_]*$"
+                }
+              },
+              "set": {
+                "description": "Fixed public values. May override CI, TZ and LANG.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^(?!TESTNOTARY_)[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "additionalProperties": false,
+        "description": "A named test command."
+      },
+      "description": "Suite name to its command.",
+      "minProperties": 1
+    }
+  },
+  "required": [
+    "suites"
+  ],
+  "additionalProperties": false,
+  "$id": "https://testnotary.dev/schema/v1.json",
+  "title": "testnotary.json"
+}
