@@ -287,9 +287,9 @@
   .legal-line a:hover { color: var(--text); }
   .signin { display: grid; gap: 10px; justify-items: start; }
   .signin form { margin: 0; }
-  .menu-pop form { margin: 0; display: grid; }
-  .menu-pop form button { all: unset; display: flex; padding: 8px 10px; border-radius: 6px; font-size: 14px; cursor: pointer; }
-  .menu-pop form button:hover, .menu-pop form button:focus-visible { background: var(--active); }
+  .menu-pop form { margin: 0; display: grid; text-align: left; white-space: normal; }
+  .menu-pop form button:not(.btn) { all: unset; display: flex; padding: 8px 10px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .menu-pop form button:not(.btn):hover, .menu-pop form button:not(.btn):focus-visible { background: var(--active); }
   .menu-pop .legal-line { padding: 4px 10px 8px; }
   .inline-form { display: inline-flex; gap: 8px; align-items: center; margin: 0; }
   .inline-form .input { height: 32px; width: 200px; }

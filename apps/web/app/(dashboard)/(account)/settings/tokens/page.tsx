@@ -99,7 +99,9 @@ export default async function TokensPage() {
         <div className="panel-h">
           <h2>Laptop tokens</h2>
           <span className="side">
-            From <span className="mono">testnotary login</span>, one per machine, 90 days, renewed on use
+            <span>
+              From <span className="mono">testnotary login</span>, one per machine, 90 days, renewed on use
+            </span>
           </span>
         </div>
         {laptop.length === 0 ? (
