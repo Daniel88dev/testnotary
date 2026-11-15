@@ -147,6 +147,29 @@ describe("the OIDC token a verification sends", () => {
     expect(await verify("not-a-jwt")).toEqual({ status: 401, body: { error: "token_rejected" } });
   });
 
+  test("the service logs why it rejected a token, and the caller hears only token_rejected", async () => {
+    const r = await installed();
+    const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
+    const replayed = await r.token(merge.sha);
+    await verify(replayed);
+    const { privateKey } = await generateKeyPair("RS256");
+    const cases: [string, string][] = [
+      ["replayed_jti", replayed],
+      ["claim_aud", await r.token(merge.sha, { audience: "https://example.com" })],
+      ["expired", await r.token(merge.sha, { claims: { iat: Math.floor(Date.now() / 1000) - 400, nbf: 0, exp: Math.floor(Date.now() / 1000) - 100 } })],
+      ["unknown_key", await new SignJWT(decodeJwt(await r.token(merge.sha))).setProtectedHeader({ alg: "RS256", kid: "not-githubs" }).sign(privateKey)],
+      ["malformed", "not-a-jwt"],
+    ];
+
+    for (const [reason, token] of cases) {
+      const from = world.service.logs.length;
+      const answer = await verify(token);
+
+      expect(answer).toEqual({ status: 401, body: { error: "token_rejected" } });
+      expect(world.service.logs.slice(from)).toEqual([expect.objectContaining({ level: "warn", event: "token_rejected", reason })]);
+    }
+  });
+
   test("a token for a repo without the App is repo_not_installed", async () => {
     const r = await installed({ install: false });
     const merge = await r.fixture.testMerge({ base: "main", head: "feature" });

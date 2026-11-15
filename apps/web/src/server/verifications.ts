@@ -25,8 +25,7 @@ export function verifyRefusal(code: VerifyRefusal): Response {
  * otherwise) whose `repository_id` is an installed repo (`repo_not_installed`).
  */
 export async function identifyJob(db: Database, request: Request): Promise<{ claims: ActionsClaims; repo: RepoView } | { response: Response }> {
-  const token = bearer(request);
-  const claims = token ? await acceptActionsToken(db, token) : undefined;
+  const claims = await acceptActionsToken(db, bearer(request));
   if (!claims) return { response: verifyRefusal("token_rejected") };
   const repo = await installedRepo(db, claims.repositoryId);
   if (!repo) return { response: verifyRefusal("repo_not_installed") };

@@ -29,12 +29,30 @@ export interface ServiceConfig {
    * Not an environment setting: a deployment always uses real time.
    */
   now: () => Date;
+  /**
+   * Where the service's log goes (`logEvent` in log.ts). Not an environment setting: a deployment
+   * writes JSON lines to stdout, which the host keeps; the test world collects the entries.
+   */
+  log: (entry: LogEntry) => void;
+}
+
+/** One line of the service's log. */
+export interface LogEntry {
+  level: "info" | "warn";
+  /** A stable snake_case name, e.g. `token_rejected`. */
+  event: string;
+  [field: string]: unknown;
+}
+
+/** The deployed service's log: a JSON line on stdout, with the real time. */
+export function stdoutLog(entry: LogEntry): void {
+  process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
 }
 
 const scoped = new AsyncLocalStorage<ServiceConfig>();
 
-/** The settings that come from the environment, by variable name. `now` is not one of them. */
-type EnvSetting = Exclude<keyof ServiceConfig, "now">;
+/** The settings that come from the environment, by variable name. `now` and `log` are not. */
+type EnvSetting = Exclude<keyof ServiceConfig, "now" | "log">;
 
 const ENV = {
   databaseUrl: "DATABASE_URL",
@@ -62,6 +80,7 @@ export function configFromEnv(env: Readonly<Record<string, string | undefined>>)
     githubAppPrivateKey: env[ENV.githubAppPrivateKey] || undefined,
     actionsOidcIssuer: (env[ENV.actionsOidcIssuer] || ACTIONS_OIDC_ISSUER).replace(/\/+$/, ""),
     now: realClock,
+    log: stdoutLog,
   };
 }
 
