@@ -5,7 +5,7 @@
 // Where something changes over time (a repo's name or visibility, its settings, an account's
 // login), each change is a row carrying the whole state after it, and the latest row per key is
 // the current state. GitHub ids are the keys for everything that comes from GitHub.
-import { bigint, boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 const githubId = (name: string) => bigint(name, { mode: "number" });
 const at = (name = "at") => timestamp(name, { withTimezone: true, mode: "date" }).notNull().defaultNow();
@@ -99,3 +99,84 @@ export const repoSettingChanges = pgTable(
   },
   (table) => [index("repo_setting_changes_latest").on(table.repoId, table.id)],
 );
+
+/** A person: a GitHub user, keyed by numeric id, never by login. */
+export const accounts = pgTable("accounts", {
+  githubId: githubId("github_id").primaryKey(),
+  createdAt: at("created_at"),
+});
+
+/** The account's login as GitHub last told it; the latest row is the cached login. */
+export const accountLogins = pgTable(
+  "account_logins",
+  {
+    id: rowId(),
+    accountId: githubId("account_id")
+      .notNull()
+      .references(() => accounts.githubId),
+    login: text("login").notNull(),
+    at: at(),
+  },
+  (table) => [index("account_logins_latest").on(table.accountId, table.id)],
+);
+
+/**
+ * A token, laptop or sandbox, always belonging to the account that created it. Its secret is in
+ * `token_secrets`, hashed. `expiresAt` is a fixed expiry (sandbox tokens); null means the token
+ * renews on use (laptop tokens: 90 days from the latest `token_uses` row, or from creation).
+ */
+export const tokens = pgTable(
+  "tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(),
+    accountId: githubId("account_id")
+      .notNull()
+      .references(() => accounts.githubId),
+    name: text("name").notNull(),
+    /** A sandbox token's one repo. */
+    repoId: githubId("repo_id").references(() => repos.githubId),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    createdAt: at("created_at"),
+  },
+  (table) => [index("tokens_account").on(table.accountId)],
+);
+
+/**
+ * The SHA-256 of each token's value; the value itself is never stored. Kept apart from `tokens`
+ * so that "clearing the hash" of a revoked or expired token is a delete the retention role can do,
+ * while the token's row stays for history.
+ */
+export const tokenSecrets = pgTable("token_secrets", {
+  tokenId: uuid("token_id")
+    .primaryKey()
+    .references(() => tokens.id),
+  hash: text("hash").notNull().unique(),
+});
+
+/** When a token was used, at most about one row an hour per token: it drives laptop renewal and "last use". */
+export const tokenUses = pgTable(
+  "token_uses",
+  {
+    id: rowId(),
+    tokenId: uuid("token_id")
+      .notNull()
+      .references(() => tokens.id),
+    at: at(),
+  },
+  (table) => [index("token_uses_latest").on(table.tokenId, table.id)],
+);
+
+/** The token was revoked. One row ends the token for good. */
+export const tokenRevocations = pgTable("token_revocations", {
+  id: rowId(),
+  tokenId: uuid("token_id")
+    .notNull()
+    .unique()
+    .references(() => tokens.id),
+  /** The account that revoked it, when an admin or owner did so in the dashboard; null when the bearer did (`logout`, or a new sign-in on the same machine). */
+  revokedBy: githubId("revoked_by").references(() => accounts.githubId),
+  /** `logout`, `replaced` (a new sign-in on the same machine), and whatever later tickets add. */
+  reason: text("reason").notNull(),
+  at: at(),
+});
