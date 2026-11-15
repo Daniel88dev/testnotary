@@ -4,6 +4,7 @@
 import { LINKS, type RefusalCode } from "../shared.ts";
 import { say } from "../report.ts";
 import { BEFORE_START } from "./checks/index.ts";
+import { laptopTokenMarker } from "./checks/laptop-token-in-sandbox.ts";
 import { emptyNotes, warn, type Env, type RunContext, type RunNotes, type RunToken } from "./context.ts";
 import { locate } from "./locate.ts";
 import { preflight, type Preflight } from "./service.ts";
@@ -46,7 +47,9 @@ export async function prepareRun(input: PrepareInput): Promise<Ready | RefusedBe
   const token = await chooseToken(input.serviceUrl, input.env);
   if ("refused" in found) {
     const { refusal, lines, partial } = found.refused;
-    return { kind: "refused", refusal, lines, suite: input.suite, checkout: partial.checkout, repository: partial.repository, token, notes, upload: true };
+    // A laptop token inside a sandbox is never sent, not even with a refused run.
+    const upload = !laptopTokenMarker(token, input.env);
+    return { kind: "refused", refusal, lines, suite: input.suite, checkout: partial.checkout, repository: partial.repository, token, notes, upload };
   }
   const { located } = found;
   const context: RunContext = {
@@ -72,7 +75,7 @@ export async function prepareRun(input: PrepareInput): Promise<Ready | RefusedBe
 
   for (const check of BEFORE_START) {
     const found = await check.check(context);
-    if (found) return refused(found.refusal, found.lines);
+    if (found) return refused(found.refusal, found.lines, found.upload ?? true);
   }
 
   const repository = context.origin.repository;

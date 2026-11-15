@@ -11,6 +11,7 @@ import type { RunCheck } from "../context.ts";
 import { dirtyTree } from "./dirty-tree.ts";
 
 // Imports for the token checks (T-823).
+import { laptopTokenInSandbox } from "./laptop-token-in-sandbox.ts";
 
 // Imports for the command and tree checks (T-816).
 
@@ -19,6 +20,7 @@ import { dirtyTree } from "./dirty-tree.ts";
 /** Before the preflight and the command, in this order. */
 export const BEFORE_START: readonly RunCheck[] = [
   // 1. The token (T-823: `laptop_token_in_sandbox`).
+  laptopTokenInSandbox,
 
   // 2. The command line and the command (T-816: `extra_arguments`, `history_dependent_command`).
 
