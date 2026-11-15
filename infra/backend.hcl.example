@@ -1,0 +1,7 @@
+# Copy to backend.hcl (ignored by git) and run `terraform init -backend-config=backend.hcl`.
+# The bucket is versioned, encrypted with KMS and blocks public access (docs/runbook/hosting.md).
+
+bucket     = "…-terraform-state"
+key        = "testnotary/production.tfstate"
+region     = "eu-central-1"
+kms_key_id = "alias/…"
