@@ -1,0 +1,19 @@
+# Copy to production.tfvars (ignored by git) and fill in. Never commit the filled copy.
+
+vpc_id             = "vpc-…"
+private_subnet_ids = ["subnet-…", "subnet-…"]
+
+# "dedicated" until the runbook's check of ADR 0002's launch conditions passes.
+database = "dedicated"
+# database                                    = "shared"
+# shared_rds_instance_identifier              = "…"
+# shared_instance_launch_conditions_confirmed = true
+
+# The first image pushed to the ECR repository (a commit SHA).
+initial_image_tag = "…"
+
+github_client_id = "Iv…"
+
+sentry_dsn ="https://…@….ingest.de.sentry.io/…"
+
+# custom_domain = "testnotary.dev"
