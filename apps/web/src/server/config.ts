@@ -34,6 +34,11 @@ export interface ServiceConfig {
    */
   actionsOidcIssuer: string;
   /**
+   * Where the terms and the privacy policy are read from (`terms.md`, `privacy.md`). Unset, it is
+   * `content/legal` in the app; the test world points it at its own copies to test dated changes.
+   */
+  legalDir: string | undefined;
+  /**
    * The service's clock. Everything the service decides by time (token renewal and expiry, run
    * receipt, attestation age) reads it here, never `new Date()`, so the test world can move it.
    * Not an environment setting: a deployment always uses real time.
@@ -78,6 +83,7 @@ const ENV = {
   githubAppId: "GITHUB_APP_ID",
   githubAppPrivateKey: "GITHUB_APP_PRIVATE_KEY",
   actionsOidcIssuer: "ACTIONS_OIDC_ISSUER",
+  legalDir: "LEGAL_DIR",
 } as const satisfies Record<EnvSetting, string>;
 
 export function realClock(): Date {
@@ -99,6 +105,7 @@ export function configFromEnv(env: Readonly<Record<string, string | undefined>>)
     githubAppId: env[ENV.githubAppId] || undefined,
     githubAppPrivateKey: env[ENV.githubAppPrivateKey] || undefined,
     actionsOidcIssuer: (env[ENV.actionsOidcIssuer] || ACTIONS_OIDC_ISSUER).replace(/\/+$/, ""),
+    legalDir: env[ENV.legalDir] || undefined,
     now: realClock,
     log: stdoutLog,
   };

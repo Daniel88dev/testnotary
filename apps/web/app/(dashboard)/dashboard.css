@@ -230,6 +230,9 @@
   .field label { font-size: 13px; font-weight: 500; }
   .input { height: 36px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--control); background: var(--ground); color: var(--text); font: 14px var(--sans); }
   .warn-line { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; background: var(--run-bg); color: var(--text); font-size: 13px; }
+  .legal-changes { display: grid; gap: 8px; margin-bottom: 20px; }
+  .legal-changes a { color: var(--skip); }
+  .legal-changes a:hover { text-decoration: underline; text-underline-offset: 3px; }
   .warn-line::before { content: '!'; flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--run); color: var(--run-ink); font-weight: 700; font-size: 12px; }
 
   /* Menus (details/summary) */

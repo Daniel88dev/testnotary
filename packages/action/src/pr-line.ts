@@ -1,4 +1,4 @@
-import { runPageUrl, resolveServiceUrl, type FallbackReason, type JobOutcome, type VerificationResult } from "./shared.ts";
+import { accountName, runPageUrl, resolveServiceUrl, type FallbackReason, type JobOutcome, type VerificationResult } from "./shared.ts";
 import type { RunnerEnv } from "./runner.ts";
 import type { Verdict } from "./verify.ts";
 
@@ -111,7 +111,7 @@ function attestedBy(verdict: Verdict): string[] {
   const attestation = verdict.record?.attestation;
   if (!attestation || (verdict.result !== "skip" && verdict.result !== "would_skip")) return [];
   const { account, token } = attestation.attester;
-  const who = account.login ? `@${account.login}` : `account ${account.id}`;
+  const who = accountName(account);
   const parts =
     token.kind === "sandbox" ? [`sandbox token "${token.name}", created by ${who}`] : [`attested by ${who}`, `laptop token "${token.name}"`];
   const environment = attestation.run.environment;

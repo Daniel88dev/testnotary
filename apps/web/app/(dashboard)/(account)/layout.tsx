@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { LegalChanges } from "../_components/legal-changes.tsx";
 import { NavLink } from "../_components/client.tsx";
 import { MobileBar } from "../_components/shell.tsx";
 import { getViewer } from "../_lib/viewer.ts";
@@ -22,6 +23,7 @@ export default async function AccountLayout({ children }: { children: ReactNode 
       </div>
       <main className="dash-main">
         <MobileBar title="Testnotary" viewer={viewer} />
+        <LegalChanges />
         {children}
       </main>
     </>

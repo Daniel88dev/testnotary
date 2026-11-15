@@ -348,3 +348,42 @@ export const sessionEnds = pgTable("session_ends", {
   sessionId: text("session_id").primaryKey(),
   at: at(),
 });
+
+/**
+ * An account deleted with *Delete account* (open decision 3). The app role cannot delete, so the
+ * deletion is this row, and it takes effect at once: the account's tokens are revoked with it, its
+ * sessions end, and every record made before `at` shows the shared *deleted account* instead of the
+ * account. The retention job (T-830) later removes the account's row and login. Signing in again
+ * afterwards starts afresh: records made after `at` are the account's own.
+ */
+export const accountDeletions = pgTable(
+  "account_deletions",
+  {
+    id: rowId(),
+    accountId: githubId("account_id")
+      .notNull()
+      .references(() => accounts.githubId),
+    at: at(),
+  },
+  (table) => [index("account_deletions_latest").on(table.accountId, table.id)],
+);
+
+/**
+ * The operator suspending an account, or lifting a suspension, with the operations script
+ * (`apps/web/scripts/ops.ts`); there is no admin UI. `action` is `suspended` or `lifted`; the latest
+ * row says whether the account is suspended. A suspension revokes the account's tokens, and a
+ * suspended account is issued no new token.
+ */
+export const accountSuspensions = pgTable(
+  "account_suspensions",
+  {
+    id: rowId(),
+    accountId: githubId("account_id")
+      .notNull()
+      .references(() => accounts.githubId),
+    action: text("action").notNull(),
+    reason: text("reason").notNull(),
+    at: at(),
+  },
+  (table) => [index("account_suspensions_latest").on(table.accountId, table.id)],
+);

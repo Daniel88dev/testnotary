@@ -9,6 +9,7 @@ import {
 } from "@testnotary/protocol";
 import type { Database } from "../db/client.ts";
 import { attestations, runs, tokens } from "../db/schema.ts";
+import { deletedAt } from "./accounts.ts";
 import { now } from "./config.ts";
 import { apiError } from "./http.ts";
 import { installedRepoByName, latestRepoState, type RepoView } from "./installations.ts";
@@ -149,6 +150,9 @@ export async function readRun(db: Database, runId: string, accountId: number): P
     .where(and(eq(runs.id, runId), eq(runs.accountId, accountId)));
   if (!row) return undefined;
   const run = row.run;
+  // Runs from before the account was deleted are no longer its own, even if it signs in again.
+  const deleted = await deletedAt(db, accountId);
+  if (deleted && run.receivedAt.getTime() <= deleted.getTime()) return undefined;
   const [attestation] = await db.select().from(attestations).where(eq(attestations.runId, run.id));
   const iso = (date: Date | null) => date?.toISOString() ?? null;
   return {

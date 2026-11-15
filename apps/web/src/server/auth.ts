@@ -12,7 +12,8 @@ import { fetchUser } from "./github.ts";
 // - `testnotary.session_token`: the session (signed), for the session's lifetime;
 // - `testnotary.session_data`: the session's contents (encrypted), same lifetime;
 // - `testnotary.account_data`: the GitHub user token the dashboard reads GitHub with (encrypted);
-// - `testnotary.state` and `testnotary.pk_code_verifier`-style OAuth state: only during sign-in, 10 minutes.
+// - `testnotary.oauth_state`: the sign-in in progress, 10 minutes.
+// The privacy policy (content/legal/privacy.md) lists the same names; e2e/legal.spec.ts checks it.
 
 export const GITHUB_PROVIDER = "github";
 export const COOKIE_PREFIX = "testnotary";
