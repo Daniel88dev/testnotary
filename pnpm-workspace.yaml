@@ -14,6 +14,5 @@ strictDepBuilds: true
 onlyBuiltDependencies:
   - esbuild
   - sharp
-  - unrs-resolver
 # The service targets Node 24 and the library Node >=20; never fail an install on a newer local Node.
 engineStrict: false
