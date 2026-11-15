@@ -4,7 +4,7 @@ import { LAPTOP_TOKEN_LIFETIME_DAYS, SANDBOX_TOKEN_MAX_DAYS, tokenKind, type Tok
 import type { Account, TokenInfo } from "@testnotary/protocol";
 import { database } from "../db/client.ts";
 import { now } from "./config.ts";
-import { accountLogins, accounts, tokenRenames, tokenRevocations, tokenSecrets, tokenUses, tokens } from "../db/schema.ts";
+import { accountLogins, accounts, repoStates, tokenRenames, tokenRevocations, tokenSecrets, tokenUses, tokens } from "../db/schema.ts";
 import type { Executor } from "./installations.ts";
 
 // Tokens: issued here, stored as SHA-256 hashes only, and recognised by hash. Every API route that
@@ -220,6 +220,79 @@ export async function ownLaptopToken(db: Executor, accountId: number, tokenId: s
     .select({ id: tokens.id })
     .from(tokens)
     .where(and(eq(tokens.id, tokenId), eq(tokens.accountId, accountId), eq(tokens.kind, "laptop")));
+  return row;
+}
+
+export interface SandboxTokenView {
+  id: string;
+  name: string;
+  repo: { id: number; fullName: string };
+  createdBy: Account;
+  createdAt: Date;
+  expiresAt: Date;
+  /** When it was last used (hourly granularity after the first use); null when never. */
+  lastUsedAt: Date | null;
+}
+
+/**
+ * Live sandbox tokens (not revoked, not expired), newest first: those `createdBy` made (the Tokens
+ * page; with `repoId`, the creator's own in a repo's Settings), or every one of `repoId` (an
+ * admin's view in Settings). Give at least one of the two.
+ */
+export async function sandboxTokens(db: Executor, filter: { createdBy?: number; repoId?: number }): Promise<SandboxTokenView[]> {
+  if (filter.createdBy === undefined && filter.repoId === undefined) throw new Error("sandboxTokens: give createdBy or repoId");
+  const conditions = [eq(tokens.kind, "sandbox"), isNull(tokenRevocations.id)];
+  if (filter.createdBy !== undefined) conditions.push(eq(tokens.accountId, filter.createdBy));
+  if (filter.repoId !== undefined) conditions.push(eq(tokens.repoId, filter.repoId));
+  const rows = await db
+    .select({ token: tokens })
+    .from(tokens)
+    .leftJoin(tokenRevocations, eq(tokenRevocations.tokenId, tokens.id))
+    .where(and(...conditions))
+    .orderBy(desc(tokens.createdAt));
+  const current = now().getTime();
+  const list = rows.map((row) => row.token).filter((token) => token.repoId !== null && token.expiresAt !== null && token.expiresAt.getTime() > current);
+  if (list.length === 0) return [];
+  const uses = await db
+    .selectDistinctOn([tokenUses.tokenId], { tokenId: tokenUses.tokenId, at: tokenUses.at })
+    .from(tokenUses)
+    .where(inArray(tokenUses.tokenId, list.map((token) => token.id)))
+    .orderBy(tokenUses.tokenId, desc(tokenUses.id));
+  const names = await currentNames(db, list);
+  const repoNames = new Map<number, string>();
+  const logins = new Map<number, string>();
+  for (const token of list) {
+    if (!repoNames.has(token.repoId!)) repoNames.set(token.repoId!, (await latestRepoName(db, token.repoId!)) ?? String(token.repoId));
+    if (!logins.has(token.accountId)) logins.set(token.accountId, (await accountLogin(db, token.accountId)) ?? "");
+  }
+  return list.map((token) => ({
+    id: token.id,
+    name: names.get(token.id) ?? token.name,
+    repo: { id: token.repoId!, fullName: repoNames.get(token.repoId!)! },
+    createdBy: { id: token.accountId, login: logins.get(token.accountId)! },
+    createdAt: token.createdAt,
+    expiresAt: token.expiresAt!,
+    lastUsedAt: uses.find((use) => use.tokenId === token.id)?.at ?? null,
+  }));
+}
+
+async function latestRepoName(db: Executor, repoId: number): Promise<string | undefined> {
+  const [state] = await db
+    .select({ fullName: repoStates.fullName })
+    .from(repoStates)
+    .where(eq(repoStates.repoId, repoId))
+    .orderBy(desc(repoStates.id))
+    .limit(1);
+  return state?.fullName;
+}
+
+/** The account's own sandbox token with this id, live or not; `undefined` for anyone else's. */
+export async function ownSandboxToken(db: Executor, accountId: number, tokenId: string): Promise<{ id: string } | undefined> {
+  if (!/^[0-9a-f-]{36}$/i.test(tokenId)) return undefined;
+  const [row] = await db
+    .select({ id: tokens.id })
+    .from(tokens)
+    .where(and(eq(tokens.id, tokenId), eq(tokens.accountId, accountId), eq(tokens.kind, "sandbox")));
   return row;
 }
 

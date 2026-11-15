@@ -1,21 +1,14 @@
 import type { Metadata } from "next";
 import { database } from "../../../../../src/db/client.ts";
-import { laptopTokensOf, TOKEN_NAME_MAX, type LaptopTokenView } from "../../../../../src/server/tokens.ts";
+import { laptopTokensOf, sandboxTokens, TOKEN_NAME_MAX, type LaptopTokenView } from "../../../../../src/server/tokens.ts";
+import { SandboxTokenForm } from "../../../_components/sandbox-token-form.tsx";
+import { LastUse, SandboxTokenTable } from "../../../_components/sandbox-token-table.tsx";
 import { SignIn } from "../../../_components/shell.tsx";
-import { date, rel } from "../../../_lib/format.ts";
-import { getViewer } from "../../../_lib/viewer.ts";
+import { date } from "../../../_lib/format.ts";
+import { getReadableRepos, getViewer } from "../../../_lib/viewer.ts";
 import { renameLaptopToken, revokeLaptopToken } from "./actions.ts";
 
 export const metadata: Metadata = { title: "Tokens · Testnotary" };
-
-function LastUse({ at }: { at: Date | null }) {
-  if (!at) return <span className="faint">Not used yet</span>;
-  return (
-    <time dateTime={at.toISOString()} title={at.toISOString()}>
-      {rel(at)}
-    </time>
-  );
-}
 
 function LaptopRow({ token }: { token: LaptopTokenView }) {
   return (
@@ -86,7 +79,12 @@ export default async function TokensPage() {
       </div>
     );
   }
-  const laptop = await laptopTokensOf(database(), viewer.account.id);
+  const [laptop, sandbox, readable] = await Promise.all([
+    laptopTokensOf(database(), viewer.account.id),
+    sandboxTokens(database(), { createdBy: viewer.account.id }),
+    getReadableRepos(),
+  ]);
+  const writable = readable.filter((repo) => repo.permission === "admin" || repo.permission === "write").map((repo) => repo.fullName);
   return (
     <div className="stack" style={{ gap: 20, maxWidth: 1080 }}>
       <div className="title-row">
@@ -133,10 +131,21 @@ export default async function TokensPage() {
       <div className="panel">
         <div className="panel-h">
           <h2>Sandbox tokens you created</h2>
-          <span className="side">Created in a repo&apos;s Settings</span>
+          <span className="side">For agent sandboxes: one repo each, upload only</span>
         </div>
-        <div className="panel-b">
-          <p className="empty-line">You have not created a sandbox token.</p>
+        {sandbox.length === 0 ? (
+          <div className="panel-b">
+            <p className="empty-line">You have not created a sandbox token.</p>
+          </div>
+        ) : (
+          <SandboxTokenTable tokens={sandbox} label="Sandbox tokens you created" show="repo" viewerId={viewer.account.id} />
+        )}
+        <div className="panel-b" style={{ paddingTop: 16 }}>
+          {writable.length > 0 ? (
+            <SandboxTokenForm repositories={writable} />
+          ) : (
+            <p className="muted">A sandbox token needs write access to a repo with Testnotary installed.</p>
+          )}
         </div>
       </div>
     </div>
