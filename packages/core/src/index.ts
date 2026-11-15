@@ -22,6 +22,7 @@ export {
   auditPoint,
   auditRateProblem,
   repoAuditKey,
+  sandboxAuditDefault,
   type AuditKeyInput,
   type AuditSubject,
 } from "./audit.ts";

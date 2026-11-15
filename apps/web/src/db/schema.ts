@@ -437,6 +437,30 @@ export const mismatches = pgTable(
   (table) => [index("mismatches_repo").on(table.repoId, table.createdAt), index("mismatches_account").on(table.accountId)],
 );
 
+/**
+ * A repo admin's explanation of a mismatch: one of four causes and a note. Append-only, and one per
+ * mismatch: a mismatch with none is open, and an open mismatch keeps the repo out of enforce mode.
+ * Recording one does not switch enforce back on; an admin does that in Settings. `explainedBy` is a
+ * plain column, like `mismatches.account_id`, named through `accountsAsOf` as of `at`, so the
+ * explanation outlives the account row. Kept, like the mismatch, while the repo is installed.
+ */
+export const mismatchExplanations = pgTable(
+  "mismatch_explanations",
+  {
+    id: rowId(),
+    mismatchId: uuid("mismatch_id")
+      .notNull()
+      .unique()
+      .references(() => mismatches.id),
+    /** `flaky_test`, `environment_difference`, `false_attestation` or `other`. */
+    cause: text("cause").notNull(),
+    note: text("note").notNull(),
+    explainedBy: githubId("explained_by").notNull(),
+    at: at(),
+  },
+  (table) => [check("mismatch_explanations_cause", sql`${table.cause} in ('flaky_test', 'environment_difference', 'false_attestation', 'other')`)],
+);
+
 /** A token's new name, given by its owner on the Tokens page. The latest row is the token's name. */
 export const tokenRenames = pgTable(
   "token_renames",

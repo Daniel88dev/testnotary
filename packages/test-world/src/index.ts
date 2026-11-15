@@ -20,6 +20,7 @@ import { createClock, type WorldClock } from "./clock.ts";
 import { configToEnv, withServiceConfig, type LogEntry, type ServiceConfig } from "@testnotary/web/config";
 import { closeDatabase, database } from "@testnotary/web/db";
 import { blockLaptopToken, revokeRepoSandboxToken, tokenIdOf } from "@testnotary/web/revocations";
+import { changeRepoSettings, explainMismatch, mismatchIdOfVerification, type SettingsChange, type SettingsRequest } from "@testnotary/web/settings";
 import { issueSandboxToken, rememberAccount } from "@testnotary/web/tokens";
 import type { FakeAccount } from "./github/app.ts";
 import { WORLD_AUDIT_MASTER_KEY, worldAudits, type WorldAudits } from "./audits.ts";
@@ -127,6 +128,19 @@ export interface World {
    * False when the service refuses: the token is not a laptop token that ran on `repo`.
    */
   blockLaptopToken(options: { admin: FakeAccount; repo: FakeRepo; token: string; note?: string }): Promise<boolean>;
+  /**
+   * A repo admin's change in Settings (the mode toggle, the audit rates), as the dashboard makes it
+   * once GitHub says `admin` is an admin of `repo` (the browser tests click the toggle). Answers the
+   * service's refusal, or the settings after it and the warnings switching to enforce gave.
+   * Throws when the fake GitHub does not make `admin` an admin.
+   */
+  changeRepoSettings(options: { admin: FakeAccount; repo: FakeRepo } & SettingsRequest): Promise<SettingsChange>;
+  /**
+   * A repo admin explains the mismatch recorded on a verification (by the verification's id, as the
+   * job summary names it), as the Mismatches section does. False when the service refuses: no such
+   * mismatch in `repo`, a cause other than the four, or one explained already.
+   */
+  explainMismatch(options: { admin: FakeAccount; repo: FakeRepo; verification: string; cause: string; note?: string }): Promise<boolean>;
   /**
    * A fresh SSH key pair made with the real `ssh-keygen` (Ed25519 unless `type` says otherwise, no
    * passphrase) in the world's temp directory. Never one from `~/.ssh` or an ssh-agent.
@@ -293,6 +307,15 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
         return asAdmin(admin, repo, async (db, by) => {
           const tokenId = await tokenIdOf(db, token);
           return tokenId ? blockLaptopToken(db, { tokenId, repoId: repo.id, by, note }) : false;
+        });
+      },
+      async changeRepoSettings({ admin, repo, ...request }) {
+        return asAdmin(admin, repo, (db, by) => changeRepoSettings(db, { repoId: repo.id, by, ...request }));
+      },
+      async explainMismatch({ admin, repo, verification, cause, note }) {
+        return asAdmin(admin, repo, async (db, by) => {
+          const mismatchId = await mismatchIdOfVerification(db, repo.id, verification);
+          return mismatchId ? explainMismatch(db, { repoId: repo.id, mismatchId, by, cause, note }) : false;
         });
       },
       sshKey(keyOptions) {
