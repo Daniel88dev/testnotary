@@ -12,9 +12,22 @@ export interface ServiceConfig {
   githubClientId: string | undefined;
   /** The App's webhook secret (a secret). Without it every webhook is refused. */
   githubWebhookSecret: string | undefined;
+  /** The App's id: the `iss` of the App JWT that buys installation tokens. Not a secret. */
+  githubAppId: string | undefined;
+  /** The App's private key, PEM (a secret). Without it the service can't check write access. */
+  githubAppPrivateKey: string | undefined;
+  /**
+   * The service's clock. Everything the service decides by time (token renewal and expiry, run
+   * receipt, attestation age) reads it here, never `new Date()`, so the test world can move it.
+   * Not an environment setting: a deployment always uses real time.
+   */
+  now: () => Date;
 }
 
 const scoped = new AsyncLocalStorage<ServiceConfig>();
+
+/** The settings that come from the environment, by variable name. `now` is not one of them. */
+type EnvSetting = Exclude<keyof ServiceConfig, "now">;
 
 const ENV = {
   databaseUrl: "DATABASE_URL",
@@ -22,7 +35,13 @@ const ENV = {
   githubWebUrl: "GITHUB_WEB_URL",
   githubClientId: "GITHUB_CLIENT_ID",
   githubWebhookSecret: "GITHUB_WEBHOOK_SECRET",
-} as const satisfies Record<keyof ServiceConfig, string>;
+  githubAppId: "GITHUB_APP_ID",
+  githubAppPrivateKey: "GITHUB_APP_PRIVATE_KEY",
+} as const satisfies Record<EnvSetting, string>;
+
+export function realClock(): Date {
+  return new Date();
+}
 
 export function configFromEnv(env: Readonly<Record<string, string | undefined>>): ServiceConfig {
   return {
@@ -31,6 +50,9 @@ export function configFromEnv(env: Readonly<Record<string, string | undefined>>)
     githubWebUrl: (env[ENV.githubWebUrl] || "https://github.com").replace(/\/+$/, ""),
     githubClientId: env[ENV.githubClientId] || undefined,
     githubWebhookSecret: env[ENV.githubWebhookSecret] || undefined,
+    githubAppId: env[ENV.githubAppId] || undefined,
+    githubAppPrivateKey: env[ENV.githubAppPrivateKey] || undefined,
+    now: realClock,
   };
 }
 
@@ -38,7 +60,7 @@ export function configFromEnv(env: Readonly<Record<string, string | undefined>>)
 export function configToEnv(config: ServiceConfig): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, name] of Object.entries(ENV)) {
-    const value = config[key as keyof ServiceConfig];
+    const value = config[key as EnvSetting];
     if (value !== undefined) env[name] = value;
   }
   return env;
@@ -51,6 +73,11 @@ export function configToEnv(config: ServiceConfig): Record<string, string> {
  */
 export function serviceConfig(): ServiceConfig {
   return scoped.getStore() ?? configFromEnv(process.env);
+}
+
+/** Now, by the service's clock. */
+export function now(): Date {
+  return serviceConfig().now();
 }
 
 export function withServiceConfig<T>(config: ServiceConfig, fn: () => T): T {

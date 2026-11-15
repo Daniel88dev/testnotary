@@ -11,6 +11,7 @@ import { cleanEnv, runAction, runNode, type ActionResult, type ProcessResult, ty
 import { paths } from "./paths.ts";
 import { startInProcessService } from "./service.ts";
 import { createMachine, type Machine, type MachineOptions } from "./machine.ts";
+import { createClock, type WorldClock } from "./clock.ts";
 import { configToEnv, type ServiceConfig } from "@testnotary/web/config";
 
 export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-repo.ts";
@@ -24,6 +25,7 @@ export type { ActionResult, Env, ProcessResult, RunActionOptions, RunOptions } f
 export type { PostgresServer, Role } from "./postgres-server.ts";
 export { startPostgresServer } from "./postgres-server.ts";
 export type { WorldDatabase } from "./database.ts";
+export type { WorldClock } from "./clock.ts";
 export { CREDENTIALS_FILE, type KeychainEntry, type Machine, type MachineOptions } from "./machine.ts";
 
 export interface WorldOptions {
@@ -45,6 +47,8 @@ export interface World {
   service: { url: string };
   github: FakeGitHub;
   db: WorldDatabase;
+  /** The service's clock: set or advance it to test expiry and renewal (in-process service only). */
+  clock: WorldClock;
   /** Builds a fixture repo (see FixtureRepo). It is deleted when the world closes. */
   fixtureRepo(options?: FixtureRepoOptions): Promise<FixtureRepo>;
   /** A developer machine for `runCli`: a lasting HOME and a keychain stub (see Machine). */
@@ -75,6 +79,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     cleanups.push(() => db.drop(), () => github.close());
 
     let service: HttpServer;
+    const clock = createClock();
     // The fake GitHub serves both api.github.com and github.com (device flow) at one URL.
     const config: ServiceConfig = {
       databaseUrl: db.urls.app,
@@ -82,6 +87,9 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       githubWebUrl: github.url,
       githubClientId: github.app.clientId,
       githubWebhookSecret: github.app.webhookSecret,
+      githubAppId: undefined,
+      githubAppPrivateKey: undefined,
+      now: () => clock.now(),
     };
     if (options.service === "next") {
       service = await startNextService(configToEnv(config));
@@ -100,6 +108,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       service: { url: service.url },
       github,
       db,
+      clock,
       async fixtureRepo(repoOptions) {
         const repo = await FixtureRepo.create(repoOptions);
         repos.push(repo);
