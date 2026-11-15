@@ -34,6 +34,10 @@ When several attestations name the tree, each is tried, newest first, until one 
 
 Everything is read from the config at the built commit’s **first parent**, the base side of a pull request’s merge commit. So a pull request can’t loosen its own rules: a changed command or a new guarded glob counts from the next pull request on, and the config file is itself guarded.
 
+The guarded files are these product defaults, which a repo can’t remove, plus the repo’s own `guarded` globs. A name without a `/` matches at any depth, the way a `.gitignore` line does, so `package.json` covers every package in a monorepo. A pull request that changes any of them names the first one it changed. See [Guarded files](/docs/guarded).
+
+<GuardedDefaults />
+
 ## Last: the repo’s mode
 
 In enforce mode a clean answer skips the test step and the action outputs `result=skip`; anything else outputs `fallback` (or `audit`) with the reason. In [shadow mode](/docs/shadow) nothing skips: the answer is recorded as *would have skipped* (`would_skip`) or *would have fallen back* (`would_fall_back`) and the tests run.
