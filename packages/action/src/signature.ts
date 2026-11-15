@@ -62,7 +62,7 @@ export async function checkSkip(env: RunnerEnv, verdict: Verdict, suiteInput: st
     return fallBack("signature_invalid", "checkout: the repo requires signatures and HEAD^1 is missing; check out with fetch-depth: 2");
   }
   const attestation = verdict.record?.attestation;
-  if (!attestation?.signature) return fallBack("signature_missing");
+  if (!attestation?.signature || attestation.payload === null) return fallBack("signature_missing");
   const failed = await signatureProblem(env, workspace, mode.config, suiteInput, attestation.payload, attestation.signature.sshsig);
   return failed ? fallBack(failed.reason, failed.detail) : verdict;
 }

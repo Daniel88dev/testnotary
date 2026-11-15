@@ -45,10 +45,25 @@ test("a deleted account's mismatch reads deleted account", async ({ page, world 
   await page.getByRole("dialog", { name: "Delete your account?" }).getByRole("button", { name: "Delete my account" }).click();
   await expect(page.getByRole("status")).toContainText("Your account is deleted.");
 
-  // The mismatch stays, under the shared deleted account.
+  // The mismatch stays, under the shared deleted account. The payload's bytes name her GitHub id,
+  // so a read withholds them (the mismatch keeps its copy); so does the verification's attestation.
   const read = await page.request.get(`/api/v1/verifications/${verification.id}`, { headers: { authorization: `Bearer ${await job()}` } });
   expect(read.status()).toBe(200);
-  const after = (await read.json()) as { verification: { mismatch: { account: unknown; token: { kind: string } } | null } };
-  expect(after.verification.mismatch).toMatchObject({ account: { id: 0, login: null }, token: { kind: "laptop" } });
-  expect(JSON.stringify(after.verification.mismatch)).not.toContain("mira-mismatch");
+  const after = (await read.json()) as {
+    verification: { attestation: { payload: string | null; signature: unknown } | null; mismatch: { account: unknown; token: { kind: string }; attestation: { payload: string | null; signature: unknown } } | null };
+  };
+  expect(after.verification.mismatch).toMatchObject({ account: { id: 0, login: null }, token: { kind: "laptop" }, attestation: { payload: null, signature: null } });
+  expect(after.verification.attestation).toMatchObject({ payload: null, signature: null });
+  for (const part of [after.verification.mismatch, after.verification.attestation]) {
+    expect(JSON.stringify(part)).not.toContain("mira-mismatch");
+    expect(JSON.stringify(part)).not.toMatch(new RegExp(`\\b${mira.id}\\b`));
+  }
+
+  // The Mismatches page, signed out on the public repo, names the deleted account and nothing of hers.
+  await page.goto("/mira-mismatch/kiln/mismatches");
+  const open = page.getByRole("region", { name: /^Open/ });
+  await expect(open.getByRole("article")).toHaveCount(1);
+  await expect(open.getByRole("article")).toContainText("deleted account, laptop token");
+  await expect(open.getByRole("article")).not.toContainText("mira-mismatch");
+  await expect(page.locator("main")).not.toContainText(new RegExp(`"account":\\s*${mira.id}\\b`));
 });

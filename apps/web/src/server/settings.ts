@@ -1,11 +1,23 @@
 import { and, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
-import { AUDIT_RATE_DEFAULTS, INITIAL_REPO_SETTINGS, auditRateProblem, sandboxAuditDefault, type RepoMode, type RepoSettings } from "@testnotary/core";
+import {
+  AUDIT_RATE_DEFAULTS,
+  CONFIG_FILE,
+  GUARDED_DEFAULTS,
+  INITIAL_REPO_SETTINGS,
+  auditRateProblem,
+  guardedGlobs,
+  parseConfig,
+  sandboxAuditDefault,
+  type RepoMode,
+  type RepoSettings,
+} from "@testnotary/core";
 import type { Mismatch } from "@testnotary/protocol";
 import { jobReports, mismatchExplanations, mismatches, repoSettingChanges, verifications } from "../db/schema.ts";
 import { accountsAsOf, type ShownAccount } from "./accounts.ts";
 import { now } from "./config.ts";
+import { fileAt, installationToken } from "./github.ts";
 import { retainedSince } from "./history.ts";
-import type { Executor } from "./installations.ts";
+import type { Executor, RepoView } from "./installations.ts";
 import { mismatchViews } from "./mismatches.ts";
 
 // A repo admin's settings and mismatch explanations (the Settings and Mismatches sections). Every
@@ -240,6 +252,33 @@ export async function explainMismatch(
     .onConflictDoNothing({ target: mismatchExplanations.mismatchId })
     .returning({ id: mismatchExplanations.id });
   return inserted.length > 0;
+}
+
+export interface GuardedFilesShown {
+  /** The product defaults, which a repo can't remove. */
+  defaults: readonly string[];
+  /** What the repo's `testnotary.json` on the default branch adds (its `guarded`, and its `nodeVersionFile`). */
+  added: string[];
+  /** Where `added` came from: the config, no config file, a config that doesn't parse, or GitHub could not be asked. */
+  source: "config" | "no_config" | "invalid" | "unavailable";
+}
+
+/**
+ * The guarded globs in effect for pull requests into the default branch, read-only: the product
+ * defaults, then what the default branch's `testnotary.json` adds (`guardedGlobs`). A pull request
+ * is checked against its own base's config, so another base branch may differ.
+ */
+export async function guardedFilesOf(repo: Pick<RepoView, "installationId" | "fullName">): Promise<GuardedFilesShown> {
+  let text: string | undefined;
+  try {
+    text = await fileAt(await installationToken(repo.installationId), repo.fullName, CONFIG_FILE);
+  } catch {
+    return { defaults: GUARDED_DEFAULTS, added: [], source: "unavailable" };
+  }
+  if (text === undefined) return { defaults: GUARDED_DEFAULTS, added: [], source: "no_config" };
+  const parsed = parseConfig(text);
+  if (!parsed.ok) return { defaults: GUARDED_DEFAULTS, added: [], source: "invalid" };
+  return { defaults: GUARDED_DEFAULTS, added: guardedGlobs(parsed.config).filter((glob) => !GUARDED_DEFAULTS.includes(glob)), source: "config" };
 }
 
 /** The mismatch recorded on a verification of the repo, by the verification's id. */
