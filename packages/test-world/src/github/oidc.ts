@@ -21,6 +21,8 @@ export interface ActionsJob {
   enterpriseSlug?: string;
   /** Extra or replaced claims. */
   claims?: JWTPayload;
+  /** `exp - iat`; GitHub's is 300 s. Shorter makes a token a job holds run low sooner. */
+  lifetimeSeconds?: number;
 }
 
 /** Token lifetime observed live: `exp - iat = 300` and `iat - nbf = 300` (live behaviour 3). */
@@ -102,7 +104,7 @@ export class OidcIssuer {
       iss: job.enterpriseSlug ? `${this.issuer}/${job.enterpriseSlug}` : this.issuer,
       nbf: iat - OIDC_LIFETIME_SECONDS,
       iat,
-      exp: iat + OIDC_LIFETIME_SECONDS,
+      exp: iat + (job.lifetimeSeconds ?? OIDC_LIFETIME_SECONDS),
       ...job.claims,
     };
     return this.sign(claims);

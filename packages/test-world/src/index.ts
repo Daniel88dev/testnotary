@@ -12,7 +12,7 @@ import { FakeSentry } from "./sentry.ts";
 import { startPostgresServer, type PostgresServer } from "./postgres-server.ts";
 import { cleanEnv, runAction, runNode, type ActionResult, type ProcessResult, type RunActionOptions, type RunOptions } from "./processes.ts";
 import { paths } from "./paths.ts";
-import { startInProcessService, type ServiceRequest } from "./service.ts";
+import { ServiceOverrides, startInProcessService, type ServiceOverride, type ServiceRequest } from "./service.ts";
 import type { AddRepoOptions } from "./github/server.ts";
 import type { FakeRepo } from "./github/state.ts";
 import { createMachine, type Machine, type MachineOptions } from "./machine.ts";
@@ -35,7 +35,7 @@ export type { DeviceFlow, DevicePlan, IssuedDeviceCode } from "./github/device-f
 export type { FakeCheckRun, FakeRepo, FakeSigningKey, RepoPermission } from "./github/state.ts";
 export type { WebFlow } from "./github/web-flow.ts";
 export { installLibrary } from "./processes.ts";
-export type { ServiceRequest } from "./service.ts";
+export type { ServiceOverride, ServiceRequest } from "./service.ts";
 export type { LogEntry } from "@testnotary/web/config";
 export { FakeSecretsManager, type SecretsManagerRequest } from "./aws/secrets-manager.ts";
 export { FakeSentry, type SentryEnvelope, type SentryEvent } from "./sentry.ts";
@@ -83,7 +83,23 @@ export interface World {
    * holds every entry the service wrote to its log (in-process service only; under `next` the
    * entries go to the child's stdout as in production).
    */
-  service: { url: string; requests: ServiceRequest[]; logs: LogEntry[] };
+  service: {
+    url: string;
+    requests: ServiceRequest[];
+    logs: LogEntry[];
+    /**
+     * Answers one endpoint (`:name` segments allowed) instead of the service until the returned
+     * function is called: a 503, a 429, a dropped connection (`"drop"`), or a slow answer, made by
+     * advancing `world.clock` before answering (in-process service only). Newest first.
+     */
+    override(method: string, path: string, handle: ServiceOverride): () => void;
+    /**
+     * For an override: the service never answers, while the world clock moves on in `stepMs` steps
+     * until the client hangs up. Resolves with the world clock's time then. Needs nothing else to
+     * move the clock, and gives up after `limitMs` of world time.
+     */
+    stall(request: Request, options?: { stepMs?: number; limitMs?: number }): Promise<Date>;
+  };
   github: FakeGitHub;
   /** AWS Secrets Manager, for the `next` service (the in-process service reads no secrets). */
   secretsManager: FakeSecretsManager;
@@ -162,7 +178,10 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     let service: HttpServer;
     // The `next` service's port is chosen first, so its own URL (where sign-in comes back) is known.
     const nextPort = options.service === "next" ? await freePort() : undefined;
-    const clock = createClock();
+    // On disk, so the action processes the world starts keep its time (action-clock-preload.ts).
+    const clockFile = join(tmp, "clock.json");
+    const clock = createClock(clockFile);
+    const overrides = new ServiceOverrides();
     const logs: LogEntry[] = [];
     // The fake GitHub serves api.github.com, github.com (device flow, browser sign-in) and the
     // avatars host at one URL.
@@ -214,7 +233,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
         nextPort,
       );
     } else {
-      service = await startInProcessService(config, requests);
+      service = await startInProcessService(config, requests, overrides);
       config.publicUrl = service.url;
     }
     cleanups.push(() => service.close());
@@ -228,7 +247,23 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     });
 
     return {
-      service: { url: service.url, requests, logs },
+      service: {
+        url: service.url,
+        requests,
+        logs,
+        override(method, path, handle) {
+          if (options.service === "next") throw new Error("service overrides need the in-process service");
+          return overrides.add(method, path, handle);
+        },
+        async stall(request, { stepMs = 1_000, limitMs = 120_000 } = {}) {
+          const start = clock.now().getTime();
+          while (!request.signal.aborted && clock.now().getTime() - start < limitMs) {
+            clock.advance(stepMs);
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+          return clock.now();
+        },
+      },
       github,
       secretsManager,
       sentry,
@@ -277,7 +312,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
         return runNode(paths.cli, args, { ...runOptions, env, baseEnv });
       },
       runAction(actionOptions) {
-        return runAction(actionOptions, { github, serviceUrl: service.url, tmp });
+        return runAction(actionOptions, { github, serviceUrl: service.url, tmp, clockFile });
       },
       close,
     };
