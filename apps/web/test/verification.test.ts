@@ -1,6 +1,6 @@
 import { decodeJwt, decodeProtectedHeader, generateKeyPair, SignJWT, type JWTPayload } from "jose";
 import { describe, expect, test } from "vitest";
-import type { FakeRepo, FixtureRepo } from "@testnotary/test-world";
+import { githubError, type FakeRepo, type FixtureRepo } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
 
 // Verification through the API, as any CI client meets it: what the service accepts as a job's
@@ -172,6 +172,20 @@ describe("the tree a verification matches", () => {
     expect(answer.status).toBe(200);
     expect(answer.body.verification).toMatchObject({ commit: merge.sha, tree: merge.tree, reason: "no_attestation" });
     expect(merge.tree).not.toBe(attestedTree);
+  });
+
+  test("can't be read when GitHub refuses the App: github_denied with GitHub's message, and no decision", async () => {
+    const r = await installed();
+    const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
+    const message = `Although you appear to have the correct authorization credentials, the '${r.repo.owner}' organization has an IP allow list enabled, and your IP address is not permitted to access this resource.`;
+    const restore = world.github.override("GET", "/repos/:owner/:repo/git/commits/:sha", () => githubError(403, message));
+    try {
+      const answer = await verify(await r.token(merge.sha));
+
+      expect(answer).toEqual({ status: 502, body: { error: "github_denied", message } });
+    } finally {
+      restore();
+    }
   });
 
   test("comes from GitHub on push too: the attested commit pushed to the default branch matches", async () => {

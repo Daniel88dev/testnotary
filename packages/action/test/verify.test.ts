@@ -260,6 +260,18 @@ describe("the gate job falls back", () => {
     expect(result.outputs).toMatchObject({ result: "skip", skip: "true" });
   });
 
+  test("when only the pull request's own config declares the suite: unknown_suite", async () => {
+    const s = await story();
+    const config = { suites: { ...PASSING.suites, e2e: { command: ["node", "-e", "process.exit(0)"] } } };
+    await featureBranch(s, { "testnotary.json": `${JSON.stringify(config)}\n` });
+    await enforce(s.repo);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+    const result = await s.gate({ sha: merge.sha, suite: "e2e" });
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "unknown_suite", skip: "false" });
+  });
+
   test("in shadow mode a fallback reads would_fall_back", async () => {
     const s = await story();
     await featureBranch(s);
