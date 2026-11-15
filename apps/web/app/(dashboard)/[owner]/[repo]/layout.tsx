@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { LegalChanges } from "../../_components/legal-changes.tsx";
 import { RepoColumn, visibleSections } from "../../_components/repo-column.tsx";
 import { MobileBar } from "../../_components/shell.tsx";
 import { getReadableRepos, getViewer, requireRepoAccess } from "../../_lib/viewer.ts";
@@ -17,6 +18,7 @@ export default async function RepoLayout({ children, params }: { children: React
       <RepoColumn access={access} viewer={viewer} repos={repos} />
       <main className="dash-main">
         <MobileBar title={fullName} repo={{ fullName, sections: visibleSections(fullName, viewer) }} viewer={viewer} />
+        <LegalChanges />
         {children}
       </main>
     </>
