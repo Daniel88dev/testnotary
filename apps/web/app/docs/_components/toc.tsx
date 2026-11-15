@@ -40,14 +40,14 @@ export function Toc({ entries }: { entries: TocEntry[] }) {
       <ul>
         {tree.map(({ entry, children }) => (
           <li key={entry.id}>
-            <a href={`#${entry.id}`} className={entry.id === active || entry.id === activeParent ? "on" : undefined}>
+            <a href={`#${entry.id}`} aria-current={entry.id === active || entry.id === activeParent ? "location" : undefined}>
               {entry.title}
             </a>
             {children.length > 0 && (
               <ul>
                 {children.map((child) => (
                   <li key={child.id}>
-                    <a href={`#${child.id}`} className={child.id === active ? "on" : undefined}>
+                    <a href={`#${child.id}`} aria-current={child.id === active ? "location" : undefined}>
                       {child.title}
                     </a>
                   </li>

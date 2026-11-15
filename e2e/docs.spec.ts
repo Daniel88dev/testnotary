@@ -133,6 +133,12 @@ test("on a phone the page tree is a full-screen menu and “On this page” is h
   await expect(toc.getByRole("link", { name: "Set up who attests" })).toHaveAttribute("href", "#who");
   await expect(toc.getByRole("link", { name: "Switch the repo to enforce" })).toHaveAttribute("href", "#enforce");
   await expect(page.getByRole("navigation", { name: "Docs" })).toBeVisible();
+
+  // Scroll spy: the step in view and its part are marked.
+  await page.evaluate(() => document.getElementById("login")!.scrollIntoView({ block: "start" }));
+  await expect(toc.getByRole("link", { name: "Sign in on your laptop" })).toHaveAttribute("aria-current", "location");
+  await expect(toc.getByRole("link", { name: "Set up who attests" })).toHaveAttribute("aria-current", "location");
+  await expect(toc.getByRole("link", { name: "Install the GitHub App" })).not.toHaveAttribute("aria-current", /.*/);
 });
 
 test("the setup guide has nine numbered steps in three parts at the anchors the dashboard and the CLI link", async ({ page }) => {

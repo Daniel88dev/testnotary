@@ -128,7 +128,7 @@ html:has(.docs) { scroll-padding-top: 96px; }
 .docs .toc li li a { padding-left: 14px; }
 .docs .toc a { display: block; padding: 4px 0; color: var(--muted); line-height: 1.35; }
 .docs .toc a:hover { color: var(--text); text-decoration: none; }
-.docs .toc a.on { color: var(--skip); }
+.docs .toc a[aria-current] { color: var(--skip); }
 .docs .toc > ul > li + li { margin-top: 10px; }
 
 /* Footer */
