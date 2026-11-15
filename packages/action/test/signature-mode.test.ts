@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { installLibrary, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine, type SshKeyPair } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
@@ -142,6 +144,65 @@ describe("a run with no usable signing key in signature mode", () => {
     expect(JSON.parse(run.stdout)).toMatchObject({ outcome: "passed", attested: true, warnings: ["no_signing_key"] });
     expect(run.stderr).toMatch(/testnotary: the repo requires signatures, but ssh-keygen could not sign with \/nonexistent\/key/);
     expect(uploads(s.repo)[0]!.attestation).toEqual({ payload: expect.any(String) });
+  });
+});
+
+describe("signature mode with a sandbox token's own key in allowed_signers", () => {
+  /** What Codex cloud shows a process, with the vendor's secrets holding the token and the key. */
+  const sandbox = (token: string, signingKey?: string) => ({ TESTNOTARY_SANDBOX: "1", CODEX_CI: "1", TESTNOTARY_TOKEN: token, TESTNOTARY_SIGNING_KEY: signingKey });
+
+  test("sandbox-key makes the key and the line; once the line is on the base branch, the sandbox signs and CI skips", async () => {
+    const s = await scene();
+    const token = await world.sandboxToken({ creator: s.user, repo: s.repo, name: "codex-cloud" });
+
+    // On the creator's laptop, in the repo: the key pair, and the line for a pull request.
+    await s.fixture.checkout("main");
+    const made = await world.runCli(["sandbox-key", "codex-cloud", "--json"], { cwd: s.fixture.dir, machine: s.machine });
+    expect(made.exitCode).toBe(0);
+    const answer = JSON.parse(made.stdout) as { token: { id: string; name: string; repository: string }; signingKey: string; allowedSignersLine: string; file: string };
+    expect(answer.token).toMatchObject({ name: "codex-cloud", repository: s.repo.fullName });
+    expect(answer.signingKey).toMatch(/^[A-Za-z0-9+/]+=*$/);
+    expect(answer.allowedSignersLine).toMatch(
+      new RegExp(`^sandbox:${answer.token.id}/github:${s.user.id} namespaces="attestation@testnotary.dev" ssh-ed25519 [A-Za-z0-9+/]+=* sandbox token "codex-cloud" for ${s.repo.fullName}, created by @${s.user.login}$`),
+    );
+    expect(answer.file).toBe(".testnotary/allowed_signers");
+    expect(await readFile(join(s.fixture.dir, ".testnotary/allowed_signers"), "utf8")).toBe(`${answer.allowedSignersLine}\n`);
+    expect(made.stderr).toContain("TESTNOTARY_SIGNING_KEY");
+
+    // The pull request adding the line merges; the agent's branch is on top of it.
+    await s.fixture.commit("Trust the codex-cloud sandbox key");
+    await s.fixture.push("main");
+    await s.fixture.checkout("feature");
+    await s.fixture.git("rebase", "--quiet", "main");
+    await s.fixture.push("feature");
+
+    const run = await world.runCli(["run"], { cwd: s.fixture.dir, machine: await world.machine(), env: sandbox(token, answer.signingKey) });
+    expect(run.stderr).toMatch(/attested=true/);
+    expect(run.stderr).toContain("(.testnotary/allowed_signers)");
+
+    const result = await s.ci();
+
+    expect(result.outputs).toMatchObject({ result: "skip", ran: "false" });
+    expect(world.github.checkRuns(s.repo)[0]!.output.title).toMatch(new RegExp(`^Skipped · .* · sandbox token "codex-cloud", created by @${s.user.login} · `));
+    // The key came from the repo: no call for GitHub's keys, only the account and its permission.
+    expect(world.github.requestsTo("GET", `/users/${s.user.login}/ssh_signing_keys`)).toHaveLength(0);
+    // The service never received the private half.
+    const sent = world.service.requests.map((request) => request.text).join("\n");
+    expect(sent).not.toContain(answer.signingKey);
+    expect(sent).not.toContain("PRIVATE KEY");
+  });
+
+  test("a sandbox without its key uploads unsigned with the warning, and CI falls back with signature_missing", async () => {
+    const s = await scene();
+    const token = await world.sandboxToken({ creator: s.user, repo: s.repo, name: "keyless" });
+
+    const run = await world.runCli(["run", "--json"], { cwd: s.fixture.dir, machine: await world.machine(), env: sandbox(token) });
+    expect(JSON.parse(run.stdout)).toMatchObject({ outcome: "passed", attested: true, warnings: ["no_signing_key"] });
+    expect(run.stderr).toContain("TESTNOTARY_SIGNING_KEY is not set");
+
+    const result = await s.ci();
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_missing", ran: "true" });
   });
 });
 

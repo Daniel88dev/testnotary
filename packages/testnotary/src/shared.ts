@@ -58,5 +58,6 @@ export {
   type RefusedRunUpload,
   type RunEnvironment,
   type RunUpload,
+  type SandboxTokensResponse,
   type ServiceRefusal,
 } from "@testnotary/protocol";

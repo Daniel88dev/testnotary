@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isoInstant } from "./attestation.ts";
+import { account } from "./login.ts";
 
 // An attestation's signature fields (signature mode). The library uploads them beside the
 // canonical payload; the service checks them, adds whether GitHub listed the key at upload, stores
@@ -49,6 +50,8 @@ export type AttestationSignature = z.infer<typeof attestationSignature>;
  * shown again.
  */
 export const sandboxTokensResponse = z.object({
+  /** The bearer's account: every token listed is its own. */
+  account,
   tokens: z.array(
     z.object({
       id: z.string(),
