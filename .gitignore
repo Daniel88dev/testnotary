@@ -11,3 +11,13 @@ blob-report/
 .env.*
 !.env.example
 .DS_Store
+# Terraform: state, plans, variables and backend settings stay off the repo.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+backend.hcl
+crash.log
