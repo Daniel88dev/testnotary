@@ -28,7 +28,8 @@ describe("a service with a secret it cannot read", () => {
   });
 
   test("answers no request and reports which secret is missing to Sentry", async () => {
-    // A production server exits before listening; `next dev` drops the connection instead.
+    // The standalone server answers every request 500 (so a deploy fails its health check);
+    // `next dev` drops the connection instead.
     const answer = await fetch(`${world.service.url}/api/v1/health`).then(
       (response) => response.status,
       () => "connection closed",

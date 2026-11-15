@@ -20,7 +20,8 @@
     "start": "next start",
     "typecheck": "next typegen && tsc -p . && tsc -p test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node scripts/migrate.ts"
+    "db:migrate": "node scripts/migrate.ts",
+    "build:migrate": "esbuild scripts/migrate.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/scripts/migrate.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1164.0",
@@ -37,6 +38,7 @@
     "@testnotary/test-world": "workspace:*",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "drizzle-kit": "^0.31.11"
+    "drizzle-kit": "^0.31.11",
+    "esbuild": "^0.28.2"
   }
 }

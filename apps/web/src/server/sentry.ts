@@ -12,8 +12,16 @@ export function startSentry(env: Readonly<Record<string, string | undefined>>): 
     dsn: env.SENTRY_DSN,
     environment: env.SENTRY_ENVIRONMENT ?? "production",
     release: env.SENTRY_RELEASE || undefined,
-    sendDefaultPii: false,
     tracesSampleRate: 0,
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+      graphQL: { document: false, variables: false },
+    },
+    // A second guard: whatever an integration attaches, nothing from the request leaves.
     beforeSend(event) {
       if (event.request) {
         delete event.request.headers;
