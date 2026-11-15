@@ -53,7 +53,7 @@ export async function verifyJob(db: Database, job: { claims: ActionsClaims; repo
     now: now(),
     sources: {
       configAtBase: async () => (firstParent ? fileAt(installation, repo.fullName, CONFIG_FILE, firstParent) : undefined),
-      newestAttestation: (suite) => newestAttestation(db, repo.id, suite, commit.tree),
+      attestations: (suite) => attestationsOfTree(db, repo.id, suite, commit.tree),
       hasWriteAccess: (accountId) => hasWriteAccess(db, repo, accountId, installation),
     },
   });
@@ -77,24 +77,22 @@ export async function verifyJob(db: Database, job: { claims: ActionsClaims; repo
   return (await readVerification(db, row!.id, repo.id))!;
 }
 
-async function newestAttestation(db: Executor, repoId: number, suite: string, tree: string): Promise<AttestationCandidate | undefined> {
-  const [row] = await db
+/** Every attestation for the repo and suite that names the tree, newest run end first. */
+async function attestationsOfTree(db: Executor, repoId: number, suite: string, tree: string): Promise<AttestationCandidate[]> {
+  const rows = await db
     .select({ attestation: attestations, tokenKind: tokens.kind })
     .from(attestations)
     .innerJoin(tokens, eq(tokens.id, attestations.tokenId))
     .where(and(eq(attestations.repoId, repoId), eq(attestations.suite, suite), eq(attestations.tree, tree)))
-    .orderBy(desc(attestations.endedAt), desc(attestations.createdAt))
-    .limit(1);
-  if (!row) return undefined;
-  const { attestation } = row;
-  return {
+    .orderBy(desc(attestations.endedAt), desc(attestations.createdAt));
+  return rows.map(({ attestation, tokenKind }) => ({
     id: attestation.id,
     accountId: attestation.accountId,
     tokenId: attestation.tokenId,
-    tokenKind: row.tokenKind === "sandbox" ? "sandbox" : "laptop",
+    tokenKind: tokenKind === "sandbox" ? "sandbox" : "laptop",
     endedAt: attestation.endedAt,
     command: decodeAttestationPayload(attestation.payload.toString("utf8"))?.command ?? [],
-  };
+  }));
 }
 
 /** One of the repo's verifications, with the matched attestation's payload exactly as stored. */

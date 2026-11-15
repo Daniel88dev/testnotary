@@ -26,6 +26,7 @@ export {
   type FallbackReason,
   type VerificationDecision,
   type VerificationInput,
+  type VerificationOrder,
   type VerificationResult,
   type VerificationSources,
   type VerificationState,

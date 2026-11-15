@@ -49,6 +49,28 @@ async function story(options: { config?: Record<string, unknown> } = {}): Promis
   };
 }
 
+/** A second developer with write access, signed in on their own laptop, in the same clone. */
+async function colleague(s: Story): Promise<{ user: FakeAccount; attest(): Promise<void> }> {
+  const user = world.github.addUser({ login: `colleague-${++repos}` });
+  world.github.setPermission(s.repo, user, "write");
+  const machine = await world.machine();
+  world.github.deviceFlow.approveNext(user);
+  expect((await world.runCli(["login"], { cwd: machine.home, machine })).exitCode).toBe(0);
+  return {
+    user,
+    async attest() {
+      const result = await world.runCli(["run"], { cwd: s.fixture.dir, machine });
+      expect(result.stderr).toMatch(/attested=true/);
+    },
+  };
+}
+
+/** The account a recorded verification's matched attestation names, from its payload. */
+function attesterOf(verification: Record<string, unknown>): number {
+  const { payload } = verification.attestation as { payload: string };
+  return (JSON.parse(payload) as { attester: { account: number } }).attester.account;
+}
+
 /** A feature branch with one change, pushed, so a pull request can be opened from it. */
 async function featureBranch(s: Story, files: Record<string, string> = { "src/a.js": "export const a = 1;\n" }) {
   await s.fixture.branch("feature");
@@ -139,6 +161,41 @@ describe("the verification output", () => {
     const read = await readBack(s.repo, merge.sha, gate.outputs.verification!);
 
     expect(read.body.verification).toMatchObject({ mode: "shadow", result: "would_fall_back", reason: "attester_no_write", attestation: { format: "testnotary.attestation/v1" } });
+  });
+
+  test("an older attestation of the tree still skips when the newest one's attester lost write access, and is the one recorded", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const later = await colleague(s);
+    await later.attest();
+    world.github.setPermission(s.repo, later.user, "read");
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+
+    const gate = await s.gate({ sha: merge.sha });
+    const read = await readBack(s.repo, merge.sha, gate.outputs.verification!);
+
+    expect(gate.outputs).toMatchObject({ result: "skip", skip: "true", reason: "" });
+    expect(read.body.verification).toMatchObject({ result: "skip", reason: null });
+    expect(attesterOf(read.body.verification!)).toBe(s.user.id);
+  });
+
+  test("when no attestation of the tree clears, the newest one's reason is given and the newest one recorded", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const later = await colleague(s);
+    await later.attest();
+    world.github.setPermission(s.repo, s.user, "read");
+    world.github.setPermission(s.repo, later.user, "none");
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+    const gate = await s.gate({ sha: merge.sha });
+    const read = await readBack(s.repo, merge.sha, gate.outputs.verification!);
+
+    expect(gate.outputs).toMatchObject({ result: "would_fall_back", reason: "attester_no_write" });
+    expect(attesterOf(read.body.verification!)).toBe(later.user.id);
   });
 
   test("is no use to another repo's CI", async () => {

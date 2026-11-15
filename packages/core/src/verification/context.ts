@@ -23,8 +23,8 @@ export interface AttestationCandidate {
 export interface VerificationSources {
   /** The text of `testnotary.json` at the built commit's first parent, or undefined when it has none. */
   configAtBase(): Promise<string | undefined>;
-  /** The newest attestation for the repo and suite that names `tree`, if any. */
-  newestAttestation(suite: string): Promise<AttestationCandidate | undefined>;
+  /** Every attestation for the repo and suite that names `tree`, newest run end first. */
+  attestations(suite: string): Promise<AttestationCandidate[]>;
   /** Whether the account has `admin` or `write` on the repo, checked live with GitHub. */
   hasWriteAccess(accountId: number): Promise<boolean>;
 }
@@ -46,15 +46,17 @@ export interface VerificationInput {
 
 /**
  * The verification as its steps go: the input plus what each step found, for the steps after it.
- * A step fills its field before it may stop the verification, so a stopped verification still
- * records, say, the attestation that turned out too old.
+ * A step fills its field before it may stop the verification.
  */
 export interface VerificationState extends VerificationInput {
   /** The config at the first parent, once the suite step has read it. */
   config?: TestnotaryConfig;
   /** The suite in that config, once the suite step has found it. */
   suite?: Suite;
-  /** The attestation the attestation step matched. */
+  /**
+   * In the attestation steps, the attestation being judged; after them, the one that cleared them
+   * (or, when none did, the newest).
+   */
   attestation?: AttestationCandidate;
 }
 
@@ -65,4 +67,18 @@ export interface VerificationState extends VerificationInput {
 export interface VerificationStep {
   name: string;
   decide(state: VerificationState): Promise<FallbackReason | undefined>;
+}
+
+/**
+ * The decision order, in three parts. The verification stops at the first reason, except in the
+ * attestation steps, which judge each attestation naming the tree in turn, newest first: the first
+ * one to clear them all is matched, and when none does, the newest one's reason stands.
+ */
+export interface VerificationOrder {
+  /** Before any attestation: about the suite and the tree CI builds. */
+  tree: readonly VerificationStep[];
+  /** Run once per attestation naming the tree, with `state.attestation` set to it. */
+  attestation: readonly VerificationStep[];
+  /** Once an attestation has cleared the attestation steps. */
+  matched: readonly VerificationStep[];
 }
