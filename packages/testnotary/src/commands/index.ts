@@ -1,13 +1,14 @@
-// Every `testnotary <command>`: one file per command, one line each here, alphabetical.
-import type { Command } from "./command.ts";
+// Every CLI command, one import and one entry each, in alphabetical order. To add a command, write
+// `commands/<name>.ts` exporting a `Command` and add one line to each list below.
+import type { Command } from "../command.ts";
+import { exec } from "./exec.ts";
 import { login } from "./login.ts";
 import { logout } from "./logout.ts";
 import { whoami } from "./whoami.ts";
 
-export type { Command } from "./command.ts";
-
-export const commands: Record<string, Command> = {
+export const commands: readonly Command[] = [
+  exec,
   login,
   logout,
   whoami,
-};
+];

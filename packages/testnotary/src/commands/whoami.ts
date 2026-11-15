@@ -1,19 +1,19 @@
 import { readStoredToken } from "../credentials.ts";
-import { EXIT, Output, parseFlags, shortDate } from "../output.ts";
+import { UsageError, parseCommandArgs, type Command } from "../command.ts";
+import { Output, shortDate } from "../output.ts";
+import { EXIT } from "../report.ts";
 import { callService, ServiceUnreachable } from "../service.ts";
 import { resolveServiceUrl, whoamiResponse } from "../shared.ts";
-import type { Command } from "./command.ts";
 
 export const whoami: Command = {
-  summary: "print the account and token this machine uses",
-  async run(args) {
-    const { json, rest } = parseFlags(args);
-    const out = new Output(json);
-    if (rest.length > 0) {
-      out.say(`whoami takes no arguments (got ${rest.join(" ")})`);
-      return EXIT.usage;
-    }
-    const env = process.env;
+  name: "whoami",
+  usage: "whoami [--json]",
+  summary: "Print the account and the token this machine uses.",
+  async run(args, context) {
+    const { flags, positionals } = parseCommandArgs(args, []);
+    if (positionals.length > 0) throw new UsageError("whoami takes no arguments");
+    const out = new Output(flags.json);
+    const env = context.env;
     const serviceUrl = resolveServiceUrl(env);
     // TESTNOTARY_TOKEN is the token every command uses when it is set, as it is in a sandbox.
     const token = env.TESTNOTARY_TOKEN || (await readStoredToken(serviceUrl, env));
@@ -26,7 +26,7 @@ export const whoami: Command = {
       if (!answer.body) return out.fail("service_error", [`the service answered ${answer.status}`]);
       const { account, token: info } = answer.body;
       out.answer(`@${account.login} · ${info.kind} token "${info.name}" · expires ${shortDate(new Date(info.expiresAt))}`, answer.body);
-      return EXIT.ok;
+      return EXIT.passed;
     } catch (error) {
       if (error instanceof ServiceUnreachable) return out.fail("service_unreachable", [`the Testnotary service could not be reached: ${error.message}`]);
       throw error;

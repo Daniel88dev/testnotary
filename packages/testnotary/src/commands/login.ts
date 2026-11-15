@@ -1,10 +1,11 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { storeToken, readStoredToken } from "../credentials.ts";
-import { EXIT, Output, parseFlags, shortDate } from "../output.ts";
+import { UsageError, parseCommandArgs, type Command } from "../command.ts";
+import { Output, shortDate } from "../output.ts";
+import { EXIT } from "../report.ts";
 import { sandboxMarker } from "../sandbox.ts";
 import { callService, ServiceUnreachable } from "../service.ts";
 import { LINKS, deviceStartResponse, devicePollResponse, resolveServiceUrl, type DevicePollRequest, type GitHubDeniedCause } from "../shared.ts";
-import type { Command } from "./command.ts";
 
 /** "<OS> machine, <date>": the laptop token's default name, never the hostname. */
 export function laptopTokenName(platform: NodeJS.Platform, date: Date): string {
@@ -19,15 +20,14 @@ const DENIED_HELP: Record<GitHubDeniedCause, string> = {
 };
 
 export const login: Command = {
-  summary: "sign this machine in with GitHub and keep a laptop token",
-  async run(args) {
-    const { json, rest } = parseFlags(args);
-    const out = new Output(json);
-    if (rest.length > 0) {
-      out.say(`login takes no arguments (got ${rest.join(" ")})`);
-      return EXIT.usage;
-    }
-    const env = process.env;
+  name: "login",
+  usage: "login [--json]",
+  summary: "Sign this machine in with GitHub and keep a laptop token in the keychain.",
+  async run(args, context) {
+    const { flags, positionals } = parseCommandArgs(args, []);
+    if (positionals.length > 0) throw new UsageError("login takes no arguments");
+    const out = new Output(flags.json);
+    const env = context.env;
     const marker = sandboxMarker(env);
     if (marker) {
       return out.fail(
@@ -75,7 +75,7 @@ export const login: Command = {
         if (storage === "file") out.say("no usable keychain on this machine: the laptop token is in a file only you can read");
         out.say(`signed in as @${answer.account.login} (laptop token "${answer.tokenInfo.name}")`);
         out.result({ account: answer.account, token: answer.tokenInfo, storage });
-        return EXIT.ok;
+        return EXIT.passed;
       }
       return out.fail("expired_token", ["The sign-in code expired before it was entered."]);
     } catch (error) {

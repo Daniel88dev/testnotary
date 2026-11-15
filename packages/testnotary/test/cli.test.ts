@@ -20,6 +20,6 @@ describe("testnotary as a process", () => {
 
     expect(result.exitCode).toBe(64);
     expect(result.stderr).toContain('testnotary: unknown command "frobnicate"');
-    expect(result.stderr).toMatch(/^ {2}login\s/m);
+    expect(result.stderr).toMatch(/^ {2}testnotary login /m);
   });
 });
