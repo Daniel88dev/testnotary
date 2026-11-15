@@ -71,6 +71,13 @@
       "when": 1794778281453,
       "tag": "0009_audits_and_mismatches",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794780365812,
+      "tag": "0010_verification_ci_run",
+      "breakpoints": true
     }
   ]
 }

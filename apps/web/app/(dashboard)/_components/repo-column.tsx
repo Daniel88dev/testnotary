@@ -19,11 +19,21 @@ export function visibleSections(fullName: string, viewer: Viewer | undefined) {
  * The repo column (prototype `renderB`): the switcher, the mode, the six sections with the open
  * mismatches counted in amber, the suites with their last result, and the settings in effect.
  */
-export function RepoColumn({ access, viewer, repos }: { access: RepoAccess; viewer: Viewer | undefined; repos: ReadableRepo[] }) {
+export function RepoColumn({
+  access,
+  viewer,
+  repos,
+  suites,
+}: {
+  access: RepoAccess;
+  viewer: Viewer | undefined;
+  repos: ReadableRepo[];
+  /** Each suite's latest verification: cyan when it skipped or would have, amber when the tests ran. */
+  suites: { name: string; lastResult: "skip" | "run"; at: string }[];
+}) {
   const { repo } = access;
-  // Mismatches and suites arrive with their tickets (T-822, T-824); until then there are none.
+  // Open mismatches arrive with T-828 (an explanation closes one); until then none are counted.
   const openMismatches = 0;
-  const suites: { name: string; lastResult: "skip" | "run"; at: string }[] = [];
   return (
     <div className="dash-nav">
       <details className="menu">
@@ -62,7 +72,7 @@ export function RepoColumn({ access, viewer, repos }: { access: RepoAccess; view
             href={section.href}
             exact={section.path === ""}
             also={
-              section.path === "verifications" ? [repoHref(repo.fullName, "commit/")] : section.path === "runs" ? [repoHref(repo.fullName, "run/")] : []
+              section.path === "verifications" ? [repoHref(repo.fullName, "commit/")] : section.path === "runs" ? [repoHref(repo.fullName, "runs/")] : []
             }
           >
             <span className="l">{section.label}</span>
