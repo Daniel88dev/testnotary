@@ -167,7 +167,11 @@ function oneLine(text: string): string {
   return text.replace(/[\u0000-\u001f\u007f]+/g, " ").slice(0, 1000);
 }
 
-/** Markdown-inert text for the job summary. */
+/**
+ * Markdown-inert text for the job summary: no links, HTML, code or emphasis from a token name or
+ * login. Underscores inside words (reason codes) are not emphasis in GitHub's Markdown, so they
+ * stay as they are.
+ */
 export function escape(text: string): string {
-  return text.replace(/[\\`*_[\]<>|#]/g, (c) => `\\${c}`);
+  return text.replace(/[\\`*[\]<>|]|(?<!\w)_|_(?!\w)/g, (c) => `\\${c}`);
 }

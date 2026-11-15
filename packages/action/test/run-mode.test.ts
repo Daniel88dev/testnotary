@@ -140,6 +140,160 @@ describe("on a fallback the step runs the suite through the library", () => {
   });
 });
 
+/** The recorded verification a later step of the repo's CI reads back with its own fresh OIDC token. */
+async function readBack(repo: FakeRepo, sha: string, id: string): Promise<{ status: number; verification?: Record<string, unknown> }> {
+  const token = await world.github.oidc.tokenFor({ repo, sha, ref: "refs/pull/1/merge", eventName: "pull_request" }, "https://testnotary.dev");
+  const response = await fetch(`${world.service.url}/api/v1/verifications/${id}`, { headers: { authorization: `Bearer ${token}` } });
+  return { status: response.status, ...((await response.json()) as { verification?: Record<string, unknown> }) };
+}
+
+/** The service calls a step made since `from`, as `METHOD path`. */
+function callsSince(from: number): string[] {
+  return world.service.requests.slice(from).map((r) => `${r.method} ${r.path}`);
+}
+
+describe("the gate recipe", () => {
+  test("the test step reuses the gate job's verification id: it reads it back, verifies nothing anew, and reports against it", async () => {
+    const s = await story({ config: MARKED(0) });
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const gate = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { suite: "test", mode: "verify" } });
+    expect(gate.outputs).toMatchObject({ result: "would_skip", skip: "false" });
+    const id = gate.outputs.verification!;
+    const workspace = await ciWorkspace(s, merge.sha);
+    const from = world.service.requests.length;
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test", verification: id } });
+
+    expect(callsSince(from)).toEqual([`GET /api/v1/verifications/${id}`, `POST /api/v1/verifications/${id}/report`]);
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs).toMatchObject({ result: "would_skip", reason: "", ran: "true" });
+    expect((await readBack(s.repo, merge.sha, id)).verification).toMatchObject({ jobReport: { outcome: "passed" } });
+  });
+
+  test("an empty verification id (the gate failed) makes the step verify on its own", async () => {
+    const s = await story();
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const workspace = await ciWorkspace(s, merge.sha);
+    const from = world.service.requests.length;
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test", verification: "" } });
+
+    expect(callsSince(from)[0]).toBe("POST /api/v1/verifications");
+    expect(result.outputs).toMatchObject({ result: "would_fall_back", reason: "no_attestation", ran: "true" });
+  });
+
+  test("a verification id of another commit is not reused: the step verifies on its own", async () => {
+    const s = await story();
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const gate = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { suite: "test", mode: "verify" } });
+    await s.fixture.commit("Change a", { "src/a.js": "export const a = 2;\n" });
+    await s.fixture.push();
+    const next = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const workspace = await ciWorkspace(s, next.sha);
+    const from = world.service.requests.length;
+
+    await world.runAction({ repo: s.repo, sha: next.sha, workspace, inputs: { suite: "test", verification: gate.outputs.verification! } });
+
+    expect(callsSince(from).slice(0, 2)).toEqual([`GET /api/v1/verifications/${gate.outputs.verification}`, "POST /api/v1/verifications"]);
+  });
+
+  test("a gate job that skips writes the PR line itself, since the test job won't run", async () => {
+    const s = await story();
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+
+    const gate = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { suite: "test", mode: "verify" } });
+
+    expect(gate.outputs).toMatchObject({ result: "skip", skip: "true" });
+    const [check, ...more] = world.github.checkRuns(s.repo);
+    expect(more).toEqual([]);
+    expect(check).toMatchObject({ name: "Testnotary / test", conclusion: "success" });
+    expect(gate.summary).toContain(check!.output.title);
+  });
+
+  test("a gate job that does not skip writes only its job summary: the test job makes the check run", async () => {
+    const s = await story();
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+    const gate = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { suite: "test", mode: "verify" } });
+
+    expect(world.github.checkRuns(s.repo)).toEqual([]);
+    expect(gate.summary).toContain("Would have fallen back: no_attestation");
+  });
+});
+
+describe("the job report", () => {
+  test("after the tests ran, one call stores the outcome, duration and runner environment against the verification", async () => {
+    const s = await story({ config: MARKED(3) });
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const workspace = await ciWorkspace(s, merge.sha);
+    const from = world.service.requests.length;
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    const reports = world.service.requests.slice(from).filter((r) => r.method === "POST" && /^\/api\/v1\/verifications\/[^/]+\/report$/.test(r.path));
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.headers.authorization).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
+    const sent = JSON.parse(reports[0]!.text) as Record<string, unknown>;
+    expect(sent).toEqual({ outcome: "failed", durationMs: expect.any(Number) as number, environment: { os: "Linux", arch: "X64", image: null, imageVersion: null, node: process.version } });
+    const verificationId = /^\/api\/v1\/verifications\/([^/]+)\/report$/.exec(reports[0]!.path)![1]!;
+    const read = await readBack(s.repo, merge.sha, verificationId);
+    expect(read.verification).toMatchObject({ result: "would_fall_back", jobReport: { outcome: "failed", durationMs: sent.durationMs } });
+    expect(result.exitCode).toBe(3);
+  });
+
+  test("a skip sends no report: no tests ran", async () => {
+    const s = await story();
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    const workspace = await ciWorkspace(s, merge.sha);
+    const from = world.service.requests.length;
+
+    await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    expect(world.service.requests.slice(from).filter((r) => r.path.endsWith("/report"))).toEqual([]);
+  });
+
+  test("a report the service refuses only warns: the step still exits with the tests' exit code, and the verification shows no outcome", async () => {
+    const s = await story({ config: MARKED(3) });
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const workspace = await ciWorkspace(s, merge.sha);
+    // The second token the job asks for (the report's) names another commit, so the service
+    // finds no verification of it to report on.
+    let tokens = 0;
+    const restore = world.github.override("GET", "/oidc/_request", async ({ request, url, github }) => {
+      const job = github.oidc.job(/^Bearer (.+)$/i.exec(request.headers.get("authorization") ?? "")![1]!)!;
+      const sha = ++tokens === 1 ? job.sha : "0".repeat(40);
+      return Response.json({ count: 1, value: await github.oidc.tokenFor({ ...job, sha }, url.searchParams.get("audience") ?? undefined) });
+    });
+    const from = world.service.requests.length;
+    let result;
+    try {
+      result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+    } finally {
+      restore();
+    }
+
+    expect(result.exitCode).toBe(3);
+    expect(result.stdout).toMatch(/^::warning::Testnotary: the job report did not reach the service \(the service answered 404\); the verification shows "outcome unknown"\./m);
+    expect(result.outputs).toMatchObject({ result: "would_fall_back", ran: "true" });
+    const report = world.service.requests.slice(from).find((r) => r.path.endsWith("/report"))!;
+    const verificationId = /^\/api\/v1\/verifications\/([^/]+)\/report$/.exec(report.path)![1]!;
+    expect((await readBack(s.repo, merge.sha, verificationId)).verification).toMatchObject({ jobReport: null });
+  });
+});
+
 describe("setup errors", () => {
   test.each(["pnpm@10.34.9", "yarn@4.9.2", null])(
     "packageManager %s without the library installed: the step fails with a setup error and never runs the raw command",
@@ -207,5 +361,53 @@ describe("the PR line", () => {
     const runPage = new RegExp(`\\(${world.service.url}/${s.repo.owner}/widgets/runs/[0-9a-f-]{36}\\)`);
     expect(check!.output.summary).toMatch(runPage);
     expect(result.summary).toMatch(runPage);
+  });
+
+  test("in shadow mode a run the attestation covers reads would_skip, runs the tests, and names both", async () => {
+    const s = await story();
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const workspace = await ciWorkspace(s, merge.sha);
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs).toEqual({ result: "would_skip", reason: "", ran: "true" });
+    expect(existsSync(join(workspace, "ran.txt"))).toBe(true);
+    const [check] = world.github.checkRuns(s.repo);
+    expect(check).toMatchObject({ conclusion: "success" });
+    expect(check!.output.title).toMatch(new RegExp(`^Would have skipped · test passed .+ ago · attested by @${s.user.login} · .+ · shadow mode: the tests passed in [\\d.]+ s$`));
+  });
+
+  test("without checks: write the step makes no check run, and still writes the job summary", async () => {
+    const s = await story();
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    const workspace = await ciWorkspace(s, merge.sha);
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" }, checks: false });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs).toMatchObject({ result: "skip" });
+    expect(world.github.checkRuns(s.repo)).toEqual([]);
+    expect(result.stdout).not.toMatch(/::(warning|error)::/);
+    expect(result.summary).toMatch(/\*\*Skipped · test passed/);
+  });
+
+  test("a fork pull request gets a read-only token: no check run, and the tests run as usual", async () => {
+    const s = await story({ config: MARKED(0) });
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const workspace = await ciWorkspace(s, merge.sha);
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" }, fork: true });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_oidc_token", ran: "true" });
+    expect(world.github.checkRuns(s.repo)).toEqual([]);
+    expect(result.summary).toContain("Fell back: no_oidc_token");
   });
 });
