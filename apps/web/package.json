@@ -1,0 +1,40 @@
+{
+  "name": "@testnotary/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Testnotary service and web app: API, landing page, docs and dashboard.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    "./config": "./src/server/config.ts",
+    "./db": "./src/db/client.ts",
+    "./migrate": "./src/db/migrate.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "next typegen && tsc -p . && tsc -p test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@testnotary/core": "workspace:*",
+    "@testnotary/protocol": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "next": "^16.4.5",
+    "postgres": "^4.1.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@testnotary/test-world": "workspace:*",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "^0.31.11"
+  }
+}

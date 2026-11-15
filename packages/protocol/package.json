@@ -1,0 +1,17 @@
+{
+  "name": "@testnotary/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Wire types and zod schemas for every /api/v1 request and response.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

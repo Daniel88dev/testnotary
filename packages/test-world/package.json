@@ -1,0 +1,22 @@
+{
+  "name": "@testnotary/test-world",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The shared test world: the real service against Postgres, a fake GitHub and fixture git repos.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./vitest": "./src/vitest.ts",
+    "./playwright": "./src/playwright.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@playwright/test": "^1.65.0",
+    "@testnotary/web": "workspace:*",
+    "jose": "^6.2.16",
+    "postgres": "^4.1.0"
+  }
+}

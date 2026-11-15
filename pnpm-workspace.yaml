@@ -1,0 +1,18 @@
+packages:
+  - packages/*
+  - apps/*
+
+# Supply-chain block. Keep these on; loosen one only with a reason in the pull request.
+# Wait a week before installing any newly published version (matches Dependabot's cooldown).
+minimumReleaseAge: 10080
+# Refuse a version whose publishing trust is weaker than its predecessors'.
+trustPolicy: no-downgrade
+# Transitive dependencies may not come from git URLs or bare tarballs.
+blockExoticSubdeps: true
+# Install scripts run only for the packages listed here; anything else fails the install.
+strictDepBuilds: true
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+# The service targets Node 24 and the library Node >=20; never fail an install on a newer local Node.
+engineStrict: false
