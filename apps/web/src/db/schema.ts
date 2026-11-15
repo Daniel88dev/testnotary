@@ -257,7 +257,7 @@ export const tokenRevocations = pgTable("token_revocations", {
     .references(() => tokens.id),
   /** The account that revoked it, when an admin or owner did so in the dashboard; null when the bearer did (`logout`, or a new sign-in on the same machine). */
   revokedBy: githubId("revoked_by").references(() => accounts.githubId),
-  /** `logout`, `replaced` (a new sign-in on the same machine), and whatever later tickets add. */
+  /** `logout`, `replaced` (a new sign-in on the same machine), `revoked` (its owner, on the Tokens page), and whatever later tickets add. */
   reason: text("reason").notNull(),
   at: at(),
 });
@@ -300,3 +300,26 @@ export const verifications = pgTable(
   },
   (table) => [index("verifications_repo").on(table.repoId, table.createdAt)],
 );
+
+/** A token's new name, given by its owner on the Tokens page. The latest row is the token's name. */
+export const tokenRenames = pgTable(
+  "token_renames",
+  {
+    id: rowId(),
+    tokenId: uuid("token_id")
+      .notNull()
+      .references(() => tokens.id),
+    name: text("name").notNull(),
+    at: at(),
+  },
+  (table) => [index("token_renames_latest").on(table.tokenId, table.id)],
+);
+
+/**
+ * A browser session that was signed out. Sessions live only in their signed, encrypted cookies;
+ * this row makes a signed-out session's cookie worthless even if a copy of it survives.
+ */
+export const sessionEnds = pgTable("session_ends", {
+  sessionId: text("session_id").primaryKey(),
+  at: at(),
+});

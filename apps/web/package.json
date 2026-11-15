@@ -28,6 +28,7 @@
     "@sentry/nextjs": "^11.11.0",
     "@testnotary/core": "workspace:*",
     "@testnotary/protocol": "workspace:*",
+    "better-auth": "~1.7.18",
     "drizzle-orm": "^0.45.4",
     "jose": "^6.2.16",
     "next": "^16.4.5",

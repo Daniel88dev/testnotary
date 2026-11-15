@@ -1,4 +1,5 @@
-import { test as base } from "@playwright/test";
+import { test as base, type Page } from "@playwright/test";
+import type { FakeAccount } from "./github/app.ts";
 import { createWorld, POSTGRES_ENV, type World } from "./index.ts";
 import { startPostgresServer } from "./postgres-server.ts";
 
@@ -22,6 +23,18 @@ export const test = base.extend<object, { world: World }>({
 });
 
 export { expect } from "@playwright/test";
+
+/**
+ * Signs `user` in to the dashboard the way a person does: *Sign in with GitHub* on `/dashboard`,
+ * through the fake GitHub's authorization (approved for `user`), and back. Ends on `next` (default
+ * `/dashboard`). Each Playwright test has its own browser context, so its session is its own.
+ */
+export async function signIn(page: Page, world: World, user: FakeAccount, next = "/dashboard"): Promise<void> {
+  world.github.webFlow.approveNext(user);
+  await page.goto(next);
+  await page.getByRole("button", { name: "Sign in with GitHub" }).first().click();
+  await page.waitForURL((url) => url.origin === world.service.url && url.pathname === next.split("?")[0]);
+}
 
 /** Playwright `globalSetup`: starts this worktree's Postgres for the run and stops it afterwards. */
 export async function globalSetup(): Promise<() => Promise<void>> {

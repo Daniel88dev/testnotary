@@ -39,9 +39,14 @@ export class DeviceFlow {
   expiresIn = 900;
   /** Every device code handed out, oldest first. */
   readonly issued: IssuedDeviceCode[] = [];
-  /** User tokens (`ghu_…`) handed out, and whose they are. */
-  readonly userTokens = new Map<string, FakeAccount>();
   private readonly plans: DevicePlan[] = [];
+
+  /** Every user token (`ghu_…`) GitHub handed out, and whose it is (shared with the browser sign-in). */
+  readonly userTokens: Map<string, FakeAccount>;
+
+  constructor(userTokens: Map<string, FakeAccount>) {
+    this.userTokens = userTokens;
+  }
 
   /** The next device code is approved by `user`, after `pending` and `slowDown` polls. */
   approveNext(user: FakeAccount, options: { pending?: number; slowDown?: number } = {}): void {

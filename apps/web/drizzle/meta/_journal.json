@@ -36,6 +36,13 @@
       "when": 1794771223046,
       "tag": "0004_verifications",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794772629807,
+      "tag": "0005_token_renames_and_session_ends",
+      "breakpoints": true
     }
   ]
 }
