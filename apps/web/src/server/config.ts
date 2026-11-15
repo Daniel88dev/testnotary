@@ -6,15 +6,42 @@ export interface ServiceConfig {
   databaseUrl: string | undefined;
   /** GitHub's REST API. The test world points this at its fake GitHub. */
   githubApiUrl: string;
+  /** github.com itself, where the device flow lives. The test world points this at its fake GitHub. */
+  githubWebUrl: string;
+  /** The Testnotary GitHub App's client id: the device flow's `client_id`. Not a secret. */
+  githubClientId: string | undefined;
+  /** The App's webhook secret (a secret). Without it every webhook is refused. */
+  githubWebhookSecret: string | undefined;
 }
 
 const scoped = new AsyncLocalStorage<ServiceConfig>();
 
+const ENV = {
+  databaseUrl: "DATABASE_URL",
+  githubApiUrl: "GITHUB_API_URL",
+  githubWebUrl: "GITHUB_WEB_URL",
+  githubClientId: "GITHUB_CLIENT_ID",
+  githubWebhookSecret: "GITHUB_WEBHOOK_SECRET",
+} as const satisfies Record<keyof ServiceConfig, string>;
+
 export function configFromEnv(env: Readonly<Record<string, string | undefined>>): ServiceConfig {
   return {
-    databaseUrl: env.DATABASE_URL || undefined,
-    githubApiUrl: (env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, ""),
+    databaseUrl: env[ENV.databaseUrl] || undefined,
+    githubApiUrl: (env[ENV.githubApiUrl] || "https://api.github.com").replace(/\/+$/, ""),
+    githubWebUrl: (env[ENV.githubWebUrl] || "https://github.com").replace(/\/+$/, ""),
+    githubClientId: env[ENV.githubClientId] || undefined,
+    githubWebhookSecret: env[ENV.githubWebhookSecret] || undefined,
   };
+}
+
+/** The environment that `configFromEnv` reads back as this config (for a service in another process). */
+export function configToEnv(config: ServiceConfig): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, name] of Object.entries(ENV)) {
+    const value = config[key as keyof ServiceConfig];
+    if (value !== undefined) env[name] = value;
+  }
+  return env;
 }
 
 /**

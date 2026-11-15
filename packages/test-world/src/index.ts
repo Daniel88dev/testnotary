@@ -10,9 +10,11 @@ import { startPostgresServer, type PostgresServer } from "./postgres-server.ts";
 import { cleanEnv, runAction, runNode, type ActionResult, type ProcessResult, type RunActionOptions, type RunOptions } from "./processes.ts";
 import { paths } from "./paths.ts";
 import { startInProcessService } from "./service.ts";
+import { configToEnv, type ServiceConfig } from "@testnotary/web/config";
 
 export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-repo.ts";
-export { FakeGitHub, type AddRepoOptions, type RecordedRequest } from "./github/server.ts";
+export { FakeGitHub, type AddRepoOptions, type InstallAppOptions, type RecordedRequest, type RepositoryAction } from "./github/server.ts";
+export type { DeliverOptions, FakeAccount, FakeApp, FakeInstallation, WebhookDelivery } from "./github/app.ts";
 export type { FakeRepo } from "./github/state.ts";
 export { OIDC_LIFETIME_SECONDS, type ActionsJob } from "./github/oidc.ts";
 export { json, githubError, notFound, route, type Route, type RouteContext } from "./github/router.ts";
@@ -68,12 +70,21 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     cleanups.push(() => db.drop(), () => github.close());
 
     let service: HttpServer;
+    // The fake GitHub serves both api.github.com and github.com (device flow) at one URL.
+    const config: ServiceConfig = {
+      databaseUrl: db.urls.app,
+      githubApiUrl: github.url,
+      githubWebUrl: github.url,
+      githubClientId: github.app.clientId,
+      githubWebhookSecret: github.app.webhookSecret,
+    };
     if (options.service === "next") {
-      service = await startNextService({ DATABASE_URL: db.urls.app, GITHUB_API_URL: github.url });
+      service = await startNextService(configToEnv(config));
     } else {
-      service = await startInProcessService({ databaseUrl: db.urls.app, githubApiUrl: github.url });
+      service = await startInProcessService(config);
     }
     cleanups.push(() => service.close());
+    github.app.webhookUrl = `${service.url}/api/v1/github/webhooks`;
 
     const repos: FixtureRepo[] = [];
     cleanups.push(async () => {
