@@ -58,6 +58,6 @@ These labels always read *unverified*, on the pull request and the dashboard. An
 
 ## In a signature-mode repo
 
-When the repo requires signatures, a sandbox also needs its own signing key. Its creator runs `testnotary sandbox-key <token-name>` on their laptop: it makes an Ed25519 key pair, prints the private half to store as a sandbox secret beside the token, and writes the line to add to `.testnotary/allowed_signers` in a pull request. The service never sees the private half. A sandbox without a key uploads unsigned attestations, which never skip there. See [Security](/docs/security).
+When the repo requires signatures, a sandbox also needs its own signing key. Its creator runs `testnotary sandbox-key <token-name>` on their laptop, inside a clone of the token's repo: it makes an Ed25519 key pair, prints the private half to store as the sandbox secret `TESTNOTARY_SIGNING_KEY` beside `TESTNOTARY_TOKEN`, and adds the key's line to `.testnotary/allowed_signers` for a pull request. The line names the token and its creator by id, `sandbox:<token id>/github:<account id>`; the sandbox's runs skip once it is on the base branch. The service never sees the private half. A sandbox without a key uploads unsigned attestations, which never skip there. See [Security](/docs/security).
 
 <Next pages="setup forks audits security" />

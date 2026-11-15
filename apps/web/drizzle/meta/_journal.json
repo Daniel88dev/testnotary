@@ -82,8 +82,15 @@
     {
       "idx": 11,
       "version": "7",
-      "when": 1794782819073,
-      "tag": "0011_token_blocks",
+      "when": 1794783381843,
+      "tag": "0011_attestation_signatures",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794783976685,
+      "tag": "0012_token_blocks",
       "breakpoints": true
     }
   ]

@@ -57,7 +57,7 @@ export async function recordMismatch(tx: Executor, verification: VerificationRow
       attestationEndedAt: attestation.endedAt,
       attestationFormat: attestation.format,
       attestationPayload: attestation.payload,
-      signature: null,
+      signature: attestation.signature ?? null,
       runEnvironment: run.environment,
       session: run.session,
       ciEnvironment: report.environment,

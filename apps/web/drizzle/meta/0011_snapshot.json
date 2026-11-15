@@ -1,5 +1,5 @@
 {
-  "id": "a14d90d5-ff3c-4638-9624-8c7c551c1cf2",
+  "id": "3537f512-1bd0-42e9-bca3-18a5d438bf75",
   "prevId": "66812b4e-5d77-4c9e-85fc-8acc99d85663",
   "version": "7",
   "dialect": "postgresql",
@@ -355,6 +355,12 @@
           "type": "bytea",
           "primaryKey": false,
           "notNull": true
+        },
+        "signature": {
+          "name": "signature",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -1603,132 +1609,6 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.token_blocks": {
-      "name": "token_blocks",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "bigint",
-          "primaryKey": true,
-          "notNull": true,
-          "identity": {
-            "type": "always",
-            "name": "token_blocks_id_seq",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "9223372036854775807",
-            "cache": "1",
-            "cycle": false
-          }
-        },
-        "token_id": {
-          "name": "token_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "repo_id": {
-          "name": "repo_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "blocked_by": {
-          "name": "blocked_by",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "at": {
-          "name": "at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "token_blocks_repo": {
-          "name": "token_blocks_repo",
-          "columns": [
-            {
-              "expression": "repo_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "token_blocks_token_id_tokens_id_fk": {
-          "name": "token_blocks_token_id_tokens_id_fk",
-          "tableFrom": "token_blocks",
-          "tableTo": "tokens",
-          "columnsFrom": [
-            "token_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "token_blocks_repo_id_repos_github_id_fk": {
-          "name": "token_blocks_repo_id_repos_github_id_fk",
-          "tableFrom": "token_blocks",
-          "tableTo": "repos",
-          "columnsFrom": [
-            "repo_id"
-          ],
-          "columnsTo": [
-            "github_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "token_blocks_blocked_by_accounts_github_id_fk": {
-          "name": "token_blocks_blocked_by_accounts_github_id_fk",
-          "tableFrom": "token_blocks",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "blocked_by"
-          ],
-          "columnsTo": [
-            "github_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "token_blocks_token_repo": {
-          "name": "token_blocks_token_repo",
-          "nullsNotDistinct": false,
-          "columns": [
-            "token_id",
-            "repo_id"
-          ]
-        }
-      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

@@ -1,7 +1,10 @@
 import { and, eq } from "drizzle-orm";
+import { SIGNATURE_NAMESPACE, attesterSigner, parsePublicKey, publicKeyText, sameKey, verifySshSignature } from "@testnotary/core";
 import {
   SERVICE_REFUSALS,
   decodeAttestationPayload,
+  type AttestationSignature,
+  type AttestationSignatureUpload,
   type CompletedRunUpload,
   type RunResponse,
   type RunUpload,
@@ -11,6 +14,7 @@ import type { Database } from "../db/client.ts";
 import { attestations, runs, tokens } from "../db/schema.ts";
 import { deletedAt } from "./accounts.ts";
 import { now } from "./config.ts";
+import { GitHubDenied, GitHubNotConfigured, GitHubUnavailable, installationToken, sshSigningKeys, userById } from "./github.ts";
 import { apiError } from "./http.ts";
 import { installedRepoByName, latestRepoState, type RepoView } from "./installations.ts";
 import { isBlocked } from "./revocations.ts";
@@ -79,8 +83,61 @@ export function uploadProblem(upload: CompletedRunUpload, auth: Authenticated, r
   return undefined;
 }
 
+/**
+ * Why a pass's signature fields can't be stored, or undefined (also when there are none). The
+ * signature must be valid over the payload's exact bytes under Testnotary's namespace, made with
+ * the public key and fingerprint it names, by the uploading token's signer; a sandbox token's key
+ * is always an `allowed_signers` key. Whether the key is *trusted* is the action's question.
+ */
+export async function signatureProblem(upload: CompletedRunUpload, auth: Authenticated): Promise<{ error: string; message: string } | undefined> {
+  const signature = upload.attestation?.signature;
+  if (!signature) return undefined;
+  const invalid = (message: string) => ({ error: "attestation_invalid", message });
+  if (signature.namespace !== SIGNATURE_NAMESPACE) return invalid(`The signature's namespace must be ${SIGNATURE_NAMESPACE}.`);
+  const check = await verifySshSignature(signature.sshsig, new TextEncoder().encode(upload.attestation!.payload));
+  if (!check.ok) return invalid(`The signature is ${check.problem}.`);
+  const named = parsePublicKey(signature.publicKey);
+  if (!named || !sameKey(named, check.signature.publicKey)) return invalid("The signature was not made with the public key it names.");
+  if (signature.fingerprint !== check.fingerprint) return invalid("The fingerprint is not the public key's.");
+  const signer = attesterSigner({ account: auth.account.id, token: auth.token.id, tokenKind: auth.token.kind });
+  if (JSON.stringify(signature.signer) !== JSON.stringify(signer)) return invalid("The signer is not the uploading token's.");
+  if (auth.token.kind === "sandbox" && signature.keySource !== "allowed_signers") return invalid("A sandbox token's key is trusted only through allowed_signers.");
+  return undefined;
+}
+
+/**
+ * The signature fields to store: the uploaded ones (the public key in its plain `type base64`
+ * form), and for a `github` key whether GitHub lists it among the account's signing keys now,
+ * with the time of that check. History only; when GitHub can't be asked both are null, and the
+ * upload goes on.
+ */
+export async function storedSignature(db: Database, repo: RepoView, auth: Authenticated, signature: AttestationSignatureUpload): Promise<AttestationSignature> {
+  const key = parsePublicKey(signature.publicKey)!;
+  const stored = { ...signature, publicKey: publicKeyText(key), githubListed: null, githubCheckedAt: null };
+  if (signature.keySource !== "github") return stored;
+  try {
+    const token = await installationToken(repo.installationId);
+    const user = await userById(token, auth.account.id);
+    const keys = user ? ((await sshSigningKeys(token, user.login)) ?? []) : [];
+    const listed = keys.some((text) => {
+      const listedKey = parsePublicKey(text);
+      return listedKey !== undefined && sameKey(listedKey, key);
+    });
+    return { ...stored, githubListed: listed, githubCheckedAt: now().toISOString() };
+  } catch (error) {
+    if (error instanceof GitHubUnavailable || error instanceof GitHubDenied || error instanceof GitHubNotConfigured) return stored;
+    throw error;
+  }
+}
+
 /** Stores a run, and for a pass its attestation with the payload's bytes, in one transaction. */
-export async function recordRun(db: Database, upload: RunUpload, auth: Authenticated, repo: RepoView): Promise<{ runId: string; attestationId: string | null }> {
+export async function recordRun(
+  db: Database,
+  upload: RunUpload,
+  auth: Authenticated,
+  repo: RepoView,
+  signature: AttestationSignature | null = null,
+): Promise<{ runId: string; attestationId: string | null }> {
   return db.transaction(async (tx) => {
     const base = { repoId: repo.id, tokenId: auth.token.id, accountId: auth.account.id, receivedAt: now() };
     if (upload.outcome === "refused") {
@@ -138,6 +195,7 @@ export async function recordRun(db: Database, upload: RunUpload, auth: Authentic
         endedAt: new Date(upload.endedAt),
         format: payload.format,
         payload: Buffer.from(upload.attestation.payload, "utf8"),
+        signature,
         createdAt: base.receivedAt,
       })
       .returning({ id: attestations.id });
@@ -184,6 +242,8 @@ export async function readRun(db: Database, runId: string, accountId: number): P
       notPinned: run.notPinned,
       baselineOverrides: run.baselineOverrides,
     },
-    attestation: attestation ? { id: attestation.id, format: attestation.format, payload: attestation.payload.toString("utf8") } : null,
+    attestation: attestation
+      ? { id: attestation.id, format: attestation.format, payload: attestation.payload.toString("utf8"), signature: attestation.signature ?? null }
+      : null,
   };
 }

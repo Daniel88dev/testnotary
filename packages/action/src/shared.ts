@@ -1,12 +1,23 @@
 // Everything the action takes from the private workspace packages comes through here. Both are
 // bundled into the action's release build.
 export {
+  ALLOWED_SIGNERS_FILE,
   CONFIG_FILE,
   FALLBACK_REASONS,
+  allowedSignerFor,
+  attesterPrincipal,
+  guardedGlobs,
+  guardedMatches,
+  parseAllowedSigners,
   parseConfig,
+  parsePublicKey,
+  sameKey,
+  suiteFromConfig,
   suiteNames,
   tokenKind,
+  verifySshSignature,
   type FallbackReason,
+  type TestnotaryConfig,
   type TokenKind,
   type VerificationResult,
 } from "@testnotary/core";
@@ -14,6 +25,8 @@ export {
   API_V1,
   OIDC_AUDIENCE,
   accountName,
+  decodeAttestationPayload,
+  type AttestationPayload,
   jobReportResponse,
   mismatchesPageUrl,
   resolveServiceUrl,

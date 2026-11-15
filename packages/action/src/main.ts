@@ -4,6 +4,7 @@ import { execSuite, suiteToRun } from "./exec.ts";
 import { presentJob, type JobPresentation, type TestsRan } from "./pr-line.ts";
 import { createCheckRun, writeSummary } from "./publish.ts";
 import { sendJobReport } from "./report.ts";
+import { checkSkip } from "./signature.ts";
 import { appendSummary, command, input, setOutputs, type RunnerEnv } from "./runner.ts";
 import { readVerification, verifyJob, type Verdict } from "./verify.ts";
 
@@ -24,7 +25,7 @@ else {
  * skip: otherwise the test job runs and makes it, with the tests' outcome.
  */
 async function gate(env: RunnerEnv): Promise<number> {
-  const verdict = await verifyJob(env, suite);
+  const verdict = await checkSkip(env, await verifyJob(env, suite), suite);
   const presentation = presentJob(env, verdict, null);
   setOutputs(env, { ...presentation.outputs, skip: String(verdict.result === "skip"), verification: verdict.record?.id ?? "" });
   await publish(env, verdict, presentation, { checkRun: verdict.result === "skip" });
@@ -40,7 +41,7 @@ async function run(env: RunnerEnv): Promise<number> {
   if (env.RUNNER_OS === "Windows" || process.platform === "win32") {
     return setupError(env, "run mode does not support Windows runners. Run the tests on Linux or macOS, or use a gate job (mode: verify), which works on any runner.");
   }
-  const verdict = await verdictForJob(env);
+  const verdict = await checkSkip(env, await verdictForJob(env), suite);
   if (verdict.result === "skip") {
     const presentation = presentJob(env, verdict, null);
     setOutputs(env, presentation.outputs);

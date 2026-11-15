@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isoInstant, objectId } from "./attestation.ts";
 import { account } from "./login.ts";
+import { attestationSignature, attestationSignatureUpload } from "./signature.ts";
 
 // `testnotary run` against the service: the preflight before the command starts, the one upload
 // after it, and reading a run back. Every request carries the token as `Bearer` (or none, so a
@@ -89,8 +90,11 @@ export const completedRunUpload = z
     notPinned: z.array(z.enum(["runtime", "package_manager"])),
     /** Which of `CI`, `TZ`, `LANG` the config's `env.set` changed. */
     baselineOverrides: z.array(z.enum(["CI", "TZ", "LANG"])),
-    /** Required for a pass, refused otherwise. */
-    attestation: z.object({ payload: z.string().max(100_000) }).strict().optional(),
+    /**
+     * Required for a pass, refused otherwise. In signature mode it also carries the signature over
+     * the payload's exact bytes (never a private key); a run with no usable key sends none.
+     */
+    attestation: z.object({ payload: z.string().max(100_000), signature: attestationSignatureUpload.optional() }).strict().optional(),
     report: z.null().optional(),
   })
   .strict();
@@ -146,6 +150,6 @@ export const runResponse = z.object({
     baselineOverrides: z.array(z.string()),
   }),
   /** The attestation, with its payload exactly as uploaded. */
-  attestation: z.object({ id: z.string(), format: z.string(), payload: z.string() }).nullable(),
+  attestation: z.object({ id: z.string(), format: z.string(), payload: z.string(), signature: attestationSignature.nullable().default(null) }).nullable(),
 });
 export type RunResponse = z.infer<typeof runResponse>;

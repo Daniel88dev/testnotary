@@ -14,9 +14,11 @@ import {
   encodeAttestationPayload,
   resolveServiceUrl,
   runPageUrl,
+  type AttestationPayload,
   type CompletedRunUpload,
   type RefusalCode,
 } from "../shared.ts";
+import { signAttestation } from "../run/sign.ts";
 import { displayArgv, runSuiteCommand } from "../suite-command.ts";
 
 export const run: Command = {
@@ -114,13 +116,18 @@ async function runSuite(ready: Ready, json: boolean): Promise<number> {
   let attested = false;
   let attestationUrl: string | null = null;
   if (ready.preflight.kind === "ok") {
-    const record = completedRecord(context, ready.preflight.answer, {
+    const { record, payload } = completedRecord(context, ready.preflight.answer, {
       outcome: passed ? "passed" : "failed",
       exitCode: result.exitCode,
       startedAt,
       endedAt,
       durationMs: result.durationMs,
     });
+    if (record.attestation && payload && context.config.signatures === "required") {
+      const signature = await signAttestation(context, payload, record.attestation.payload);
+      // Unsigned, `no_signing_key` is already in `record.warnings` (the run's own list).
+      if (signature) record.attestation.signature = signature;
+    }
     const stored = await upload(context.serviceUrl, context.token, record);
     if (stored.kind === "stored" && stored.attestationId) {
       attested = true;
@@ -152,7 +159,7 @@ function completedRecord(
   context: RunContext,
   seen: Extract<Ready["preflight"], { kind: "ok" }>["answer"],
   run: { outcome: "passed" | "failed"; exitCode: number; startedAt: Date; endedAt: Date; durationMs: number },
-): CompletedRunUpload {
+): { record: CompletedRunUpload; payload: AttestationPayload | undefined } {
   const { suite, checkout, notes } = context;
   const endedAt = run.endedAt.toISOString();
   const record: CompletedRunUpload = {
@@ -174,20 +181,18 @@ function completedRecord(
     notPinned: notes.notPinned,
     baselineOverrides: baselineOverrides(suite.env) as CompletedRunUpload["baselineOverrides"],
   };
-  if (run.outcome === "passed") {
-    record.attestation = {
-      payload: encodeAttestationPayload({
-        format: ATTESTATION_FORMAT_V1,
-        repository: seen.repository.id,
-        suite: suite.name,
-        command: suite.command,
-        tree: checkout.tree,
-        commit: checkout.commit,
-        outcome: "passed",
-        attester: { account: seen.account.id, token: seen.token.id, tokenKind: seen.token.kind },
-        endedAt,
-      }),
-    };
-  }
-  return record;
+  if (run.outcome !== "passed") return { record, payload: undefined };
+  const payload: AttestationPayload = {
+    format: ATTESTATION_FORMAT_V1,
+    repository: seen.repository.id,
+    suite: suite.name,
+    command: suite.command,
+    tree: checkout.tree,
+    commit: checkout.commit,
+    outcome: "passed",
+    attester: { account: seen.account.id, token: seen.token.id, tokenKind: seen.token.kind },
+    endedAt,
+  };
+  record.attestation = { payload: encodeAttestationPayload(payload) };
+  return { record, payload };
 }

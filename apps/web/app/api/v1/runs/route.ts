@@ -1,15 +1,15 @@
-import { runUpload, type RunUploadResponse } from "@testnotary/protocol";
+import { runUpload, type AttestationSignature, type RunUploadResponse } from "@testnotary/protocol";
 import { database } from "../../../../src/db/client.ts";
 import { apiError, ok, withGitHubErrors } from "../../../../src/server/http.ts";
-import { gate, recordRun, uploadProblem } from "../../../../src/server/runs.ts";
+import { gate, recordRun, signatureProblem, storedSignature, uploadProblem } from "../../../../src/server/runs.ts";
 
 export const dynamic = "force-dynamic";
 
 /**
  * The one upload after a run, for every outcome. Checks the token and the account's write access
  * again (they may have changed since the preflight), then stores the run and, for a pass, its
- * attestation with the canonical payload's exact bytes. The reserved `report` field is refused
- * when filled.
+ * attestation with the canonical payload's exact bytes and, in signature mode, its signature
+ * fields. The reserved `report` field is refused when filled.
  */
 export async function POST(request: Request): Promise<Response> {
   return withGitHubErrors(async () => {
@@ -29,11 +29,13 @@ export async function POST(request: Request): Promise<Response> {
     const passed = await gate(db, request, upload.repository);
     if ("response" in passed) return passed.response;
     const { auth, repo } = passed;
+    let signature: AttestationSignature | null = null;
     if (upload.outcome !== "refused") {
-      const problem = uploadProblem(upload, auth, repo);
+      const problem = uploadProblem(upload, auth, repo) ?? (await signatureProblem(upload, auth));
       if (problem) return apiError(400, problem.error, problem.message);
+      if (upload.attestation?.signature) signature = await storedSignature(db, repo, auth, upload.attestation.signature);
     }
-    const stored = await recordRun(db, upload, auth, repo);
+    const stored = await recordRun(db, upload, auth, repo, signature);
     const body: RunUploadResponse = { run: { id: stored.runId }, attestation: stored.attestationId ? { id: stored.attestationId } : null };
     return ok(body, 201);
   });
