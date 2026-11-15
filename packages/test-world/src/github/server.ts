@@ -14,6 +14,7 @@ import { OidcIssuer } from "./oidc.ts";
 import { matchPath, notFound, type Route, type RouteHandler } from "./router.ts";
 import { DeviceFlow } from "./device-flow.ts";
 import { gitRoutes } from "./routes/git.ts";
+import { installationRoutes } from "./routes/installation.ts";
 import { loginRoutes } from "./routes/login.ts";
 import { oidcRoutes } from "./routes/oidc.ts";
 import { avatarRoutes } from "./routes/avatars.ts";
@@ -22,7 +23,8 @@ import { GitHubState, type FakeRepo, type RepoPermission } from "./state.ts";
 import { WebFlow } from "./web-flow.ts";
 
 /** Every endpoint the fake serves. Add a file under routes/ and list it here. */
-const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes, ...userAccessRoutes, ...avatarRoutes];
+// `GET /user/installations` (user-access) must come before `GET /user/:id` (installation).
+const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes, ...userAccessRoutes, ...installationRoutes, ...avatarRoutes];
 
 export interface RecordedRequest {
   method: string;
@@ -104,23 +106,24 @@ export class FakeGitHub {
     });
   }
 
+  /**
+   * Gives a person a role on a repo (`admin`, `maintain`, `write`, `triage`, `read`, `none`). Without
+   * one they read `read` on a public repo and `none` on a private one (§7), and the owner of a
+   * personal repo is admin. `none` takes a role away. The dashboard sees the same roles through the
+   * person's user token (`GET /repos/{owner}/{repo}`, `GET /user/installations…`).
+   */
+  setPermission(repo: FakeRepo, account: FakeAccount, permission: RepoPermission): void {
+    let roles = this.state.permissions.get(repo.id);
+    if (!roles) {
+      roles = new Map();
+      this.state.permissions.set(repo.id, roles);
+    }
+    roles.set(account.id, permission);
+  }
+
   /** A person on GitHub, who can sign in through the device flow or in the browser. */
   addUser(options: { login: string; id?: number }): FakeAccount {
     return this.state.account(options.login, "User", options.id);
-  }
-
-  /**
-   * Gives a person a permission on a repo (a collaborator or team grant), or takes it away with
-   * `undefined`. The owner of a personal repo is admin without a grant; anyone reads a public repo.
-   */
-  grant(repo: FakeRepo, user: FakeAccount, permission: RepoPermission | undefined): void {
-    let grants = this.state.permissions.get(repo.id);
-    if (!grants) {
-      grants = new Map();
-      this.state.permissions.set(repo.id, grants);
-    }
-    if (permission) grants.set(user.id, permission);
-    else grants.delete(user.id);
   }
 
   /** Where the App's avatars come from: avatars.githubusercontent.com in production. */

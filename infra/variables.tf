@@ -97,6 +97,11 @@ variable "github_client_id" {
   type        = string
 }
 
+variable "github_app_id" {
+  description = "The Testnotary GitHub App's numeric id (not a secret; the iss of the App JWT that buys installation tokens)."
+  type        = string
+}
+
 variable "sentry_dsn" {
   description = "Sentry DSN of the service. Empty turns reporting off."
   type        = string

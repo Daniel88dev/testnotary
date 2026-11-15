@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { INITIAL_REPO_SETTINGS, type RepoMode } from "@testnotary/core";
 import type { Database } from "../db/client.ts";
 import { installationEvents, installations, repoSettingChanges, repoStates, repos } from "../db/schema.ts";
@@ -47,6 +47,22 @@ export interface RepoInput {
 export async function installedRepo(db: Executor, repoId: number): Promise<RepoView | undefined> {
   const [repo] = await repoViews(db, [repoId]);
   return repo?.installed ? repo : undefined;
+}
+
+/**
+ * The installed repo whose current name is `owner/name` (case-insensitive, as GitHub's are), the
+ * way the library names a repo: from its clone's `origin` URL.
+ */
+export async function installedRepoByName(db: Executor, fullName: string): Promise<RepoView | undefined> {
+  const candidates = await db
+    .selectDistinct({ repoId: repoStates.repoId })
+    .from(repoStates)
+    .where(sql`lower(${repoStates.fullName}) = lower(${fullName})`);
+  const views = await repoViews(
+    db,
+    candidates.map((row) => row.repoId),
+  );
+  return views.find((repo) => repo.installed && repo.fullName.toLowerCase() === fullName.toLowerCase());
 }
 
 /** An installation and the repos installed on it now. */

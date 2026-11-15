@@ -1,5 +1,5 @@
 {
-  "id": "a092ca65-b9fa-4c84-8456-e6b1e2bcbcbd",
+  "id": "391fece3-257d-4602-a0ec-9515887fb442",
   "prevId": "bd89364c-7e32-4921-b1f6-cbcc227e47ee",
   "version": "7",
   "dialect": "postgresql",
@@ -111,6 +111,182 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.attestations": {
+      "name": "attestations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "repo_id": {
+          "name": "repo_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "suite": {
+          "name": "suite",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tree": {
+          "name": "tree",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "commit": {
+          "name": "commit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_id": {
+          "name": "token_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "format": {
+          "name": "format",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "attestations_lookup": {
+          "name": "attestations_lookup",
+          "columns": [
+            {
+              "expression": "repo_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "suite",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tree",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "attestations_run_id_runs_id_fk": {
+          "name": "attestations_run_id_runs_id_fk",
+          "tableFrom": "attestations",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "attestations_repo_id_repos_github_id_fk": {
+          "name": "attestations_repo_id_repos_github_id_fk",
+          "tableFrom": "attestations",
+          "tableTo": "repos",
+          "columnsFrom": [
+            "repo_id"
+          ],
+          "columnsTo": [
+            "github_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "attestations_token_id_tokens_id_fk": {
+          "name": "attestations_token_id_tokens_id_fk",
+          "tableFrom": "attestations",
+          "tableTo": "tokens",
+          "columnsFrom": [
+            "token_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "attestations_account_id_accounts_github_id_fk": {
+          "name": "attestations_account_id_accounts_github_id_fk",
+          "tableFrom": "attestations",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "github_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "attestations_run_id_unique": {
+          "name": "attestations_run_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "run_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -528,52 +704,22 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.session_ends": {
-      "name": "session_ends",
-      "schema": "",
-      "columns": {
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "at": {
-          "name": "at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.token_renames": {
-      "name": "token_renames",
+    "public.runs": {
+      "name": "runs",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "bigint",
+          "type": "uuid",
           "primaryKey": true,
           "notNull": true,
-          "identity": {
-            "type": "always",
-            "name": "token_renames_id_seq",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "9223372036854775807",
-            "cache": "1",
-            "cycle": false
-          }
+          "default": "gen_random_uuid()"
+        },
+        "repo_id": {
+          "name": "repo_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
         },
         "token_id": {
           "name": "token_id",
@@ -581,14 +727,116 @@
           "primaryKey": false,
           "notNull": true
         },
-        "name": {
-          "name": "name",
+        "account_id": {
+          "name": "account_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome": {
+          "name": "outcome",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "at": {
-          "name": "at",
+        "refusal": {
+          "name": "refusal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suite": {
+          "name": "suite",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tree": {
+          "name": "tree",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "commit": {
+          "name": "commit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "command": {
+          "name": "command",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "exit_code": {
+          "name": "exit_code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_ms": {
+          "name": "duration_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "environment": {
+          "name": "environment",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "session": {
+          "name": "session",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "passed_env": {
+          "name": "passed_env",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "guarded_matched": {
+          "name": "guarded_matched",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "warnings": {
+          "name": "warnings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "not_pinned": {
+          "name": "not_pinned",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "baseline_overrides": {
+          "name": "baseline_overrides",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_at": {
+          "name": "received_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
@@ -596,17 +844,32 @@
         }
       },
       "indexes": {
-        "token_renames_latest": {
-          "name": "token_renames_latest",
+        "runs_repo": {
+          "name": "runs_repo",
           "columns": [
             {
-              "expression": "token_id",
+              "expression": "repo_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "id",
+              "expression": "received_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runs_account": {
+          "name": "runs_account",
+          "columns": [
+            {
+              "expression": "account_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -619,15 +882,41 @@
         }
       },
       "foreignKeys": {
-        "token_renames_token_id_tokens_id_fk": {
-          "name": "token_renames_token_id_tokens_id_fk",
-          "tableFrom": "token_renames",
+        "runs_repo_id_repos_github_id_fk": {
+          "name": "runs_repo_id_repos_github_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "repos",
+          "columnsFrom": [
+            "repo_id"
+          ],
+          "columnsTo": [
+            "github_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "runs_token_id_tokens_id_fk": {
+          "name": "runs_token_id_tokens_id_fk",
+          "tableFrom": "runs",
           "tableTo": "tokens",
           "columnsFrom": [
             "token_id"
           ],
           "columnsTo": [
             "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "runs_account_id_accounts_github_id_fk": {
+          "name": "runs_account_id_accounts_github_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "github_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"

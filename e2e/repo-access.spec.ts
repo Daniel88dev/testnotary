@@ -33,7 +33,7 @@ test("a private repo's pages are not found for anyone GitHub does not show it to
   const { repo } = await installedRepo(world, "fernpay", "ledger", "private");
   const outsider = world.github.addUser({ login: "outsider" });
   const reader = world.github.addUser({ login: "ledger-reader" });
-  world.github.grant(repo, reader, "read");
+  world.github.setPermission(repo, reader, "read");
 
   expect((await page.request.get("/fernpay/ledger")).status()).toBe(404);
   expect((await page.request.get("/fernpay/ledger/runs")).status()).toBe(404);
@@ -50,7 +50,7 @@ test("a private repo's pages are not found for anyone GitHub does not show it to
   await expect(page.getByRole("navigation", { name: "Repository" }).getByRole("link", { name: "Settings" })).toBeVisible();
 
   // Access follows GitHub at the next request: a removed collaborator no longer sees the repo.
-  world.github.grant(repo, reader, undefined);
+  world.github.setPermission(repo, reader, "none");
   expect((await page.goto("/fernpay/ledger"))?.status()).toBe(404);
 });
 

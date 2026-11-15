@@ -30,6 +30,7 @@
     "@testnotary/protocol": "workspace:*",
     "better-auth": "~1.7.18",
     "drizzle-orm": "^0.45.4",
+    "jose": "^6.2.16",
     "next": "^16.4.5",
     "postgres": "^4.1.0",
     "react": "^19.3.1",

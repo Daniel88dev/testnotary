@@ -1,5 +1,14 @@
 import type { FakeAccount, FakeInstallation } from "./app.ts";
 
+/** A person's role on a repo, as GitHub's roles go. */
+export type RepoPermission = "admin" | "maintain" | "write" | "triage" | "read" | "none";
+
+export interface InstallationToken {
+  installationId: number;
+  /** ms since the epoch; GitHub's last an hour. */
+  expiresAt: number;
+}
+
 /** A repo the fake GitHub knows, backed by a fixture repo's bare `origin`. */
 export interface FakeRepo {
   /** GitHub's numeric repo id (what the OIDC `repository_id` claim carries). */
@@ -20,9 +29,6 @@ export interface FakeRepo {
  * FakeGitHub methods. Grow it here (installations, users, collaborators, keys, check runs, …) as
  * tickets add endpoints.
  */
-/** A person's permission on a repo, as GitHub folds roles (maintain → write, triage → read). */
-export type RepoPermission = "admin" | "write" | "read";
-
 export class GitHubState {
   readonly repos = new Map<string, FakeRepo>();
   /** Installations of the Testnotary App, by installation id. */
@@ -31,7 +37,12 @@ export class GitHubState {
   readonly accounts = new Map<string, FakeAccount>();
   /** Every user token (`ghu_…`) handed out by the device flow or the browser sign-in, and whose it is. */
   readonly userTokens = new Map<string, FakeAccount>();
-  /** Explicit permissions: repo id → account id → permission. The owner of a personal repo is admin without one. */
+  /** Installation access tokens (`ghs_…`) the App bought, by value (§10). */
+  readonly installationTokens = new Map<string, InstallationToken>();
+  /**
+   * Collaborator permissions set by tests, by repo id then account id. Anyone not listed reads
+   * `read` on a public repo and `none` on a private one (§7); the owner of a personal repo is admin.
+   */
   readonly permissions = new Map<number, Map<number, RepoPermission>>();
   private nextId = 1000;
 
@@ -58,22 +69,29 @@ export class GitHubState {
     this.repos.set(repo.fullName.toLowerCase(), repo);
   }
 
-  /**
-   * The person's permission on the repo: explicit, or admin when it is their own personal repo, or
-   * `read` on any public repo. `undefined`: they cannot see it at all.
-   */
-  permission(repo: FakeRepo, user: FakeAccount | undefined): RepoPermission | undefined {
-    const explicit = this.explicitPermission(repo, user);
-    if (explicit) return explicit;
-    return repo.visibility === "public" ? "read" : undefined;
+  /** The account with this numeric id, if GitHub knows one. */
+  accountById(id: number): FakeAccount | undefined {
+    return [...this.accounts.values()].find((account) => account.id === id);
   }
 
-  /** A permission GitHub would list the repo under the person's installations for. */
-  explicitPermission(repo: FakeRepo, user: FakeAccount | undefined): RepoPermission | undefined {
-    if (!user) return undefined;
-    const explicit = this.permissions.get(repo.id)?.get(user.id);
-    if (explicit) return explicit;
-    return repo.owner.toLowerCase() === user.login.toLowerCase() ? "admin" : undefined;
+  /** What `GET …/collaborators/{login}/permission` reports: `maintain` folds into `write`, `triage` into `read` (§7). */
+  permission(repo: FakeRepo, account: FakeAccount): "admin" | "write" | "read" | "none" {
+    const set = this.explicitRole(repo, account);
+    if (set === "maintain") return "write";
+    if (set === "triage") return "read";
+    if (set && set !== "none") return set;
+    return repo.visibility === "public" ? "read" : "none";
+  }
+
+  /**
+   * The role the person holds on the repo itself (what GitHub lists a repo under their
+   * installations for): one set by a test, or admin on their own personal repo. `undefined` or
+   * `none` means they only read it if it is public.
+   */
+  explicitRole(repo: FakeRepo, account: FakeAccount): RepoPermission | undefined {
+    const set = this.permissions.get(repo.id)?.get(account.id);
+    if (set) return set;
+    return repo.owner.toLowerCase() === account.login.toLowerCase() ? "admin" : undefined;
   }
 
   /** The account with this login, made up (with a fresh id) the first time it is named. */

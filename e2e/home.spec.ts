@@ -14,7 +14,7 @@ test("home lists every installed repo the person can read on GitHub, with its mo
   const web = await githubRepo(world, "fernpay", "web", "private");
   const payroll = await githubRepo(world, "fernpay", "payroll", "private");
   await world.github.installApp({ account: { login: "fernpay", type: "Organization" }, repos: [web, payroll] });
-  world.github.grant(web, maria, "write");
+  world.github.setPermission(web, maria, "write");
 
   await signIn(page, world, maria);
 
@@ -53,7 +53,7 @@ test("with nothing installed by them, home lists the repos someone else installe
   const priya = world.github.addUser({ login: "priya-n" });
   const shop = await githubRepo(world, "acme-shop", "storefront", "private");
   await world.github.installApp({ account: { login: "acme-shop", type: "Organization" }, repos: [shop] });
-  world.github.grant(shop, priya, "read");
+  world.github.setPermission(shop, priya, "read");
 
   await signIn(page, world, priya);
 

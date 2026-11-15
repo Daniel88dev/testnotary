@@ -1,11 +1,19 @@
 import { execFile } from "node:child_process";
 
-/** Runs git and returns its trimmed stdout, or `undefined` when git fails or isn't installed. */
-export function tryGit(cwd: string, args: string[], env: Readonly<Record<string, string | undefined>>): Promise<string | undefined> {
+/**
+ * Runs git and returns its trimmed stdout, or `undefined` when git fails, isn't installed or runs
+ * past `timeoutMs`. Git never prompts for credentials here.
+ */
+export function tryGit(cwd: string, args: string[], env: Readonly<Record<string, string | undefined>>, timeoutMs = 0): Promise<string | undefined> {
   return new Promise((resolve) => {
-    execFile("git", args, { cwd, env: { ...env, GIT_OPTIONAL_LOCKS: "0" } }, (error, stdout) => {
-      resolve(error ? undefined : stdout.trim());
-    });
+    execFile(
+      "git",
+      args,
+      { cwd, env: { ...env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" }, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout) => {
+        resolve(error ? undefined : stdout.trim());
+      },
+    );
   });
 }
 

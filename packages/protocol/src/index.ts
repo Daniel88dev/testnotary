@@ -1,6 +1,56 @@
 export { API_V1, DEFAULT_SERVICE_URL, resolveServiceUrl } from "./service-url.ts";
 export { healthResponse, type HealthResponse } from "./health.ts";
 export {
+  ATTESTATION_FORMAT_V1,
+  ATTESTATION_FORMATS,
+  attestationPayloadV1,
+  decodeAttestationPayload,
+  encodeAttestationPayload,
+  isoInstant,
+  objectId,
+  type AttestationFormat,
+  type AttestationPayload,
+  type AttestationPayloadV1,
+} from "./attestation.ts";
+export { runPagePath, runPageUrl } from "./run-page.ts";
+export {
+  SERVICE_REFUSALS,
+  completedRunUpload,
+  preflightRequest,
+  preflightResponse,
+  refusedRunUpload,
+  repositoryName,
+  runEnvironment,
+  runResponse,
+  runUpload,
+  runUploadResponse,
+  sessionLabels,
+  type CompletedRunUpload,
+  type PreflightRequest,
+  type PreflightResponse,
+  type RefusedRunUpload,
+  type RunEnvironment,
+  type RunResponse,
+  type RunUpload,
+  type RunUploadResponse,
+  type ServiceRefusal,
+} from "./run.ts";
+export {
+  ACTIONS_OIDC_ISSUER,
+  OIDC_AUDIENCE,
+  VERIFY_REFUSALS,
+  ciEnvironment,
+  verification,
+  verificationResult,
+  verifyRequest,
+  verifyResponse,
+  type CiEnvironment,
+  type Verification,
+  type VerifyRefusal,
+  type VerifyRequest,
+  type VerifyResponse,
+} from "./verification.ts";
+export {
   LINKS,
   account,
   apiError,

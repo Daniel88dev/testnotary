@@ -22,24 +22,33 @@ export interface Command {
 /** A command line the command can't make sense of: exit 64 with the usage line. */
 export class UsageError extends Error {}
 
-export interface ParsedArgs<Flags extends string> {
+export interface ParsedArgs<Flags extends string, Options extends string = never> {
   flags: Record<Flags, boolean>;
+  /** Options that take a value (`--base main` or `--base=main`); undefined when not given. */
+  options: Record<Options, string | undefined>;
   positionals: string[];
   /** Everything after a bare `--`, which `run` refuses as `extra_arguments`. */
   afterTerminator: string[];
 }
 
 /**
- * Parses a command's own arguments: boolean flags (`--json` is always accepted) and positionals.
- * Unknown flags and option values are usage errors.
+ * Parses a command's own arguments: boolean flags (`--json` is always accepted), options with a
+ * value, and positionals. Unknown flags and a missing option value are usage errors.
  */
-export function parseCommandArgs<Flags extends string>(args: string[], flags: readonly Flags[]): ParsedArgs<Flags | "json"> {
+export function parseCommandArgs<Flags extends string, Options extends string = never>(
+  args: string[],
+  flags: readonly Flags[],
+  options: readonly Options[] = [],
+): ParsedArgs<Flags | "json", Options> {
   const names = [...new Set<Flags | "json">([...flags, "json"])];
   let parsed;
   try {
     parsed = parseArgs({
       args,
-      options: Object.fromEntries(names.map((name) => [name, { type: "boolean" as const }])),
+      options: {
+        ...Object.fromEntries(names.map((name) => [name, { type: "boolean" as const }])),
+        ...Object.fromEntries(options.map((name) => [name, { type: "string" as const }])),
+      },
       allowPositionals: true,
       strict: true,
       tokens: true,
@@ -51,7 +60,11 @@ export function parseCommandArgs<Flags extends string>(args: string[], flags: re
   const terminator = parsed.tokens.find((token) => token.kind === "option-terminator");
   const afterTerminator = terminator ? args.slice(terminator.index + 1) : [];
   const positionals = parsed.positionals.slice(0, parsed.positionals.length - afterTerminator.length);
-  const values = parsed.values as Record<string, boolean | undefined>;
+  const values = parsed.values as Record<string, boolean | string | undefined>;
   const result = Object.fromEntries(names.map((name) => [name, values[name] === true])) as Record<Flags | "json", boolean>;
-  return { flags: result, positionals, afterTerminator };
+  const optionValues = Object.fromEntries(options.map((name) => [name, typeof values[name] === "string" ? values[name] : undefined])) as Record<
+    Options,
+    string | undefined
+  >;
+  return { flags: result, options: optionValues, positionals, afterTerminator };
 }

@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomBytes, randomUUID, type KeyObject } from "node:crypto";
 import type { FakeRepo } from "./state.ts";
 
 // The Testnotary GitHub App as the fake GitHub knows it: its client id (device flow), its webhook
@@ -15,6 +15,10 @@ export interface FakeApp {
   webhookSecret: string;
   /** Where deliveries go. The world points it at the service's webhook route. */
   webhookUrl: string | undefined;
+  /** The App's private key (PKCS#8 PEM), made per world. The service signs its App JWTs with it. */
+  privateKey: string;
+  /** Checks those JWTs (§10). */
+  publicKey: KeyObject;
 }
 
 /** A GitHub account an installation belongs to: a person or an organization. */
@@ -50,6 +54,7 @@ export interface DeliverOptions {
 }
 
 export function newApp(id: number): FakeApp {
+  const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   return {
     id,
     slug: "testnotary-world",
@@ -57,6 +62,8 @@ export function newApp(id: number): FakeApp {
     clientSecret: randomBytes(20).toString("hex"),
     webhookSecret: randomBytes(20).toString("hex"),
     webhookUrl: undefined,
+    privateKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    publicKey,
   };
 }
 

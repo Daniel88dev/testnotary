@@ -1,6 +1,8 @@
 import type { FakeAccount, FakeInstallation } from "../app.ts";
 import { githubError, json, notFound, route, type RouteContext } from "../router.ts";
-import type { FakeRepo, RepoPermission } from "../state.ts";
+import type { FakeRepo } from "../state.ts";
+
+type Folded = "admin" | "write" | "read" | "none";
 
 // What the dashboard asks GitHub with the signed-in person's user token (`ghu_`): which installed
 // repos they can read, and their permission on one repo. A user token of a GitHub App reaches only
@@ -20,17 +22,17 @@ function installationOf(context: RouteContext, repo: FakeRepo): FakeInstallation
 }
 
 /** GitHub's `permissions` object for a folded permission. */
-function permissionsObject(permission: RepoPermission | undefined) {
+function permissionsObject(permission: Folded) {
   return {
     admin: permission === "admin",
     maintain: permission === "admin",
     push: permission === "admin" || permission === "write",
-    triage: permission !== undefined,
-    pull: permission !== undefined,
+    triage: permission !== "none",
+    pull: permission !== "none",
   };
 }
 
-function repoBody(repo: FakeRepo, permission: RepoPermission | undefined, withPermissions: boolean) {
+function repoBody(repo: FakeRepo, permission: Folded, withPermissions: boolean) {
   return {
     id: repo.id,
     node_id: `R_${repo.id}`,
@@ -54,7 +56,10 @@ function page<T>(context: RouteContext, items: T[]): T[] {
 function accessibleRepos(context: RouteContext, installation: FakeInstallation, user: FakeAccount): FakeRepo[] {
   const { state } = context.github;
   return [...state.repos.values()]
-    .filter((repo) => installation.repoIds.has(repo.id) && state.explicitPermission(repo, user))
+    .filter((repo) => {
+      const role = state.explicitRole(repo, user);
+      return installation.repoIds.has(repo.id) && role !== undefined && role !== "none";
+    })
     .sort((a, b) => a.id - b.id);
 }
 
@@ -66,8 +71,8 @@ export const userAccessRoutes = [
     if (user === null) return githubError(401, "Bad credentials");
     const repo = context.github.state.repo(context.params.owner!, context.params.repo!);
     if (!repo) return notFound();
-    const permission = context.github.state.permission(repo, user);
-    if (!permission) return notFound();
+    const permission: Folded = user ? context.github.state.permission(repo, user) : repo.visibility === "public" ? "read" : "none";
+    if (permission === "none") return notFound();
     if (repo.visibility === "private" && !installationOf(context, repo)) return notFound();
     return json(200, repoBody(repo, permission, user !== undefined));
   }),
