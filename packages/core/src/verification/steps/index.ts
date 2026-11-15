@@ -3,6 +3,7 @@ import { ageStep } from "./age.ts";
 import { auditStep } from "./audit.ts";
 import { commandStep } from "./command.ts";
 import { guardedFilesStep } from "./guarded-files.ts";
+import { revocationStep } from "./revocation.ts";
 import { suiteStep } from "./suite.ts";
 import { writeAccessStep } from "./write-access.ts";
 
@@ -21,7 +22,8 @@ export const VERIFICATION_STEPS: VerificationOrder = {
   attestation: [
     commandStep,
     ageStep,
-    // Revocations, blocks and token expiry (`attestation_revoked`) go here, beside the age.
+    // Revocations, blocks and token expiry (`attestation_revoked`), beside the age.
+    revocationStep,
     writeAccessStep,
   ],
   matched: [

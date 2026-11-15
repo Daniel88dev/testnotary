@@ -9,6 +9,7 @@ export type {
   AttestationCandidate,
   ChangedPaths,
   Fallback,
+  TokenVoid,
   VerificationInput,
   VerificationOrder,
   VerificationSources,

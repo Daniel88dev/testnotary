@@ -37,7 +37,15 @@ export interface VerificationSources {
    * (`repoAuditKey`). Asked for only when the draw is made.
    */
   auditKey(): Promise<Uint8Array>;
+  /**
+   * What voids the token's attestations on this repo now, if anything: revoked, blocked on this
+   * repo, or expired. Undefined while the token stands.
+   */
+  tokenVoided(tokenId: string): Promise<TokenVoid | undefined>;
 }
+
+/** Why a token's attestations no longer count: each reads `attestation_revoked`. */
+export type TokenVoid = "revoked" | "blocked" | "expired";
 
 /** What GitHub's compare lists between the first parent and the built commit. */
 export interface ChangedPaths {

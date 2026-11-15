@@ -118,7 +118,7 @@ function preflightRefusalLines(refusal: RefusalCode, repository: string, token: 
       return [
         token?.source === "env"
           ? "the service rejected TESTNOTARY_TOKEN (revoked or expired): create a new sandbox token, or unset it to use your laptop token"
-          : "the service rejected this machine's laptop token (revoked or expired): run `testnotary login` again",
+          : `the service rejected this machine's laptop token for ${repository}: it was revoked or expired (run \`testnotary login\` again), or an admin of ${repository} blocked it there`,
       ];
     case "repo_not_installed":
       return [`the Testnotary GitHub App is not installed on ${repository}: install it on the repo, then run again`];

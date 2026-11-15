@@ -20,6 +20,7 @@ import { acceptActionsToken, type ActionsClaims } from "./oidc.ts";
 import { accountAsOf } from "./accounts.ts";
 import { auditKeyOf } from "./audits.ts";
 import { mismatchOfVerification, mismatchViews, recordMismatch } from "./mismatches.ts";
+import { tokenVoided } from "./revocations.ts";
 import { bearer, currentNames } from "./tokens.ts";
 import { hasWriteAccess } from "./write-access.ts";
 
@@ -68,6 +69,7 @@ export async function verifyJob(db: Database, job: { claims: ActionsClaims; repo
       configAtBase: async () => (firstParent ? fileAt(installation, repo.fullName, CONFIG_FILE, firstParent) : undefined),
       attestations: (suite) => attestationsOfTree(db, repo.id, suite, commit.tree),
       hasWriteAccess: (accountId) => hasWriteAccess(db, repo, accountId, installation),
+      tokenVoided: (tokenId) => tokenVoided(db, tokenId, repo.id),
       changedPaths: async () => {
         if (!firstParent) return undefined;
         const { paths, count } = await changedPaths(installation, repo.fullName, firstParent, claims.sha);

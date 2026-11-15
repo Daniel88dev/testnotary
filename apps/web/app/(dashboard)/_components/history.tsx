@@ -190,7 +190,7 @@ const GATES: { label: string; reasons: string[] }[] = [
   { label: "Suite declared in testnotary.json on the base", reasons: ["unknown_suite"] },
   { label: "No guarded file changed", reasons: ["guarded_file_changed"] },
   { label: "An attestation names this tree, with the same command", reasons: ["no_attestation", "command_changed"] },
-  { label: "Attestation under 24 hours old, not revoked or blocked", reasons: ["attestation_expired", "attestation_revoked"] },
+  { label: "Attestation under 24 hours old, its token not revoked, blocked or expired", reasons: ["attestation_expired", "attestation_revoked"] },
   { label: "Attester has write access", reasons: ["attester_no_write"] },
   { label: "Not drawn for an audit", reasons: ["audit"] },
   { label: "Repo is enforcing", reasons: [] },

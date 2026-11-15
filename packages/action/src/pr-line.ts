@@ -52,7 +52,7 @@ export const REASON_LINES: Record<FallbackReason, string> = {
   unknown_suite: "testnotary.json on the base branch declares no such suite",
   no_attestation: "no passing run attested this tree",
   attestation_expired: "the attested run ended 24 hours ago or more",
-  attestation_revoked: "the attestation's token was revoked or blocked",
+  attestation_revoked: "the attestation's token was revoked, blocked or expired",
   attester_no_write: "the attester no longer has write access",
   command_changed: "the attested command differs from testnotary.json on the base branch",
   guarded_file_changed: "the pull request changes a guarded file",
