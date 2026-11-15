@@ -12,6 +12,8 @@ database = "dedicated"
 # The first image pushed to the ECR repository (a commit SHA).
 initial_image_tag = "…"
 
-sentry_dsn = "https://…@….ingest.de.sentry.io/…"
+github_client_id = "Iv…"
+
+sentry_dsn ="https://…@….ingest.de.sentry.io/…"
 
 # custom_domain = "testnotary.dev"

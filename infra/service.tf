@@ -95,6 +95,7 @@ resource "aws_apprunner_service" "web" {
         runtime_environment_variables = merge(
           {
             AWS_REGION         = var.region
+            GITHUB_CLIENT_ID   = var.github_client_id
             SENTRY_DSN         = var.sentry_dsn
             SENTRY_ENVIRONMENT = "production"
           },

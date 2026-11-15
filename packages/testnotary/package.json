@@ -19,6 +19,7 @@
   "devDependencies": {
     "@testnotary/core": "workspace:*",
     "@testnotary/protocol": "workspace:*",
-    "@testnotary/test-world": "workspace:*"
+    "@testnotary/test-world": "workspace:*",
+    "zod": "^4.6.7"
   }
 }

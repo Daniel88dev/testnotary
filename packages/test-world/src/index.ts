@@ -12,9 +12,13 @@ import { startPostgresServer, type PostgresServer } from "./postgres-server.ts";
 import { cleanEnv, runAction, runNode, type ActionResult, type ProcessResult, type RunActionOptions, type RunOptions } from "./processes.ts";
 import { paths } from "./paths.ts";
 import { startInProcessService } from "./service.ts";
+import { createMachine, type Machine, type MachineOptions } from "./machine.ts";
+import { configToEnv, type ServiceConfig } from "@testnotary/web/config";
 
 export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-repo.ts";
-export { FakeGitHub, type AddRepoOptions, type RecordedRequest } from "./github/server.ts";
+export { FakeGitHub, type AddRepoOptions, type InstallAppOptions, type RecordedRequest, type RepositoryAction } from "./github/server.ts";
+export type { DeliverOptions, FakeAccount, FakeApp, FakeInstallation, WebhookDelivery } from "./github/app.ts";
+export type { DeviceFlow, DevicePlan, IssuedDeviceCode } from "./github/device-flow.ts";
 export type { FakeRepo } from "./github/state.ts";
 export { FakeSecretsManager, type SecretsManagerRequest } from "./aws/secrets-manager.ts";
 export { FakeSentry, type SentryEnvelope, type SentryEvent } from "./sentry.ts";
@@ -24,6 +28,7 @@ export type { ActionResult, Env, ProcessResult, RunActionOptions, RunOptions } f
 export type { PostgresServer, Role } from "./postgres-server.ts";
 export { startPostgresServer } from "./postgres-server.ts";
 export type { WorldDatabase } from "./database.ts";
+export { CREDENTIALS_FILE, type KeychainEntry, type Machine, type MachineOptions } from "./machine.ts";
 
 export interface WorldOptions {
   /** The Postgres server from a global setup. Without it the world starts (and stops) its own. */
@@ -63,6 +68,8 @@ export interface World {
   db: WorldDatabase;
   /** Builds a fixture repo (see FixtureRepo). It is deleted when the world closes. */
   fixtureRepo(options?: FixtureRepoOptions): Promise<FixtureRepo>;
+  /** A developer machine for `runCli`: a lasting HOME and a keychain stub (see Machine). */
+  machine(options?: MachineOptions): Promise<Machine>;
   /** Runs `testnotary <args>` as a process, pointed at this world's service. */
   runCli(args: string[], options: RunOptions): Promise<ProcessResult>;
   /** Runs the action's entry point as a process in a simulated runner. */
@@ -99,10 +106,17 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     );
 
     let service: HttpServer;
+    // The fake GitHub serves both api.github.com and github.com (device flow) at one URL.
+    const config: ServiceConfig = {
+      databaseUrl: db.urls.app,
+      githubApiUrl: github.url,
+      githubWebUrl: github.url,
+      githubClientId: github.app.clientId,
+      githubWebhookSecret: github.app.webhookSecret,
+    };
     if (options.service === "next") {
       const env: Record<string, string | undefined> = {
-        DATABASE_URL: db.urls.app,
-        GITHUB_API_URL: github.url,
+        ...configToEnv(config),
         SENTRY_DSN: sentry.dsn,
         // The AWS SDK talks to the fake Secrets Manager with throwaway credentials and never looks
         // for real ones (no profile, no instance metadata).
@@ -123,9 +137,10 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
         Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
       );
     } else {
-      service = await startInProcessService({ databaseUrl: db.urls.app, githubApiUrl: github.url });
+      service = await startInProcessService(config);
     }
     cleanups.push(() => service.close());
+    github.app.webhookUrl = `${service.url}/api/v1/github/webhooks`;
 
     const repos: FixtureRepo[] = [];
     cleanups.push(async () => {
@@ -143,9 +158,18 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
         repos.push(repo);
         return repo;
       },
+      machine(machineOptions) {
+        return createMachine(tmp, machineOptions);
+      },
       async runCli(args, runOptions) {
-        const home = await mkdtemp(join(tmp, "home-"));
-        return runNode(paths.cli, args, { ...runOptions, baseEnv: cleanEnv(home, service.url) });
+        const machine = runOptions.machine ?? (await createMachine(tmp));
+        const baseEnv = cleanEnv(machine.home, service.url);
+        // The keychain stub always comes first, even on a PATH a test sets: no test reaches the
+        // real keychain.
+        baseEnv.PATH = `${machine.bin}:${baseEnv.PATH}`;
+        const env = { ...runOptions.env };
+        if (env.PATH !== undefined) env.PATH = `${machine.bin}:${env.PATH}`;
+        return runNode(paths.cli, args, { ...runOptions, env, baseEnv });
       },
       runAction(actionOptions) {
         return runAction(actionOptions, { github, serviceUrl: service.url, tmp });

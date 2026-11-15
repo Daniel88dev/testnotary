@@ -92,6 +92,11 @@ variable "max_instances" {
   default     = 2
 }
 
+variable "github_client_id" {
+  description = "The Testnotary GitHub App's client id (not a secret; the device flow's client_id)."
+  type        = string
+}
+
 variable "sentry_dsn" {
   description = "Sentry DSN of the service. Empty turns reporting off."
   type        = string

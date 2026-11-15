@@ -1,12 +1,25 @@
 import { serve, type HttpServer } from "../http.ts";
+import {
+  deliver,
+  installationPayload,
+  newApp,
+  repoPayload,
+  type DeliverOptions,
+  type FakeAccount,
+  type FakeApp,
+  type FakeInstallation,
+  type WebhookDelivery,
+} from "./app.ts";
 import { OidcIssuer } from "./oidc.ts";
 import { matchPath, notFound, type Route, type RouteHandler } from "./router.ts";
+import { DeviceFlow } from "./device-flow.ts";
 import { gitRoutes } from "./routes/git.ts";
+import { loginRoutes } from "./routes/login.ts";
 import { oidcRoutes } from "./routes/oidc.ts";
 import { GitHubState, type FakeRepo } from "./state.ts";
 
 /** Every endpoint the fake serves. Add a file under routes/ and list it here. */
-const routes: Route[] = [...gitRoutes, ...oidcRoutes];
+const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes];
 
 export interface RecordedRequest {
   method: string;
@@ -14,7 +27,24 @@ export interface RecordedRequest {
   query: Record<string, string>;
   headers: Record<string, string>;
   body: unknown;
+  /** When it arrived, in ms since the epoch. */
+  at: number;
 }
+
+export interface InstallAppOptions {
+  /** The account installing the App. A login made up here gets a fresh id. */
+  account: { login: string; id?: number; type?: FakeAccount["type"] };
+  repos: FakeRepo[];
+  /** The installation id GitHub assigns (a reinstall gets a new one). */
+  id?: number;
+}
+
+export type RepositoryAction =
+  | { action: "renamed"; name: string }
+  | { action: "transferred"; owner: string }
+  | { action: "privatized" }
+  | { action: "publicized" }
+  | { action: "deleted" };
 
 export interface AddRepoOptions {
   owner?: string;
@@ -34,6 +64,12 @@ export class FakeGitHub {
   readonly oidc = new OidcIssuer(() => this.url);
   /** Every request received, in order, for asserting on what reached GitHub. */
   readonly requests: RecordedRequest[] = [];
+  /** The Testnotary App: client id, webhook secret and webhook URL. */
+  readonly app: FakeApp = newApp(this.state.id());
+  /** The device flow behind `testnotary login`: plan approvals with `approveNext`. */
+  readonly deviceFlow = new DeviceFlow();
+  /** Every webhook delivered to the App, with the service's answer. */
+  readonly deliveries: WebhookDelivery[] = [];
   private readonly overrides: Route[] = [];
   private server: HttpServer | undefined;
 
@@ -61,6 +97,121 @@ export class FakeGitHub {
       defaultBranch: fixture.defaultBranch,
       gitDir: fixture.remoteDir,
     });
+  }
+
+  /** A person on GitHub, who can sign in through the device flow. */
+  addUser(options: { login: string; id?: number }): FakeAccount {
+    return this.state.account(options.login, "User", options.id);
+  }
+
+  /**
+   * The account installs the App on some of its repos: GitHub records the installation and sends
+   * `installation` `created` with the repos (§12). Returns the installation and the delivery.
+   */
+  async installApp(options: InstallAppOptions): Promise<{ installation: FakeInstallation; delivery: WebhookDelivery }> {
+    const account = this.state.account(options.account.login, options.account.type ?? "User", options.account.id);
+    const installation: FakeInstallation = {
+      id: options.id ?? this.state.id(),
+      account,
+      repoIds: new Set(options.repos.map((repo) => repo.id)),
+      suspended: false,
+    };
+    this.state.installations.set(installation.id, installation);
+    const delivery = await this.installationEvent(installation, "created", options.repos);
+    return { installation, delivery };
+  }
+
+  /** The account uninstalls the App: `installation` `deleted`. */
+  uninstallApp(installation: FakeInstallation): Promise<WebhookDelivery> {
+    this.state.installations.delete(installation.id);
+    return this.installationEvent(installation, "deleted", this.installationRepos(installation));
+  }
+
+  /** An owner suspends or unsuspends the installation: `installation` `suspend` / `unsuspend`. */
+  setSuspended(installation: FakeInstallation, suspended: boolean): Promise<WebhookDelivery> {
+    installation.suspended = suspended;
+    return this.installationEvent(installation, suspended ? "suspend" : "unsuspend", undefined);
+  }
+
+  /** The account gives the App more repos: `installation_repositories` `added`. */
+  addInstallationRepos(installation: FakeInstallation, repos: FakeRepo[]): Promise<WebhookDelivery> {
+    for (const repo of repos) installation.repoIds.add(repo.id);
+    return this.deliverWebhook("installation_repositories", {
+      action: "added",
+      installation: installationPayload(this.app, installation),
+      repository_selection: "selected",
+      repositories_added: repos.map(repoPayload),
+      repositories_removed: [],
+      sender: this.sender(installation),
+    });
+  }
+
+  /** The account takes repos away from the App: `installation_repositories` `removed`. */
+  removeInstallationRepos(installation: FakeInstallation, repos: FakeRepo[]): Promise<WebhookDelivery> {
+    for (const repo of repos) installation.repoIds.delete(repo.id);
+    return this.deliverWebhook("installation_repositories", {
+      action: "removed",
+      installation: installationPayload(this.app, installation),
+      repository_selection: "selected",
+      repositories_added: [],
+      repositories_removed: repos.map(repoPayload),
+      sender: this.sender(installation),
+    });
+  }
+
+  /** Something happens to an installed repo: a `repository` event (§12). */
+  repositoryEvent(installation: FakeInstallation, repo: FakeRepo, change: RepositoryAction): Promise<WebhookDelivery> {
+    let changes: Record<string, unknown> | undefined;
+    if (change.action === "renamed") {
+      changes = { repository: { name: { from: repo.name } } };
+      this.state.moveRepo(repo, repo.owner, change.name);
+    } else if (change.action === "transferred") {
+      changes = { owner: { from: { user: { login: repo.owner, id: repo.ownerId, type: "Organization" } } } };
+      this.state.moveRepo(repo, change.owner, repo.name);
+      installation.repoIds.delete(repo.id);
+    } else if (change.action === "privatized" || change.action === "publicized") {
+      repo.visibility = change.action === "privatized" ? "private" : "public";
+    } else {
+      this.state.repos.delete(repo.fullName.toLowerCase());
+      installation.repoIds.delete(repo.id);
+    }
+    return this.deliverWebhook("repository", {
+      action: change.action,
+      ...(changes ? { changes } : {}),
+      repository: {
+        ...repoPayload(repo),
+        visibility: repo.visibility,
+        owner: { login: repo.owner, id: repo.ownerId },
+        default_branch: repo.defaultBranch,
+      },
+      installation: { id: installation.id, node_id: `MDIz${installation.id}` },
+      sender: this.sender(installation),
+    });
+  }
+
+  /** Sends one webhook as GitHub would, signed with the App's secret unless told otherwise. */
+  async deliverWebhook(event: string, payload: Record<string, unknown>, options?: DeliverOptions): Promise<WebhookDelivery> {
+    const delivery = await deliver(this.app, event, payload, options);
+    this.deliveries.push(delivery);
+    return delivery;
+  }
+
+  private installationEvent(installation: FakeInstallation, action: string, repos: FakeRepo[] | undefined): Promise<WebhookDelivery> {
+    return this.deliverWebhook("installation", {
+      action,
+      installation: installationPayload(this.app, installation),
+      ...(repos ? { repositories: repos.map(repoPayload) } : {}),
+      sender: this.sender(installation),
+    });
+  }
+
+  private installationRepos(installation: FakeInstallation): FakeRepo[] {
+    return [...this.state.repos.values()].filter((repo) => installation.repoIds.has(repo.id));
+  }
+
+  private sender(installation: FakeInstallation) {
+    const account = installation.account;
+    return account.type === "User" ? { login: account.login, id: account.id, type: "User" } : { login: "octocat", id: 1, type: "User" };
   }
 
   /**
@@ -95,6 +246,7 @@ export class FakeGitHub {
       query: Object.fromEntries(url.searchParams),
       headers: Object.fromEntries(request.headers),
       body: parseBody(text),
+      at: Date.now(),
     });
     for (const candidate of [...this.overrides, ...routes]) {
       if (candidate.method !== request.method) continue;

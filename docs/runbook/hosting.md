@@ -85,7 +85,8 @@ connections above 70% for a day, or a security review that asks for it. The code
      (encrypted inside the VPC; `verify-full` would need the RDS CA bundle in the image through
      `NODE_EXTRA_CA_CERTS`, which it does not carry yet)
    - `database-migration-url`, `database-retention-url`: the same for those roles
-   - `github-app-private-key`, `github-app-client-secret`: from the GitHub App's settings
+   - `github-app-webhook-secret`, `github-app-private-key`, `github-app-client-secret`: from the
+     GitHub App's settings (its webhook URL is `https://<domain>/api/v1/github/webhooks`)
    - `audit-master-key`: 32 random bytes, base64 (`openssl rand -base64 32`)
    - `better-auth-secret`: `openssl rand -base64 32`
 8. **Deploy variables.** In the `production` environment, set the variables `AWS_DEPLOY_ROLE_ARN`,
