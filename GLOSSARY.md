@@ -4,8 +4,12 @@ Testnotary lets CI skip its test job for a commit whose tests already passed on 
 
 ## Language
 
+**Suite**:
+A named test command the repo declares in its Testnotary config, such as *unit* or *e2e*. Each CI test job that may skip corresponds to one suite.
+_Avoid_: Test command, target, task, job
+
 **Run**:
-One invocation of Testnotary on a laptop or in a cloud agent sandbox to test the repo's tree with its declared test command. Every run has an outcome, even one that never started the command.
+One invocation of Testnotary on a laptop or in a cloud agent sandbox to test the repo's tree with one suite. Every run has an outcome, even one that never started the command.
 _Avoid_: Test result, execution, job
 
 **Outcome**:
@@ -21,12 +25,16 @@ The pair of OS and architecture a run executed on, such as linux/x64. The narrow
 _Avoid_: Environment, target, OS
 
 **Attestation**:
-The record, tied to a GitHub account, that a run passed on one tree: the exact set of files the run tested. It also names the commit the run had checked out, but only the tree decides what it covers.
+The record, tied to a GitHub account, that a run of one suite passed on one tree: the exact set of files the run tested. It also names the commit the run had checked out, but only the tree decides what it covers.
 _Avoid_: Test result, signoff, proof, certificate, notarization, seal
 
 **Verification**:
-The CI action asking the service whether a valid attestation names the tree of the commit CI is building. A match counts even when CI builds a different commit, such as the merge commit GitHub creates for a pull request.
+The CI action asking the service whether a valid attestation names the tree of the commit CI is building, for the suite of the job asking. A match counts even when CI builds a different commit, such as the merge commit GitHub creates for a pull request.
 _Avoid_: Check, validation, lookup
+
+**Fallback**:
+A verification that does not let CI skip its tests, together with the reason, such as no attestation for the tree or a changed guarded file. An audit is one kind of fallback. In shadow mode nothing skips, so a verification there is reported as one that *would have skipped* or *would have fallen back*, never as a fallback.
+_Avoid_: Miss, cache miss, rejection, normal CI
 
 ## Trust
 
