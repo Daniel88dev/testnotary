@@ -93,4 +93,72 @@ describe("signature mode with the developer's GitHub SSH signing key", () => {
     expect(byJob(`/users/${s.user.login}/ssh_signing_keys`)).toHaveLength(1);
     expect(byJob(`/repos/${s.repo.fullName}/collaborators/${s.user.login}/permission`)).toHaveLength(1);
   });
+
+  test("after the key is deleted on GitHub, the next check is signature_invalid and the tests run", async () => {
+    const s = await scene();
+    const key = await world.sshKey();
+    const id = world.github.addSigningKey(s.user, key.publicKey);
+    await useSigningKey(s.fixture, key);
+    expect((await s.attest()).stderr).toMatch(/attested=true/);
+    world.github.removeSigningKey(id);
+
+    const result = await s.ci();
+
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_invalid", ran: "true" });
+    expect(line(result.summary)).toBe(
+      `Fell back: signature_invalid (signature: the key is neither among @${s.user.login}'s GitHub signing keys nor in .testnotary/allowed_signers at HEAD^1), the attestation's signature did not pass the signature check · the tests passed in ${duration(result.summary)}`,
+    );
+    expect(world.github.checkRuns(s.repo)[0]).toMatchObject({ conclusion: "neutral" });
+  });
 });
+
+describe("a run with no usable signing key in signature mode", () => {
+  test("uploads unsigned with a warning, and the action falls back with signature_missing", async () => {
+    const s = await scene();
+
+    const run = await world.runCli(["run", "--json"], { cwd: s.fixture.dir, machine: s.machine });
+
+    expect(run.exitCode).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ outcome: "passed", attested: true, warnings: ["no_signing_key"] });
+    expect(run.stderr).toContain("testnotary: the repo requires signatures, but git has no SSH signing key");
+    const [upload] = uploads(s.repo);
+    expect(upload).toMatchObject({ outcome: "passed", warnings: ["no_signing_key"] });
+    expect(upload!.attestation).toEqual({ payload: expect.any(String) });
+
+    const result = await s.ci();
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_missing", ran: "true" });
+    expect(line(result.summary)).toMatch(/^Fell back: signature_missing, the repo requires signatures and the attestation has none · the tests passed in /);
+  });
+
+  test("a key ssh-keygen can't use also uploads unsigned with the warning", async () => {
+    const s = await scene();
+    await s.fixture.git("config", "gpg.format", "ssh");
+    await s.fixture.git("config", "user.signingKey", "/nonexistent/key");
+
+    const run = await world.runCli(["run", "--json"], { cwd: s.fixture.dir, machine: s.machine });
+
+    expect(JSON.parse(run.stdout)).toMatchObject({ outcome: "passed", attested: true, warnings: ["no_signing_key"] });
+    expect(run.stderr).toMatch(/testnotary: the repo requires signatures, but ssh-keygen could not sign with \/nonexistent\/key/);
+    expect(uploads(s.repo)[0]!.attestation).toEqual({ payload: expect.any(String) });
+  });
+});
+
+/** The PR line: the bold line of the job summary. */
+function line(summary: string): string {
+  return /\*\*(.+)\*\*/.exec(summary)?.[1] ?? "";
+}
+
+/** How long the tests took, as the line printed it. */
+function duration(summary: string): string {
+  return /the tests passed in ([\d.]+ s)/.exec(summary)?.[1] ?? "?";
+}
+
+/** Every run upload the service received for the repo, oldest first, as sent. */
+function uploads(repo: FakeRepo): Record<string, unknown>[] {
+  return world.service.requests
+    .filter((request) => request.method === "POST" && request.path === "/api/v1/runs")
+    .map((request) => JSON.parse(request.text) as Record<string, unknown>)
+    .filter((upload) => upload.repository === repo.fullName);
+}
