@@ -15,13 +15,18 @@ const world = useWorld();
 const SUITE = "test";
 /**
  * Leaves `ran.txt`, so a test sees whether the command ran, and fails (exit 1) where a file named
- * `fails-here` exists: a test drops it in CI's workspace to make CI disagree with the laptop.
+ * `fails-here` exists: a test drops it in CI's workspace to make CI disagree with the laptop. Where
+ * `slow-here` exists it takes 4 s, so a test can cancel the job while the tests run.
  */
-const PASSING = {
-  suites: {
-    [SUITE]: { command: ["node", "-e", "const fs = require('fs'); fs.writeFileSync('ran.txt', 'x'); process.exit(fs.existsSync('fails-here') ? 1 : 0)"] },
-  },
-};
+const SCRIPT = [
+  "const fs = require('fs');",
+  "fs.writeFileSync('ran.txt', 'x');",
+  "if (fs.existsSync('slow-here')) setTimeout(() => process.exit(1), 4000);",
+  "else process.exit(fs.existsSync('fails-here') ? 1 : 0);",
+].join(" ");
+const PASSING = { suites: { [SUITE]: { command: ["node", "-e", SCRIPT] } } };
+/** A command only the laptop has (`check.sh` is ignored by git): `exec` in CI refuses it, `command_not_found`. */
+const LAPTOP_ONLY = { suites: { [SUITE]: { command: ["./check.sh"] } } };
 
 interface Story {
   fixture: FixtureRepo;
@@ -36,18 +41,31 @@ interface Story {
    * The action's run-mode step on a commit, in a fresh checkout with the library installed. With
    * `fails`, the tests fail in CI although they passed on the laptop.
    */
-  ci(sha: string, options?: { fails?: boolean; event?: string; ref?: string }): Promise<Awaited<ReturnType<typeof world.runAction>> & { workspace: string }>;
+  ci(sha: string, options?: CiOptions): Promise<Awaited<ReturnType<typeof world.runAction>> & { workspace: string }>;
+}
+
+interface CiOptions {
+  /** The tests fail in CI although they passed on the laptop. */
+  fails?: boolean;
+  /** The job is cancelled while its tests run. */
+  cancelled?: boolean;
+  event?: string;
+  ref?: string;
 }
 
 let repos = 0;
 
-/** An installed repo in enforce mode at the default rates, and a developer with write access signed in on their laptop. */
-async function story(): Promise<Story> {
+/** An installed repo (in enforce mode at the default rates, unless `mode` says shadow), and a developer with write access signed in on their laptop. */
+async function story(options: { mode?: "shadow" | "enforce"; config?: Record<string, unknown> } = {}): Promise<Story> {
   const n = ++repos;
   const fixture = await world.fixtureRepo({
-    config: PASSING,
-    files: { "package.json": '{ "name": "widgets", "private": true, "packageManager": "pnpm@10.34.9" }\n', ".gitignore": "node_modules\nran.txt\nfails-here\n" },
+    config: options.config ?? PASSING,
+    files: {
+      "package.json": '{ "name": "widgets", "private": true, "packageManager": "pnpm@10.34.9" }\n',
+      ".gitignore": "node_modules\nran.txt\nfails-here\nslow-here\ncheck.sh\n",
+    },
   });
+  await writeFile(join(fixture.dir, "check.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   const repo = await world.hostOnGitHub(fixture, { owner: `audit-${n}`, name: "widgets" });
   await world.github.installApp({ account: { login: `audit-${n}`, type: "Organization" }, repos: [repo] });
   const user = world.github.addUser({ login: `audit-dev-${n}` });
@@ -55,7 +73,7 @@ async function story(): Promise<Story> {
   const machine = await world.machine();
   world.github.deviceFlow.approveNext(user);
   expect((await world.runCli(["login"], { cwd: machine.home, machine })).exitCode).toBe(0);
-  await setMode(repo, "enforce");
+  if ((options.mode ?? "enforce") === "enforce") await setMode(repo, "enforce");
   return {
     fixture,
     repo,
@@ -67,11 +85,13 @@ async function story(): Promise<Story> {
       expect(result.exitCode).toBe(0);
     },
     gate: (sha, { event, ref } = {}) => world.runAction({ repo, sha, event, ref, workspace: fixture.dir, inputs: { suite: SUITE, mode: "verify" } }),
-    async ci(sha, { fails = false, event, ref } = {}) {
+    async ci(sha, { fails = false, cancelled = false, event, ref } = {}) {
       const workspace = await fixture.ciCheckout(sha);
       await installLibrary(workspace);
       if (fails) await writeFile(join(workspace, "fails-here"), "");
-      return { ...(await world.runAction({ repo, sha, event, ref, workspace, inputs: { suite: SUITE } })), workspace };
+      if (cancelled) await writeFile(join(workspace, "slow-here"), "");
+      const cancelOnceExists = cancelled ? join(workspace, "ran.txt") : undefined;
+      return { ...(await world.runAction({ repo, sha, event, ref, workspace, inputs: { suite: SUITE }, cancelOnceExists })), workspace };
     },
   };
 }
@@ -95,14 +115,15 @@ async function setMode(repo: FakeRepo, mode: "shadow" | "enforce", rates: { audi
  * A feature branch whose one commit has a tree the draw treats as `wanted` says, found by trying
  * one small file after another (no key version is touched), pushed. Returns the tree.
  */
-async function featureWithTree(s: Story, wanted: (tree: string) => Promise<boolean>): Promise<string> {
-  await s.fixture.branch("feature");
+async function featureWithTree(s: Story, wanted: (tree: string) => Promise<boolean>, branch = "feature"): Promise<string> {
+  await s.fixture.checkout("main");
+  await s.fixture.branch(branch);
   for (let attempt = 0; attempt < 500; attempt++) {
-    await s.fixture.write({ "src/a.js": `export const a = ${attempt};\n` });
+    await s.fixture.write({ [`src/${branch}.js`]: `export const a = ${attempt};\n` });
     await s.fixture.git("add", "--all");
     const tree = (await s.fixture.git("write-tree")).trim();
     if (await wanted(tree)) {
-      await s.fixture.commit("Add a");
+      await s.fixture.commit(`Change ${branch}`);
       await s.fixture.push();
       return tree;
     }
@@ -112,12 +133,14 @@ async function featureWithTree(s: Story, wanted: (tree: string) => Promise<boole
 
 const drawnAt = (s: Story, tokenKind: "laptop" | "sandbox") => (tree: string) => world.audits.drawn(s.repo, { tree, suite: SUITE, tokenKind });
 
-/** A pull request whose tree the draw picks at 1 in 10, attested on the laptop, and its test merge commit. */
-async function auditedPullRequest(s: Story) {
-  await featureWithTree(s, drawnAt(s, "laptop"));
+/** A pull request whose tree the draw picks at 1 in 10 (or doesn't, with `drawn: false`), attested on the laptop, and its test merge commit. */
+async function attestedPullRequest(s: Story, { drawn = true, branch = "feature", number = 1 } = {}) {
+  await featureWithTree(s, async (tree) => (drawn ? drawnAt(s, "laptop")(tree) : !(await drawnAt(s, "sandbox")(tree))), branch);
   await s.attest();
-  return s.fixture.testMerge({ base: "main", head: "feature" });
+  return s.fixture.testMerge({ base: "main", head: branch, number });
 }
+
+const auditedPullRequest = (s: Story) => attestedPullRequest(s);
 
 describe("the audit draw, under the world's fixed master key", () => {
   test("at 1 in 10, a tree the draw picks reads audit, every time, and a tree it doesn't pick skips", async () => {
@@ -197,6 +220,77 @@ describe("an audited job", () => {
     // Back in shadow mode at once: the same tree would skip now, and doesn't.
     const next = await s.gate(merge.sha);
     expect(next.outputs).toMatchObject({ result: "would_skip", skip: "false" });
+  });
+});
+
+describe("in shadow mode", () => {
+  test("no audit is drawn: a tree the draw would pick reads would_skip", async () => {
+    const s = await story({ mode: "shadow" });
+    const merge = await auditedPullRequest(s);
+
+    expect((await s.gate(merge.sha)).outputs).toMatchObject({ result: "would_skip", reason: "" });
+  });
+
+  test("a failing report on a would-skip creates a mismatch, with its own line and a failing check", async () => {
+    const s = await story({ mode: "shadow" });
+    const merge = await attestedPullRequest(s, { drawn: false });
+
+    const result = await s.ci(merge.sha, { fails: true });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.outputs).toEqual({ result: "would_skip", reason: "", ran: "true" });
+    const [check] = world.github.checkRuns(s.repo);
+    expect(check).toMatchObject({ conclusion: "failure" });
+    expect(check!.output.title).toMatch(
+      new RegExp(`^Mismatch: would have skipped · test passed .+ ago · attested by @${s.user.login} · .+ · shadow mode: the tests failed in [\\d.]+ s \\(exit code 1\\)$`),
+    );
+    expect(result.summary).toMatch(/- Mismatch: recorded against @audit-dev-\d+ and laptop token "[^"]+"\. Nothing was revoked\./);
+    const gate = await s.gate(merge.sha);
+    expect((await readBack(s.repo, merge.sha, gate.outputs.verification!)).mode).toBe("shadow");
+  });
+});
+
+describe("what is neither an agreement nor a mismatch", () => {
+  test("a cancelled audit job: no report, no mismatch, and the repo stays in enforce", async () => {
+    const s = await story();
+    const merge = await auditedPullRequest(s);
+    const from = world.service.requests.length;
+
+    const result = await s.ci(merge.sha, { cancelled: true });
+
+    expect(result.signal).toBe("SIGTERM");
+    expect(world.service.requests.slice(from).map((request) => `${request.method} ${request.path}`)).toEqual(["POST /api/v1/verifications"]);
+    const gate = await s.gate(merge.sha);
+    expect(gate.outputs.result).toBe("audit");
+    const read = await readBack(s.repo, merge.sha, gate.outputs.verification!);
+    expect(read).toMatchObject({ mode: "enforce", jobReport: null, mismatch: null });
+  });
+
+  test("an audit whose tests exec refused to start: the report says refused, no mismatch, and the repo stays in enforce", async () => {
+    const s = await story({ config: LAPTOP_ONLY });
+    const merge = await auditedPullRequest(s);
+
+    const result = await s.ci(merge.sha);
+
+    expect(result.outputs).toMatchObject({ result: "audit", ran: "true" });
+    const [check] = world.github.checkRuns(s.repo);
+    expect(check).toMatchObject({ conclusion: "neutral" });
+    expect(check!.output.title).toMatch(/^Audit · .+ · exec refused to start the tests \(exit code 2\)$/);
+    const gate = await s.gate(merge.sha);
+    expect(gate.outputs.result).toBe("audit");
+  });
+
+  test("a fallback whose tests fail is an ordinary failure: no mismatch, a neutral check, and the repo stays in enforce", async () => {
+    const s = await story();
+    await featureWithTree(s, async () => true);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+    const result = await s.ci(merge.sha, { fails: true });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation" });
+    expect(world.github.checkRuns(s.repo)[0]).toMatchObject({ conclusion: "neutral" });
+    expect((await s.gate(merge.sha)).outputs.result).toBe("fallback");
   });
 });
 

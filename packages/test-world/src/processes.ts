@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { git } from "./git.ts";
@@ -32,6 +33,11 @@ export interface RunOptions {
    * `/opt/.devin`, the file a Devin sandbox has. Nothing is written there.
    */
   rootFiles?: string[];
+  /**
+   * Cancels the process the way a runner cancels a job (SIGTERM) as soon as this path exists, e.g.
+   * a file the test command writes when it starts.
+   */
+  cancelOnceExists?: string;
 }
 
 /**
@@ -60,12 +66,23 @@ export function runNode(entry: string, args: string[], options: RunOptions & { b
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
     const timer = setTimeout(() => child.kill("SIGKILL"), options.timeoutMs ?? 30_000);
+    const cancelPath = options.cancelOnceExists;
+    const cancel = cancelPath
+      ? setInterval(() => {
+          if (existsSync(cancelPath)) {
+            clearInterval(cancel);
+            child.kill("SIGTERM");
+          }
+        }, 20)
+      : undefined;
     child.on("error", (error) => {
       clearTimeout(timer);
+      clearInterval(cancel);
       reject(error);
     });
     child.on("close", (exitCode, signal) => {
       clearTimeout(timer);
+      clearInterval(cancel);
       resolve({ exitCode, signal, stdout, stderr });
     });
     child.stdin.end(options.input ?? "");
@@ -116,6 +133,8 @@ export interface RunActionOptions {
   eventPayload?: unknown;
   /** Another entry point instead of the action's (harness tests only). */
   entry?: string;
+  /** Cancels the job (SIGTERM to the step) as soon as this path exists, e.g. a file the tests write when they start. */
+  cancelOnceExists?: string;
 }
 
 export interface ActionResult extends ProcessResult {
@@ -255,6 +274,7 @@ export async function runAction(
     cwd: options.workspace,
     env: options.env,
     baseEnv: env,
+    cancelOnceExists: options.cancelOnceExists,
   });
   return {
     ...result,
