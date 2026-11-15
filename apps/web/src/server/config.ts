@@ -12,6 +12,16 @@ export interface ServiceConfig {
   githubClientId: string | undefined;
   /** The App's webhook secret (a secret). Without it every webhook is refused. */
   githubWebhookSecret: string | undefined;
+  /** The App's URL name on GitHub: `github.com/apps/<slug>`, where people install it. */
+  githubAppSlug: string;
+  /** The App's client secret (a secret): the browser sign-in exchanges GitHub's code with it. */
+  githubClientSecret: string | undefined;
+  /** Where GitHub serves avatars. The app's own image route fetches them, so browsers never do. */
+  githubAvatarsUrl: string;
+  /** Signs and encrypts the browser session cookies (a secret, 32+ characters). Without it nobody can sign in. */
+  authSecret: string | undefined;
+  /** The service's own origin as browsers reach it: sign-in redirects come back here. */
+  publicUrl: string;
 }
 
 const scoped = new AsyncLocalStorage<ServiceConfig>();
@@ -22,6 +32,11 @@ const ENV = {
   githubWebUrl: "GITHUB_WEB_URL",
   githubClientId: "GITHUB_CLIENT_ID",
   githubWebhookSecret: "GITHUB_WEBHOOK_SECRET",
+  githubAppSlug: "GITHUB_APP_SLUG",
+  githubClientSecret: "GITHUB_APP_CLIENT_SECRET",
+  githubAvatarsUrl: "GITHUB_AVATARS_URL",
+  authSecret: "BETTER_AUTH_SECRET",
+  publicUrl: "PUBLIC_URL",
 } as const satisfies Record<keyof ServiceConfig, string>;
 
 export function configFromEnv(env: Readonly<Record<string, string | undefined>>): ServiceConfig {
@@ -31,6 +46,11 @@ export function configFromEnv(env: Readonly<Record<string, string | undefined>>)
     githubWebUrl: (env[ENV.githubWebUrl] || "https://github.com").replace(/\/+$/, ""),
     githubClientId: env[ENV.githubClientId] || undefined,
     githubWebhookSecret: env[ENV.githubWebhookSecret] || undefined,
+    githubAppSlug: env[ENV.githubAppSlug] || "testnotary",
+    githubClientSecret: env[ENV.githubClientSecret] || undefined,
+    githubAvatarsUrl: (env[ENV.githubAvatarsUrl] || "https://avatars.githubusercontent.com").replace(/\/+$/, ""),
+    authSecret: env[ENV.authSecret] || undefined,
+    publicUrl: (env[ENV.publicUrl] || "https://testnotary.dev").replace(/\/+$/, ""),
   };
 }
 
@@ -55,4 +75,9 @@ export function serviceConfig(): ServiceConfig {
 
 export function withServiceConfig<T>(config: ServiceConfig, fn: () => T): T {
   return scoped.run(config, fn);
+}
+
+/** Where a person installs the App on an account and picks its repos. */
+export function appInstallUrl(config: ServiceConfig = serviceConfig()): string {
+  return `${config.githubWebUrl}/apps/${config.githubAppSlug}/installations/new`;
 }

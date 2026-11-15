@@ -5,7 +5,8 @@ import { createWorldDatabase, type WorldDatabase } from "./database.ts";
 import { FixtureRepo, type FixtureRepoOptions } from "./fixture-repo.ts";
 import { FakeGitHub } from "./github/server.ts";
 import type { HttpServer } from "./http.ts";
-import { startNextService } from "./next-service.ts";
+import { freePort, startNextService } from "./next-service.ts";
+import { randomBytes } from "node:crypto";
 import { FakeSecretsManager } from "./aws/secrets-manager.ts";
 import { FakeSentry } from "./sentry.ts";
 import { startPostgresServer, type PostgresServer } from "./postgres-server.ts";
@@ -19,7 +20,8 @@ export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-
 export { FakeGitHub, type AddRepoOptions, type InstallAppOptions, type RecordedRequest, type RepositoryAction } from "./github/server.ts";
 export type { DeliverOptions, FakeAccount, FakeApp, FakeInstallation, WebhookDelivery } from "./github/app.ts";
 export type { DeviceFlow, DevicePlan, IssuedDeviceCode } from "./github/device-flow.ts";
-export type { FakeRepo } from "./github/state.ts";
+export type { FakeRepo, RepoPermission } from "./github/state.ts";
+export type { WebFlow } from "./github/web-flow.ts";
 export { FakeSecretsManager, type SecretsManagerRequest } from "./aws/secrets-manager.ts";
 export { FakeSentry, type SentryEnvelope, type SentryEvent } from "./sentry.ts";
 export { OIDC_LIFETIME_SECONDS, type ActionsJob } from "./github/oidc.ts";
@@ -106,13 +108,22 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
     );
 
     let service: HttpServer;
-    // The fake GitHub serves both api.github.com and github.com (device flow) at one URL.
+    // The `next` service's port is chosen first, so its own URL (where sign-in comes back) is known.
+    const nextPort = options.service === "next" ? await freePort() : undefined;
+    // The fake GitHub serves api.github.com, github.com (device flow, browser sign-in) and the
+    // avatars host at one URL.
     const config: ServiceConfig = {
       databaseUrl: db.urls.app,
       githubApiUrl: github.url,
       githubWebUrl: github.url,
       githubClientId: github.app.clientId,
       githubWebhookSecret: github.app.webhookSecret,
+      githubAppSlug: github.app.slug,
+      githubClientSecret: github.app.clientSecret,
+      githubAvatarsUrl: github.avatarsUrl,
+      authSecret: randomBytes(32).toString("base64url"),
+      // The in-process service learns its URL once it listens (below).
+      publicUrl: nextPort ? `http://127.0.0.1:${nextPort}` : "http://127.0.0.1",
     };
     if (options.service === "next") {
       const env: Record<string, string | undefined> = {
@@ -135,9 +146,11 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       }
       service = await startNextService(
         Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+        nextPort,
       );
     } else {
       service = await startInProcessService(config);
+      config.publicUrl = service.url;
     }
     cleanups.push(() => service.close());
     github.app.webhookUrl = `${service.url}/api/v1/github/webhooks`;

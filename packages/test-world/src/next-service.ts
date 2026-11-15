@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { createServer } from "node:net";
 import type { HttpServer } from "./http.ts";
 import { paths } from "./paths.ts";
@@ -7,8 +8,8 @@ import { paths } from "./paths.ts";
  * The whole web app (pages and API) under `next dev`, for Playwright. It gets the same world as the
  * in-process service: the world's database as the app role and the fake GitHub.
  */
-export async function startNextService(env: Record<string, string>): Promise<HttpServer> {
-  const port = await freePort();
+export async function startNextService(env: Record<string, string>, port?: number): Promise<HttpServer> {
+  port ??= await freePort();
   const child = spawn(
     process.execPath,
     [`${paths.webApp}/node_modules/next/dist/bin/next`, "dev", "--hostname", "127.0.0.1", "--port", String(port)],
@@ -20,8 +21,14 @@ export async function startNextService(env: Record<string, string>): Promise<Htt
     },
   );
   let log = "";
-  child.stdout.setEncoding("utf8").on("data", (chunk: string) => (log += chunk));
-  child.stderr.setEncoding("utf8").on("data", (chunk: string) => (log += chunk));
+  // TESTNOTARY_WORLD_NEXT_LOG=<file>: also append the service's output there, for debugging a page.
+  const logFile = process.env.TESTNOTARY_WORLD_NEXT_LOG;
+  const record = (chunk: string) => {
+    log += chunk;
+    if (logFile) appendFileSync(logFile, chunk);
+  };
+  child.stdout.setEncoding("utf8").on("data", record);
+  child.stderr.setEncoding("utf8").on("data", record);
   const url = `http://127.0.0.1:${port}`;
 
   const stop = async () => {
@@ -49,7 +56,7 @@ export async function startNextService(env: Record<string, string>): Promise<Htt
   return { url, close: stop };
 }
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.once("error", reject);

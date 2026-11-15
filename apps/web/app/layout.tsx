@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { mono, sans } from "./fonts.ts";
+import "./tokens.css";
 
 export const metadata: Metadata = {
   title: "Testnotary",
@@ -8,10 +10,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body style={{ margin: 0, background: "#070a12", color: "#e8edf9", fontFamily: "system-ui, sans-serif" }}>
-        {children}
-      </body>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
+      <body>{children}</body>
     </html>
   );
 }

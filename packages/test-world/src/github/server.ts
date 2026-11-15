@@ -16,10 +16,13 @@ import { DeviceFlow } from "./device-flow.ts";
 import { gitRoutes } from "./routes/git.ts";
 import { loginRoutes } from "./routes/login.ts";
 import { oidcRoutes } from "./routes/oidc.ts";
-import { GitHubState, type FakeRepo } from "./state.ts";
+import { avatarRoutes } from "./routes/avatars.ts";
+import { userAccessRoutes } from "./routes/user-access.ts";
+import { GitHubState, type FakeRepo, type RepoPermission } from "./state.ts";
+import { WebFlow } from "./web-flow.ts";
 
 /** Every endpoint the fake serves. Add a file under routes/ and list it here. */
-const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes];
+const routes: Route[] = [...gitRoutes, ...oidcRoutes, ...loginRoutes, ...userAccessRoutes, ...avatarRoutes];
 
 export interface RecordedRequest {
   method: string;
@@ -67,7 +70,9 @@ export class FakeGitHub {
   /** The Testnotary App: client id, webhook secret and webhook URL. */
   readonly app: FakeApp = newApp(this.state.id());
   /** The device flow behind `testnotary login`: plan approvals with `approveNext`. */
-  readonly deviceFlow = new DeviceFlow();
+  readonly deviceFlow = new DeviceFlow(this.state.userTokens);
+  /** The browser sign-in to the dashboard: plan who is signed in on GitHub with `approveNext`. */
+  readonly webFlow = new WebFlow(this.state.userTokens);
   /** Every webhook delivered to the App, with the service's answer. */
   readonly deliveries: WebhookDelivery[] = [];
   private readonly overrides: Route[] = [];
@@ -99,9 +104,28 @@ export class FakeGitHub {
     });
   }
 
-  /** A person on GitHub, who can sign in through the device flow. */
+  /** A person on GitHub, who can sign in through the device flow or in the browser. */
   addUser(options: { login: string; id?: number }): FakeAccount {
     return this.state.account(options.login, "User", options.id);
+  }
+
+  /**
+   * Gives a person a permission on a repo (a collaborator or team grant), or takes it away with
+   * `undefined`. The owner of a personal repo is admin without a grant; anyone reads a public repo.
+   */
+  grant(repo: FakeRepo, user: FakeAccount, permission: RepoPermission | undefined): void {
+    let grants = this.state.permissions.get(repo.id);
+    if (!grants) {
+      grants = new Map();
+      this.state.permissions.set(repo.id, grants);
+    }
+    if (permission) grants.set(user.id, permission);
+    else grants.delete(user.id);
+  }
+
+  /** Where the App's avatars come from: avatars.githubusercontent.com in production. */
+  get avatarsUrl(): string {
+    return `${this.url}/avatars`;
   }
 
   /**

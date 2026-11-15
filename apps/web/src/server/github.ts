@@ -108,3 +108,101 @@ export async function fetchUser(userToken: string): Promise<GitHubUser> {
   }
   return { kind: "user", id: body.id, login: body.login };
 }
+
+/** A person's permission on a repo, folded as GitHub folds roles: maintain → write, triage → read. */
+export type RepoPermission = "admin" | "write" | "read";
+
+function foldPermissions(value: unknown): RepoPermission | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const p = value as Record<string, unknown>;
+  if (p.admin === true) return "admin";
+  if (p.maintain === true || p.push === true) return "write";
+  if (p.triage === true || p.pull === true) return "read";
+  return undefined;
+}
+
+function asUser(userToken: string): RequestInit {
+  return { headers: { accept: "application/vnd.github+json", authorization: `Bearer ${userToken}` } };
+}
+
+/**
+ * The person's permission on a repo, asked as them: `undefined` when GitHub does not show them the
+ * repo (404, or no permission). A user token of the App reaches only repos the App is installed on.
+ */
+export async function fetchRepoPermission(userToken: string, fullName: string): Promise<RepoPermission | undefined> {
+  const path = fullName.split("/").map(encodeURIComponent).join("/");
+  const response = await call(`${serviceConfig().githubApiUrl}/repos/${path}`, asUser(userToken));
+  if (response.status === 404 || response.status === 403 || response.status === 401) return undefined;
+  const body = await jsonBody(response);
+  if (!response.ok) throw new GitHubUnavailable(`GET /repos/${fullName} answered ${response.status}`);
+  return foldPermissions(body.permissions);
+}
+
+export interface AccessibleRepo {
+  id: number;
+  fullName: string;
+  permission: RepoPermission;
+  /** The installation it came through, and the GitHub account that installation is on. */
+  installationId: number;
+  installationAccountId: number;
+}
+
+const PER_PAGE = 100;
+/** A person in more installations or repos than this is shown the first ones only. */
+const MAX_PAGES = 10;
+
+/**
+ * Every repo the person can access through an installation of the App (GitHub lists the repos they
+ * have explicit read, write or admin access to): `GET /user/installations`, then each one's
+ * `repositories`.
+ */
+export async function fetchAccessibleRepos(userToken: string): Promise<AccessibleRepo[]> {
+  const api = serviceConfig().githubApiUrl;
+  const installations: { id: number; accountId: number }[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const response = await call(`${api}/user/installations?per_page=${PER_PAGE}&page=${page}`, asUser(userToken));
+    if (response.status === 401 || response.status === 403) return [];
+    const body = await jsonBody(response);
+    if (!response.ok) throw new GitHubUnavailable(`GET /user/installations answered ${response.status}`);
+    const listed = Array.isArray(body.installations) ? (body.installations as Record<string, unknown>[]) : [];
+    for (const item of listed) {
+      const account = item.account as Record<string, unknown> | undefined;
+      if (typeof item.id === "number" && typeof account?.id === "number") installations.push({ id: item.id, accountId: account.id });
+    }
+    if (listed.length < PER_PAGE) break;
+  }
+  const repos: AccessibleRepo[] = [];
+  for (const installation of installations) {
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const url = `${api}/user/installations/${installation.id}/repositories?per_page=${PER_PAGE}&page=${page}`;
+      const response = await call(url, asUser(userToken));
+      if (response.status === 404 || response.status === 403) break;
+      const body = await jsonBody(response);
+      if (!response.ok) throw new GitHubUnavailable(`GET /user/installations/${installation.id}/repositories answered ${response.status}`);
+      const listed = Array.isArray(body.repositories) ? (body.repositories as Record<string, unknown>[]) : [];
+      for (const item of listed) {
+        const permission = foldPermissions(item.permissions);
+        if (typeof item.id !== "number" || typeof item.full_name !== "string" || !permission) continue;
+        repos.push({ id: item.id, fullName: item.full_name, permission, installationId: installation.id, installationAccountId: installation.accountId });
+      }
+      if (listed.length < PER_PAGE) break;
+    }
+  }
+  return repos;
+}
+
+/** A GitHub avatar, fetched by the service so browsers never contact GitHub. `undefined` if GitHub has none. */
+export async function fetchAvatar(accountId: number): Promise<{ body: ArrayBuffer; contentType: string } | undefined> {
+  let response: Response;
+  try {
+    response = await fetch(`${serviceConfig().githubAvatarsUrl}/u/${accountId}?s=80&v=4`, {
+      headers: { "user-agent": "testnotary-service" },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch {
+    return undefined;
+  }
+  const contentType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim();
+  if (!response.ok || !/^image\/(png|jpeg|gif|webp)$/.test(contentType)) return undefined;
+  return { body: await response.arrayBuffer(), contentType };
+}

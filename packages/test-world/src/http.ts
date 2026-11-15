@@ -24,7 +24,12 @@ async function handle(
   try {
     const response = await handler(await toRequest(req));
     res.statusCode = response.status;
-    response.headers.forEach((value, key) => res.setHeader(key, value));
+    response.headers.forEach((value, key) => {
+      if (key !== "set-cookie") res.setHeader(key, value);
+    });
+    // Each cookie is its own header: setHeader per entry would keep only the last one.
+    const cookies = response.headers.getSetCookie();
+    if (cookies.length > 0) res.setHeader("set-cookie", cookies);
     res.end(Buffer.from(await response.arrayBuffer()));
   } catch (error) {
     res.statusCode = 500;

@@ -9,6 +9,8 @@ export interface FakeApp {
   slug: string;
   /** The App's OAuth client id: the device flow's `client_id`. No secret is needed for it. */
   clientId: string;
+  /** The App's OAuth client secret: the browser sign-in's code exchange needs it (the device flow does not). */
+  clientSecret: string;
   /** Signs every delivery (`X-Hub-Signature-256`). The service gets the same value. */
   webhookSecret: string;
   /** Where deliveries go. The world points it at the service's webhook route. */
@@ -52,6 +54,7 @@ export function newApp(id: number): FakeApp {
     id,
     slug: "testnotary-world",
     clientId: `Iv23li${randomBytes(7).toString("hex")}`,
+    clientSecret: randomBytes(20).toString("hex"),
     webhookSecret: randomBytes(20).toString("hex"),
     webhookUrl: undefined,
   };
