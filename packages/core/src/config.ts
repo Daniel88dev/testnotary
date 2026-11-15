@@ -53,6 +53,7 @@ const configSchema = z
     signatures: z.literal("required").optional().meta({ description: '"required" turns signature mode on.' }),
     suites: z
       .record(z.string().regex(SUITE_NAME, { error: (issue) => `${JSON.stringify(issue.input)} is not a suite name (letters, digits, ".", "_", "-")` }), suite)
+      .refine((suites) => Object.keys(suites).length > 0, "declare at least one suite")
       .meta({ description: "Suite name to its command.", minProperties: 1 }),
   })
   .meta({ $id: CONFIG_SCHEMA_URL, title: "testnotary.json" });

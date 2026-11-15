@@ -45,7 +45,8 @@ export function parseCommandArgs<Flags extends string>(args: string[], flags: re
       tokens: true,
     });
   } catch (error) {
-    throw new UsageError((error as Error).message);
+    const unknown = /Unknown option '([^']+)'/.exec((error as Error).message);
+    throw new UsageError(unknown ? `unknown option ${unknown[1]}` : (error as Error).message);
   }
   const terminator = parsed.tokens.find((token) => token.kind === "option-terminator");
   const afterTerminator = terminator ? args.slice(terminator.index + 1) : [];
