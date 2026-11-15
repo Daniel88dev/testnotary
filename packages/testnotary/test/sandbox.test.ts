@@ -68,6 +68,97 @@ const MARKERS: { marker: string; env?: Record<string, string>; rootFiles?: strin
   { marker: "TESTNOTARY_SANDBOX", env: { TESTNOTARY_SANDBOX: "1" } },
 ];
 
+describe("a sandbox token", () => {
+  test("in a sandbox, TESTNOTARY_TOKEN holding a sandbox token attests as its creator, sent as Bearer exactly as it is", async () => {
+    const dev = await developer();
+    const token = await world.sandboxToken({ creator: dev.user, repo: dev.repo, name: "codex-cloud" });
+    expect(token).toMatch(/^tns_/);
+    const mark = world.service.requests.length;
+
+    const result = await dev.run({ TESTNOTARY_SANDBOX: "1", TESTNOTARY_TOKEN: token });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "passed", attested: true });
+    expect(result.stderr).toMatch(new RegExp(`^testnotary: attesting as @${dev.user.login} with sandbox token "codex-cloud"$`, "m"));
+    const sent = requestsSince(mark);
+    expect(sent.map((request) => `${request.method} ${request.path}`)).toEqual(["POST /api/v1/preflight", "POST /api/v1/runs"]);
+    for (const request of sent) expect(request.headers.authorization).toBe(`Bearer ${token}`);
+  });
+});
+
+/** The `session` the run's upload carried. */
+function uploadedSession(from: number): unknown {
+  const uploads = requestsSince(from).filter((request) => request.method === "POST" && request.path === "/api/v1/runs");
+  expect(uploads).toHaveLength(1);
+  return (JSON.parse(uploads[0]!.text) as { session: unknown }).session;
+}
+
+const AGENTS: { agent: string; env: Record<string, string>; session: { vendor: string; id: string | null; url: string | null } | null }[] = [
+  { agent: "none", env: {}, session: null },
+  {
+    agent: "Claude Code on the web",
+    env: { CLAUDE_CODE_REMOTE: "true", CLAUDE_CODE_REMOTE_SESSION_ID: "session_01AbCdEf", CLAUDE_CODE_SESSION_ID: "local-1" },
+    session: { vendor: "Claude Code", id: "session_01AbCdEf", url: "https://claude.ai/code/session_01AbCdEf" },
+  },
+  { agent: "Claude Code on a laptop", env: { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "6f1c2b9e" }, session: { vendor: "Claude Code", id: "6f1c2b9e", url: null } },
+  { agent: "Codex cloud", env: { CODEX_CI: "1", CODEX_THREAD_ID: "thr_6f2e91ac" }, session: { vendor: "Codex", id: "thr_6f2e91ac", url: null } },
+  { agent: "Codex with a session id", env: { CODEX_SESSION_ID: "sess-42" }, session: { vendor: "Codex", id: "sess-42", url: null } },
+  {
+    agent: "Copilot cloud agent",
+    env: { GITHUB_ACTIONS: "true", COPILOT_AGENT_SESSION_ID: "cps-7" },
+    session: { vendor: "Copilot", id: "cps-7", url: null },
+  },
+  { agent: "a plain Actions job", env: { GITHUB_ACTIONS: "true" }, session: null },
+  { agent: "Cursor background agent", env: { CURSOR_AGENT_SOCKET: "/tmp/cursor.sock" }, session: { vendor: "Cursor", id: null, url: null } },
+  { agent: "Cursor's CLI", env: { CURSOR_AGENT: "1" }, session: { vendor: "Cursor", id: null, url: null } },
+  { agent: "Gemini CLI", env: { GEMINI_CLI: "1" }, session: { vendor: "Gemini CLI", id: null, url: null } },
+  { agent: "AI_AGENT", env: { AI_AGENT: "devin" }, session: { vendor: "devin", id: null, url: null } },
+  {
+    agent: "the overrides, over a detected vendor",
+    env: {
+      CLAUDE_CODE_REMOTE: "true",
+      CLAUDE_CODE_REMOTE_SESSION_ID: "session_01AbCdEf",
+      TESTNOTARY_SESSION_VENDOR: "Acme agent",
+      TESTNOTARY_SESSION_ID: "run-9",
+      TESTNOTARY_SESSION_URL: "https://agents.example/run-9",
+    },
+    session: { vendor: "Acme agent", id: "run-9", url: "https://agents.example/run-9" },
+  },
+  {
+    agent: "one override, the rest detected",
+    env: { CODEX_CI: "1", CODEX_THREAD_ID: "thr_1", TESTNOTARY_SESSION_URL: "https://chatgpt.example/codex/tasks/1" },
+    session: { vendor: "Codex", id: "thr_1", url: "https://chatgpt.example/codex/tasks/1" },
+  },
+  {
+    agent: "the overrides alone",
+    env: { TESTNOTARY_SESSION_VENDOR: "in-house runner", TESTNOTARY_SESSION_ID: "job-3" },
+    session: { vendor: "in-house runner", id: "job-3", url: null },
+  },
+];
+
+describe("agent session labels", () => {
+  test.each(AGENTS)("$agent: the run uploads the session the environment names", async ({ env, session }) => {
+    const dev = await developer();
+    const token = await world.sandboxToken({ creator: dev.user, repo: dev.repo });
+    const mark = world.service.requests.length;
+
+    const result = await dev.run({ ...env, TESTNOTARY_TOKEN: token });
+
+    expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "passed", attested: true });
+    expect(uploadedSession(mark)).toEqual(session);
+  });
+
+  test("a failed run on a laptop carries the labels too", async () => {
+    const dev = await developer({ exitCode: 1 });
+    const mark = world.service.requests.length;
+
+    const result = await dev.run({ CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "abc" });
+
+    expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "failed", attested: false });
+    expect(uploadedSession(mark)).toEqual({ vendor: "Claude Code", id: "abc", url: null });
+  });
+});
+
 describe("a laptop token inside a sandbox", () => {
   test.each(MARKERS)("$marker: TESTNOTARY_TOKEN holding a tnl_ token refuses laptop_token_in_sandbox before the start", async ({ env, rootFiles }) => {
     const dev = await developer();

@@ -69,3 +69,7 @@ export const INITIAL_REPO_SETTINGS: RepoSettings = { mode: "shadow", auditOneIn:
 
 /** A laptop token lasts this long from its last use. */
 export const LAPTOP_TOKEN_LIFETIME_DAYS = 90;
+
+/** A sandbox token's fixed lifetime, chosen at creation: 90 days unless its creator picks another, never over a year. It is never renewed. */
+export const SANDBOX_TOKEN_DEFAULT_DAYS = 90;
+export const SANDBOX_TOKEN_MAX_DAYS = 365;

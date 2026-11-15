@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { LAPTOP_TOKEN_LIFETIME_DAYS, tokenKind, type TokenKind } from "@testnotary/core";
+import { LAPTOP_TOKEN_LIFETIME_DAYS, SANDBOX_TOKEN_MAX_DAYS, tokenKind, type TokenKind } from "@testnotary/core";
 import type { Account, TokenInfo } from "@testnotary/protocol";
 import { database } from "../db/client.ts";
 import { now } from "./config.ts";
@@ -57,6 +57,34 @@ export async function issueLaptopToken(db: Executor, account: Account, name: str
   const [row] = await db.insert(tokens).values({ kind: "laptop", accountId: account.id, name, createdAt: now() }).returning();
   await db.insert(tokenSecrets).values({ tokenId: row!.id, hash: hashToken(value) });
   return { value, info: { id: row!.id, kind: "laptop", name, expiresAt: expiry(row!, row!.createdAt).toISOString() } };
+}
+
+/**
+ * Issues a sandbox token for one repo, upload only, expiring `days` after creation (never
+ * renewed). The caller has checked that `creator` has write access to the repo (the dashboard asks
+ * GitHub live). The value is returned once and only its hash is kept.
+ */
+export async function issueSandboxToken(
+  db: Executor,
+  input: { creator: Account; repoId: number; name: string; days: number },
+): Promise<{ value: string; info: TokenInfo }> {
+  if (!Number.isInteger(input.days) || input.days < 1 || input.days > SANDBOX_TOKEN_MAX_DAYS) throw new RangeError(`days: 1 to ${SANDBOX_TOKEN_MAX_DAYS}`);
+  await rememberAccount(db, input.creator);
+  const value = newTokenValue("sandbox");
+  const createdAt = now();
+  const expiresAt = new Date(createdAt.getTime() + input.days * DAY_MS);
+  const [row] = await db
+    .insert(tokens)
+    .values({ kind: "sandbox", accountId: input.creator.id, name: input.name, repoId: input.repoId, expiresAt, createdAt })
+    .returning();
+  await db.insert(tokenSecrets).values({ tokenId: row!.id, hash: hashToken(value) });
+  return { value, info: { id: row!.id, kind: "sandbox", name: input.name, expiresAt: expiresAt.toISOString() } };
+}
+
+/** A sandbox token's lifetime in days as typed in the dashboard; `undefined` outside 1 to 365. */
+export function sandboxTokenDays(value: unknown): number | undefined {
+  const days = typeof value === "string" && /^\d{1,3}$/.test(value.trim()) ? Number(value.trim()) : Number.NaN;
+  return days >= 1 && days <= SANDBOX_TOKEN_MAX_DAYS ? days : undefined;
 }
 
 /**

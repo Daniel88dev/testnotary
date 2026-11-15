@@ -8,6 +8,7 @@ import { laptopTokenMarker } from "./checks/laptop-token-in-sandbox.ts";
 import { emptyNotes, warn, type Env, type RunContext, type RunNotes, type RunToken } from "./context.ts";
 import { locate } from "./locate.ts";
 import { preflight, type Preflight } from "./service.ts";
+import { detectSession } from "./session.ts";
 import { chooseToken } from "./token.ts";
 
 export interface PrepareInput {
@@ -43,6 +44,7 @@ export interface RefusedBeforeStart {
 
 export async function prepareRun(input: PrepareInput): Promise<Ready | RefusedBeforeStart> {
   const notes = emptyNotes();
+  notes.session = detectSession(input.env);
   const found = await locate(input);
   const token = await chooseToken(input.serviceUrl, input.env);
   if ("refused" in found) {
