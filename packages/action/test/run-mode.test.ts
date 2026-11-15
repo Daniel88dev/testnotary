@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { installLibrary, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
@@ -93,6 +95,95 @@ describe("the end-to-end story", () => {
     expect(check).toMatchObject({ name: "Testnotary / test", headSha: merge.parents[1], status: "completed", conclusion: "success" });
     expect(check!.output.title).toMatch(new RegExp(`^Skipped · test passed .+ ago · attested by @${s.user.login} · laptop token "`));
     expect(result.summary).toContain(check!.output.title);
+  });
+});
+
+describe("on a fallback the step runs the suite through the library", () => {
+  test.each([
+    { packageManager: "pnpm@10.34.9", form: ["pnpm", "exec", "testnotary"] },
+    { packageManager: "yarn@4.9.2", form: ["yarn", "testnotary"] },
+    { packageManager: "npm@11.6.0", form: ["npx", "--no-install", "testnotary"] },
+    { packageManager: null, form: ["npx", "--no-install", "testnotary"] },
+  ])("packageManager $packageManager: `$form exec` runs the tests and the step exits with their exit code", async ({ packageManager, form }) => {
+    const s = await story({ packageManager, config: MARKED(3) });
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    const workspace = await ciWorkspace(s, merge.sha);
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    expect(result.exitCode).toBe(3);
+    expect(existsSync(join(workspace, "ran.txt"))).toBe(true);
+    expect(result.packageManagerCalls).toEqual([
+      [...form, "--version"],
+      [...form, "exec", "test", "--json"],
+    ]);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    const [check] = world.github.checkRuns(s.repo);
+    expect(check).toMatchObject({ name: "Testnotary / test", conclusion: "neutral" });
+    expect(check!.output.title).toMatch(/^Fell back: no_attestation, no passing run attested this tree · the tests failed in [\d.]+ s \(exit code 3\)$/);
+  });
+
+  test("a passing suite exits 0, and the line says the tests passed", async () => {
+    const s = await story();
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    const workspace = await ciWorkspace(s, merge.sha);
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(world.github.checkRuns(s.repo)[0]!.output.title).toMatch(/· the tests passed in [\d.]+ s$/);
+  });
+});
+
+describe("setup errors", () => {
+  test.each(["pnpm@10.34.9", "yarn@4.9.2", null])(
+    "packageManager %s without the library installed: the step fails with a setup error and never runs the raw command",
+    async (packageManager) => {
+      const s = await story({ packageManager });
+      await pullRequest(s);
+      const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+      const workspace = await ciWorkspace(s, merge.sha, { library: false });
+
+      const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toMatch(/^::error::Testnotary: the testnotary library was not found with `(pnpm exec|yarn|npx --no-install) testnotary`/m);
+      expect(existsSync(join(workspace, "ran.txt"))).toBe(false);
+      expect(result.packageManagerCalls.every((call) => call.at(-1) === "--version")).toBe(true);
+      expect(result.outputs).toMatchObject({ result: "would_fall_back", reason: "no_attestation", ran: "false" });
+      expect(result.summary).toContain("Setup error");
+    },
+  );
+
+  test("run mode on a Windows runner is a setup error, before any verification", async () => {
+    const s = await story();
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    const workspace = await ciWorkspace(s, merge.sha);
+    const from = world.service.requests.length;
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" }, env: { RUNNER_OS: "Windows" } });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toMatch(/^::error::Testnotary: run mode does not support Windows runners/m);
+    expect(world.service.requests.slice(from)).toEqual([]);
+    expect(existsSync(join(workspace, "ran.txt"))).toBe(false);
+  });
+
+  test("verify mode works on a Windows runner", async () => {
+    const s = await story();
+    await pullRequest(s);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { suite: "test", mode: "verify" }, env: { RUNNER_OS: "Windows" } });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs).toMatchObject({ result: "would_fall_back", reason: "no_attestation" });
   });
 });
 
