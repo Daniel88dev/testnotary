@@ -38,6 +38,7 @@ export {
   type ChangedPaths,
   type Fallback,
   type FallbackReason,
+  type TokenVoid,
   type VerificationDecision,
   type VerificationInput,
   type VerificationOrder,
