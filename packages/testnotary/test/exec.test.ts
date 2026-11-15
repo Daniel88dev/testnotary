@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { useWorld } from "@testnotary/test-world/vitest";
@@ -130,6 +132,21 @@ describe("testnotary exec", () => {
 
     expect(result.exitCode).toBe(2);
     expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "refused", refusal: "command_not_found" });
+  });
+
+  test("outside a git repo exec still runs the suite, with tree and commit left empty", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tn-exec-plain-"));
+    try {
+      await writeFile(join(dir, "testnotary.json"), JSON.stringify({ suites: { unit: nodeSuite("console.log('ok')") } }));
+
+      const result = await world.runCli(["exec", "unit", "--json"], { cwd: dir });
+
+      expect(result.exitCode).toBe(0);
+      expect(lastLine(result.stderr)).toBe("outcome=passed suite=unit attested=false tree= commit= url=");
+      expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "passed", exitCode: 0, tree: null, commit: null });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("exec reads the config from the checked-out tree and runs at the repo root, from a subdirectory too", async () => {
