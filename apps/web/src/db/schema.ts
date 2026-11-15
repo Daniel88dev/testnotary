@@ -6,7 +6,7 @@
 // login), each change is a row carrying the whole state after it, and the latest row per key is
 // the current state. GitHub ids are the keys for everything that comes from GitHub.
 import { sql } from "drizzle-orm";
-import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 import type { CiEnvironment, RunEnvironment, SessionLabels, SkippedCommit } from "@testnotary/protocol";
 
 const githubId = (name: string) => bigint(name, { mode: "number" });
@@ -283,10 +283,36 @@ export const tokenRevocations = pgTable("token_revocations", {
     .references(() => tokens.id),
   /** The account that revoked it, when an admin or owner did so in the dashboard; null when the bearer did (`logout`, or a new sign-in on the same machine). */
   revokedBy: githubId("revoked_by").references(() => accounts.githubId),
-  /** `logout`, `replaced` (a new sign-in on the same machine), `revoked` (its owner, in the dashboard), `repo_removed` (a sandbox token whose repo left Testnotary), and whatever later tickets add. */
+  /** `logout`, `replaced` (a new sign-in on the same machine), `revoked` (its owner, in the dashboard), `revoked_by_admin` (a repo admin, a sandbox token of that repo), `repo_removed` (a sandbox token whose repo left Testnotary), and whatever later tickets add. */
   reason: text("reason").notNull(),
   at: at(),
 });
+
+/**
+ * A repo admin blocked a laptop token from attesting on one repo. The token still works on every
+ * other repo; on this one its runs are refused (`token_rejected`) and its attestations stop counting
+ * (`attestation_revoked`). There is no unblock: one row blocks the token on the repo for good.
+ */
+export const tokenBlocks = pgTable(
+  "token_blocks",
+  {
+    id: rowId(),
+    tokenId: uuid("token_id")
+      .notNull()
+      .references(() => tokens.id),
+    repoId: githubId("repo_id")
+      .notNull()
+      .references(() => repos.githubId),
+    /** The admin who blocked it. */
+    blockedBy: githubId("blocked_by")
+      .notNull()
+      .references(() => accounts.githubId),
+    /** Why, in the admin's words; shown beside the block in Settings. */
+    note: text("note"),
+    at: at(),
+  },
+  (table) => [unique("token_blocks_token_repo").on(table.tokenId, table.repoId), index("token_blocks_repo").on(table.repoId)],
+);
 
 /**
  * Every Actions OIDC token the service accepted, by its `jti`: a second use of one is a replay and

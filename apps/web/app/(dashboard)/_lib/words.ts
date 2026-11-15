@@ -18,7 +18,7 @@ export const REASON_LABELS: Record<FallbackReason, string> = {
   unknown_suite: "Suite not in testnotary.json on the base",
   no_attestation: "No attestation for this tree",
   attestation_expired: "Attestation 24 hours old or more",
-  attestation_revoked: "Attesting token revoked or blocked",
+  attestation_revoked: "Attesting token revoked, blocked or expired",
   attester_no_write: "Attester has no write access",
   command_changed: "Command differs from the base branch",
   guarded_file_changed: "Guarded file changed",
