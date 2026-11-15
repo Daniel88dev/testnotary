@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@playwright/test": "^1.65.0",
+    "@testnotary/core": "workspace:*",
     "@testnotary/web": "workspace:*",
     "jose": "^6.2.16",
     "postgres": "^4.1.0"

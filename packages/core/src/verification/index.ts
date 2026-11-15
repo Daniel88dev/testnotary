@@ -79,10 +79,11 @@ async function firstStop(state: VerificationState, steps: readonly VerificationS
 }
 
 /**
- * The mode step, last in the order: enforce skips or falls back; shadow mode never skips and says
- * what would have happened. (T-822 decides how an audit reads in each mode.)
+ * The mode step, last in the order: enforce skips, audits or falls back; shadow mode never skips
+ * and says what would have happened. The audit draw is made in enforce mode only, so shadow mode
+ * never reads `audit`.
  */
 export function resultFor(mode: RepoMode, reason: FallbackReason | undefined): VerificationResult {
-  if (mode === "enforce") return reason ? "fallback" : "skip";
+  if (mode === "enforce") return reason === "audit" ? "audit" : reason ? "fallback" : "skip";
   return reason ? "would_fall_back" : "would_skip";
 }

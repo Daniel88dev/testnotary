@@ -56,12 +56,17 @@ async function enforce(repo: FakeRepo) {
             values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
 }
 
-/** A pull request: a pushed feature branch with one commit, attested on the laptop, and GitHub's test merge commit for it. */
+/**
+ * A pull request: a pushed feature branch with one commit, attested on the laptop, and GitHub's
+ * test merge commit for it. The repo's audit key version is one under which the attested tree is
+ * not drawn for an audit: these tests are about guarded files, and audits have their own.
+ */
 async function attestedPullRequest(s: Story, files: Record<string, string | null>) {
   await s.fixture.branch("feature");
   await s.fixture.commit("Change things", files);
   await s.fixture.push();
   await s.attest();
+  await world.audits.forbid(s.repo);
   return s.fixture.testMerge({ base: "main", head: "feature" });
 }
 

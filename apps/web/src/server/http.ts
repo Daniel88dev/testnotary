@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { AuditNotConfigured } from "./audits.ts";
 import { GitHubDenied, GitHubNotConfigured, GitHubUnavailable } from "./github.ts";
 
 // Small helpers every API route shares. Error bodies are `{ error, message? }` (protocol `apiError`).
@@ -34,7 +35,7 @@ export async function withGitHubErrors(handle: () => Promise<Response>): Promise
   } catch (error) {
     if (error instanceof GitHubUnavailable) return apiError(502, "github_unavailable", error.message);
     if (error instanceof GitHubDenied) return apiError(502, "github_denied", error.message);
-    if (error instanceof GitHubNotConfigured) return apiError(503, "not_configured");
+    if (error instanceof GitHubNotConfigured || error instanceof AuditNotConfigured) return apiError(503, "not_configured");
     throw error;
   }
 }

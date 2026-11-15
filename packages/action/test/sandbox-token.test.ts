@@ -55,6 +55,9 @@ async function scene(): Promise<Scene> {
       expect(result.exitCode).toBe(0);
     },
     async ci() {
+      // A key version under which no attested tree is drawn for an audit: these tests are about
+      // the sandbox token, and audits (1 in 5 for sandbox tokens) have their own.
+      await world.audits.forbid(repo);
       const merge = await fixture.testMerge({ base: "main", head: "feature" });
       const workspace = await fixture.ciCheckout(merge.sha);
       await installLibrary(workspace);

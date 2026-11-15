@@ -112,6 +112,12 @@ connections above 70% for a day, or a security review that asks for it. The code
   Rotate the DSN in `production.tfvars` and apply.
 - **Rotating a secret**: put the new value, then redeploy (or pause and resume the service); the
   server reads secrets when it starts.
+- **Rotating audit keys**: each repo's audit key is derived from `audit-master-key`, the repo id
+  and the repo's key version, so the master key itself rarely needs to change. To change the draws
+  of one repo, or of all, raise the version with the operations script, as the app role:
+  `node scripts/ops.ts rotate-audit-key <owner/repo> --reason "…"` or
+  `node scripts/ops.ts rotate-audit-key --all --reason "…"`. Without `audit-master-key` the service
+  draws no audit, and every verification that would skip answers 503 (CI runs its tests).
 - **Retention job**: the schedule `testnotary-retention` exists, disabled. When the retention job
   ships, set `retention_job_enabled = true` (and `retention_command` if its path differs) and apply.
 - **Custom domain**: set `custom_domain`, apply, and create the records from

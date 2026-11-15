@@ -21,6 +21,9 @@ import { configToEnv, withServiceConfig, type LogEntry, type ServiceConfig } fro
 import { closeDatabase, database } from "@testnotary/web/db";
 import { issueSandboxToken } from "@testnotary/web/tokens";
 import type { FakeAccount } from "./github/app.ts";
+import { WORLD_AUDIT_MASTER_KEY, worldAudits, type WorldAudits } from "./audits.ts";
+
+export { WORLD_AUDIT_MASTER_KEY, type AuditTree, type WorldAudits } from "./audits.ts";
 
 export { DEFAULT_CONFIG, FixtureRepo, type FixtureRepoOptions } from "./fixture-repo.ts";
 export { FakeGitHub, type AddRepoOptions, type InstallAppOptions, type RecordedRequest, type RepositoryAction } from "./github/server.ts";
@@ -86,6 +89,11 @@ export interface World {
   db: WorldDatabase;
   /** The service's clock: set or advance it to test expiry and renewal (in-process service only). */
   clock: WorldClock;
+  /**
+   * The audit draw under the world's fixed master key (`WORLD_AUDIT_MASTER_KEY`): whether a tree is
+   * drawn, and the repo's key version to pick so that one is, or is not.
+   */
+  audits: WorldAudits;
   /** Builds a fixture repo (see FixtureRepo). It is deleted when the world closes. */
   fixtureRepo(options?: FixtureRepoOptions): Promise<FixtureRepo>;
   /**
@@ -160,6 +168,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       githubAppPrivateKey: github.app.privateKey,
       actionsOidcIssuer: github.oidc.issuer,
       legalDir: undefined,
+      auditMasterKey: WORLD_AUDIT_MASTER_KEY,
       now: () => clock.now(),
       log: (entry) => logs.push(entry),
     };
@@ -211,6 +220,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       sentry,
       db,
       clock,
+      audits: worldAudits(db),
       async fixtureRepo(repoOptions) {
         const repo = await FixtureRepo.create(repoOptions);
         repos.push(repo);

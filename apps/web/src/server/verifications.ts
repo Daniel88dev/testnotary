@@ -5,6 +5,7 @@ import {
   decodeAttestationPayload,
   type JobReport,
   type JobReportRequest,
+  type Mismatch,
   type Verification,
   type VerifyRefusal,
   type VerifyRequest,
@@ -17,6 +18,8 @@ import { apiError } from "./http.ts";
 import { installedRepo, latestRepoState, type Executor, type RepoView } from "./installations.ts";
 import { acceptActionsToken, type ActionsClaims } from "./oidc.ts";
 import { accountAsOf } from "./accounts.ts";
+import { auditKeyOf } from "./audits.ts";
+import { mismatchOfVerification, mismatchViews, recordMismatch } from "./mismatches.ts";
 import { bearer, currentNames } from "./tokens.ts";
 import { hasWriteAccess } from "./write-access.ts";
 
@@ -58,8 +61,10 @@ export async function verifyJob(db: Database, job: { claims: ActionsClaims; repo
     tree: commit.tree,
     event: claims.eventName,
     mode: repo.mode,
+    rates: { auditOneIn: repo.auditOneIn, sandboxAuditOneIn: repo.sandboxAuditOneIn },
     now: now(),
     sources: {
+      auditKey: () => auditKeyOf(db, repo.id),
       configAtBase: async () => (firstParent ? fileAt(installation, repo.fullName, CONFIG_FILE, firstParent) : undefined),
       attestations: (suite) => attestationsOfTree(db, repo.id, suite, commit.tree),
       hasWriteAccess: (accountId) => hasWriteAccess(db, repo, accountId, installation),
@@ -111,19 +116,29 @@ async function attestationsOfTree(db: Executor, repoId: number, suite: string, t
 
 /**
  * Stores a CI job's report of its tests against one of its repo's verifications. The token must be
- * of the verification's commit: a job reports only on what it built. Undefined when it isn't.
+ * of the verification's commit: a job reports only on what it built. Undefined when it isn't. A
+ * failing report on an audit or a *would skip* records a mismatch, returned with the report, and
+ * sends the repo back to shadow mode (see mismatches.ts).
  */
-export async function recordJobReport(db: Database, job: { claims: ActionsClaims; repo: RepoView }, verificationId: string, report: JobReportRequest): Promise<JobReport | undefined> {
-  const [verification] = await db
-    .select({ id: verifications.id })
-    .from(verifications)
-    .where(and(eq(verifications.id, verificationId), eq(verifications.repoId, job.repo.id), eq(verifications.commit, job.claims.sha)));
-  if (!verification) return undefined;
-  const [row] = await db
-    .insert(jobReports)
-    .values({ verificationId: verification.id, outcome: report.outcome, durationMs: report.durationMs, environment: report.environment, createdAt: now() })
-    .returning();
-  return jobReportView(row!);
+export async function recordJobReport(
+  db: Database,
+  job: { claims: ActionsClaims; repo: RepoView },
+  verificationId: string,
+  report: JobReportRequest,
+): Promise<{ jobReport: JobReport; mismatch: Mismatch | null } | undefined> {
+  return db.transaction(async (tx) => {
+    const [verification] = await tx
+      .select()
+      .from(verifications)
+      .where(and(eq(verifications.id, verificationId), eq(verifications.repoId, job.repo.id), eq(verifications.commit, job.claims.sha)));
+    if (!verification) return undefined;
+    const [row] = await tx
+      .insert(jobReports)
+      .values({ verificationId: verification.id, outcome: report.outcome, durationMs: report.durationMs, environment: report.environment, createdAt: now() })
+      .returning();
+    const mismatch = await recordMismatch(tx, verification, row!);
+    return { jobReport: jobReportView(row!), mismatch: mismatch ? (await mismatchViews(tx, [mismatch]))[0]! : null };
+  });
 }
 
 function jobReportView(row: typeof jobReports.$inferSelect): JobReport {
@@ -173,6 +188,7 @@ export async function readVerification(db: Executor, id: string, repoId: number)
         }
       : null,
     jobReport: report ? jobReportView(report) : null,
+    mismatch: await mismatchOfVerification(db, verification.id),
     createdAt: verification.createdAt.toISOString(),
   };
 }

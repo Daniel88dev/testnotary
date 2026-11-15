@@ -1,4 +1,4 @@
-import { accountName, runPageUrl, resolveServiceUrl, type FallbackReason, type JobOutcome, type VerificationResult } from "./shared.ts";
+import { accountName, mismatchesPageUrl, runPageUrl, resolveServiceUrl, type FallbackReason, type JobOutcome, type VerificationResult } from "./shared.ts";
 import type { RunnerEnv } from "./runner.ts";
 import type { Verdict } from "./verify.ts";
 
@@ -15,6 +15,11 @@ export interface TestsRan {
   exitCode: number;
   /** The test command's wall-clock duration. */
   durationMs: number;
+  /**
+   * Whether the service recorded a mismatch from the job report (and so sent the repo back to
+   * shadow mode); false when it recorded none, or the report never reached it.
+   */
+  mismatch: boolean;
 }
 
 export type Conclusion = "success" | "neutral" | "failure";
@@ -59,7 +64,7 @@ export const REASON_LINES: Record<FallbackReason, string> = {
 
 /** Turns the verdict and the tests (null: they did not run) into the line, details, conclusion and outputs. */
 export function presentJob(env: RunnerEnv, verdict: Verdict, tests: TestsRan | null): JobPresentation {
-  const parts = [headline(verdict), ...attestedBy(verdict), ...testsPart(verdict, tests)];
+  const parts = [headline(verdict, tests), ...attestedBy(verdict), ...testsPart(verdict, tests)];
   return {
     line: oneLine(parts.join(" · ")),
     details: details(env, verdict, tests),
@@ -69,35 +74,47 @@ export function presentJob(env: RunnerEnv, verdict: Verdict, tests: TestsRan | n
 }
 
 /**
- * `success` for a skip, or a run the attestation would have skipped; `neutral` for a fallback.
- * Never `failure` yet: a mismatch (T-822) is the only thing that will be.
+ * A mismatch: CI's tests failed on a tree an attestation said passed, on an audit or on a shadow
+ * *would skip*. A refused `exec` ran no tests, so it is none; nor is a cancelled job, which never
+ * gets here.
  */
-function conclusion(verdict: Verdict, _tests: TestsRan | null): Conclusion {
+export function isMismatch(verdict: Verdict, tests: TestsRan | null): boolean {
+  return tests?.outcome === "failed" && (verdict.result === "audit" || verdict.result === "would_skip");
+}
+
+/**
+ * `failure` for a mismatch, the only thing Testnotary fails; `success` for a skip, an audit whose
+ * tests passed, or a run the attestation would have skipped; `neutral` for a fallback.
+ */
+function conclusion(verdict: Verdict, tests: TestsRan | null): Conclusion {
+  if (isMismatch(verdict, tests)) return "failure";
   switch (verdict.result) {
     case "skip":
     case "would_skip":
       return "success";
     case "audit":
+      return tests?.outcome === "passed" ? "success" : "neutral";
     case "fallback":
     case "would_fall_back":
       return "neutral";
   }
 }
 
-function headline(verdict: Verdict): string {
+function headline(verdict: Verdict, tests: TestsRan | null): string {
   const attestation = verdict.record?.attestation;
   const age = attestation && verdict.record ? `${verdict.record.suite ?? "the suite"} passed ${ago(attestation.endedAt, verdict.record.createdAt)}` : "";
+  const mismatch = isMismatch(verdict, tests);
   switch (verdict.result) {
     case "skip":
       return `Skipped · ${age}`;
     case "would_skip":
-      return `Would have skipped · ${age}`;
+      return `${mismatch ? "Mismatch: would have skipped" : "Would have skipped"} · ${age}`;
     case "fallback":
       return `Fell back: ${reason(verdict)}`;
     case "would_fall_back":
       return `Would have fallen back: ${reason(verdict)}`;
     case "audit":
-      return `Audit: ${REASON_LINES.audit}`;
+      return `${mismatch ? "Mismatch: the audit failed" : "Audit"} · ${age}`;
   }
 }
 
@@ -106,10 +123,10 @@ function reason(verdict: Verdict): string {
   return `${code}${verdict.detail ? ` (${verdict.detail})` : ""}, ${REASON_LINES[code]}`;
 }
 
-/** For a skip or *would skip*: who attested, with which token, on what platform and Node. */
+/** For a skip, an audit or *would skip*: who attested, with which token, on what platform and Node. */
 function attestedBy(verdict: Verdict): string[] {
   const attestation = verdict.record?.attestation;
-  if (!attestation || (verdict.result !== "skip" && verdict.result !== "would_skip")) return [];
+  if (!attestation || (verdict.result !== "skip" && verdict.result !== "would_skip" && verdict.result !== "audit")) return [];
   const { account, token } = attestation.attester;
   const who = accountName(account);
   const parts =
@@ -124,7 +141,9 @@ function attestedBy(verdict: Verdict): string[] {
 function testsPart(verdict: Verdict, tests: TestsRan | null): string[] {
   if (!tests) return [];
   const shadow = verdict.result === "would_skip" || verdict.result === "would_fall_back" ? "shadow mode: " : "";
-  return [`${shadow}${testsPhrase(tests)}`];
+  const parts = [`${shadow}${testsPhrase(tests)}`];
+  if (verdict.result === "audit" && tests.mismatch) parts.push("the repo is back in shadow mode");
+  return parts;
 }
 
 function testsPhrase(tests: TestsRan): string {
@@ -146,7 +165,19 @@ function details(env: RunnerEnv, verdict: Verdict, tests: TestsRan | null): stri
     if (session) lines.push(`- Agent session (unverified): ${sessionLabels(session)}`);
   }
   if (record) lines.push(`- Verification: \`${record.id}\``);
+  if (record && isMismatch(verdict, tests)) lines.push(`- Mismatch: ${mismatchDetail(env, verdict, tests!)}`);
   return lines.join("\n");
+}
+
+/** What happened about a mismatch, and where an admin explains it. Nothing is revoked and no other repo changes. */
+function mismatchDetail(env: RunnerEnv, verdict: Verdict, tests: TestsRan): string {
+  const record = verdict.record!;
+  if (!tests.mismatch) return "the job report did not reach the service, so no mismatch was recorded.";
+  const attester = record.attestation?.attester;
+  const against = attester ? ` against ${escape(accountName(attester.account))} and ${attester.token.kind} token "${escape(oneLine(attester.token.name))}"` : "";
+  const mode = verdict.result === "audit" ? " The repo is back in shadow mode until an admin switches enforce on again." : "";
+  const url = mismatchesPageUrl(resolveServiceUrl(env), record.repository.fullName);
+  return `recorded${against}.${mode} Nothing was revoked. Explain it on the [Mismatches](${url}) page.`;
 }
 
 /**

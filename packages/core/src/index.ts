@@ -15,6 +15,16 @@ export {
   type TestnotaryConfig,
 } from "./config.ts";
 export { REFUSAL_CODES, type Outcome, type RefusalCode } from "./outcome.ts";
+export {
+  AUDIT_RATE_DEFAULTS,
+  auditDrawn,
+  auditOneIn,
+  auditPoint,
+  auditRateProblem,
+  repoAuditKey,
+  type AuditKeyInput,
+  type AuditSubject,
+} from "./audit.ts";
 export { GUARDED_DEFAULTS, guardedGlobs, guardedMatches, matchesGuardedGlob, type GuardedMatch } from "./guarded.ts";
 export {
   ATTESTATION_MAX_AGE_MS,

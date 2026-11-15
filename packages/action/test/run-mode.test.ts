@@ -69,11 +69,16 @@ async function ciWorkspace(s: Story, sha: string, options: { library?: boolean }
   return workspace;
 }
 
-/** Switches the repo to enforce mode, as an admin's setting change would (the toggle comes later). */
+/**
+ * Switches the repo to enforce mode, as an admin's setting change would (the toggle comes later),
+ * with a key version under which no tree attested so far is drawn for an audit: the skip tests
+ * here are about skipping, and audits have their own (audit.test.ts).
+ */
 async function enforce(repo: FakeRepo) {
   const sql = world.db.connect("app");
   await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
             values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  await world.audits.forbid(repo);
 }
 
 describe("the end-to-end story", () => {

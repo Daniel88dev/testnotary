@@ -5,20 +5,26 @@
 //   node scripts/ops.ts revoke-tokens <account>
 //   node scripts/ops.ts suspend <account> --reason "<why>"
 //   node scripts/ops.ts unsuspend <account> --reason "<why>"
+//   node scripts/ops.ts rotate-audit-key <owner/repo> --reason "<why>"
+//   node scripts/ops.ts rotate-audit-key --all --reason "<why>"
 //
 // <account> is a GitHub numeric id, or a login as Testnotary last saw it. A mismatch alone is never
-// grounds for either action (the terms).
+// grounds for either action (the terms). Rotating an audit key raises the repo's key version, so
+// its audit draws change; the master key in Secrets Manager stays as it is.
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { revokeAccountTokens, setSuspension } from "../src/server/accounts.ts";
-import { accountLogins, accounts } from "../src/db/schema.ts";
+import { rotateAuditKeys } from "../src/server/audits.ts";
+import { accountLogins, accounts, repoStates, repos } from "../src/db/schema.ts";
 import * as schema from "../src/db/schema.ts";
 
-const USAGE = `usage: node scripts/ops.ts <command> <account> [--reason "<why>"]
-  revoke-tokens <account>               revoke every live token of the account
-  suspend <account> --reason "<why>"    suspend the account and revoke its tokens
-  unsuspend <account> --reason "<why>"  lift a suspension
+const USAGE = `usage: node scripts/ops.ts <command> <account | repo> [--reason "<why>"]
+  revoke-tokens <account>                          revoke every live token of the account
+  suspend <account> --reason "<why>"               suspend the account and revoke its tokens
+  unsuspend <account> --reason "<why>"             lift a suspension
+  rotate-audit-key <owner/repo> --reason "<why>"   raise one repo's audit key version
+  rotate-audit-key --all --reason "<why>"          raise every repo's audit key version
 <account>: a GitHub numeric id, or a login. Connects with DATABASE_URL (the app role).
 `;
 
@@ -34,8 +40,8 @@ function fail(message: string): never {
 }
 
 const [command, who, ...rest] = process.argv.slice(2);
-if (!command || !["revoke-tokens", "suspend", "unsuspend"].includes(command)) usage(command ? `unknown command ${command}` : undefined);
-if (!who) usage("name the account");
+if (!command || !["revoke-tokens", "suspend", "unsuspend", "rotate-audit-key"].includes(command)) usage(command ? `unknown command ${command}` : undefined);
+if (!who) usage(command === "rotate-audit-key" ? "name the repo, or --all" : "name the account");
 let reason: string | undefined;
 for (let i = 0; i < rest.length; i++) {
   if (rest[i] === "--reason" && rest[i + 1]?.trim()) reason = rest[++i]!.trim();
@@ -69,7 +75,46 @@ async function findAccount(): Promise<{ id: number; login: string | undefined }>
 
 const tokens = (count: number) => `${count} token${count === 1 ? "" : "s"}`;
 
+/** The repo whose latest name is `owner/repo` (case-insensitive, as GitHub's names are), installed or not. */
+async function findRepo(fullName: string): Promise<number> {
+  const named = await db
+    .selectDistinctOn([repoStates.repoId], { repoId: repoStates.repoId, fullName: repoStates.fullName })
+    .from(repoStates)
+    .orderBy(repoStates.repoId, desc(repoStates.id));
+  const matches = named.filter((row) => row.fullName.toLowerCase() === fullName.toLowerCase());
+  if (matches.length === 0) fail(`no repo named ${fullName}`);
+  return matches[0]!.repoId;
+}
+
+async function rotateAuditKey(): Promise<void> {
+  if (who === "--all") {
+    const all = await db.select({ id: repos.githubId }).from(repos).orderBy(repos.githubId);
+    const rotated = await db.transaction((tx) =>
+      rotateAuditKeys(
+        tx,
+        all.map((repo) => repo.id),
+        reason!,
+      ),
+    );
+    process.stdout.write(`rotated the audit keys of ${rotated.size} repos\n`);
+    return;
+  }
+  const repoId = await findRepo(who!);
+  const rotated = await rotateAuditKeys(db, [repoId], reason!);
+  process.stdout.write(`rotated the audit key of ${who} to version ${rotated.get(repoId)}\n`);
+}
+
 try {
+  if (command === "rotate-audit-key") await rotateAuditKey();
+  else await accountCommand();
+} catch (error) {
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  fail(cause instanceof Error ? cause.message : String(cause));
+} finally {
+  await sql.end({ timeout: 1 });
+}
+
+async function accountCommand(): Promise<void> {
   const account = await findAccount();
   const name = `${account.login ? `@${account.login}` : "the account"} (GitHub id ${account.id})`;
   if (command === "revoke-tokens") {
@@ -82,9 +127,4 @@ try {
     await setSuspension(db, account.id, "lifted", reason!);
     process.stdout.write(`lifted the suspension of ${name}\n`);
   }
-} catch (error) {
-  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
-  fail(cause instanceof Error ? cause.message : String(cause));
-} finally {
-  await sql.end({ timeout: 1 });
 }
