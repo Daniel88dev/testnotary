@@ -13,10 +13,12 @@ import {
   LAPTOP_TOKEN_LIFETIME_DAYS,
   PASSED_THROUGH,
   SANDBOX_MARKERS,
+  WARNING_CODES,
 } from "@testnotary/core";
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 import { DOCS_PAGES } from "../../../src/docs/nav.ts";
+import { REASON_HELP, REFUSAL_HELP, WARNING_HELP, type CodeHelp } from "../../../src/docs/reference.ts";
 import { PMS, checkLabel, snippet, substitute } from "../../../src/docs/snippets.ts";
 import { CodePanel, type Variants } from "./code-panel.tsx";
 import { VendorSteps } from "./vendors.tsx";
@@ -171,7 +173,73 @@ function CodeList({ of }: { of: string }) {
   );
 }
 
-/** The sandbox markers the library ships. */
+/** Text from src/docs/reference.ts: `backticks` are code, [words](/docs/…) a link. */
+function Rich({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`|\[[^\]]+\]\([^)]+\))/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith("`")) return <code key={i}>{part.slice(1, -1)}</code>;
+        const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(part);
+        if (link)
+          return (
+            <A key={i} href={link[2]}>
+              {link[1]}
+            </A>
+          );
+        return part;
+      })}
+    </>
+  );
+}
+
+const CODE_TABLES: Record<string, { label: string; codes: readonly string[]; help: Record<string, CodeHelp> }> = {
+  refusals: { label: "Refusal codes", codes: REFUSAL_CODES, help: REFUSAL_HELP },
+  reasons: { label: "Fallback reason codes", codes: FALLBACK_REASONS, help: REASON_HELP },
+  warnings: { label: "Warning codes", codes: WARNING_CODES, help: WARNING_HELP },
+};
+
+/**
+ * Every code of a list from the core package, in its order, with its cause and fix from
+ * src/docs/reference.ts. Each row is the code's anchor (`/docs/refusals#dirty_tree`).
+ */
+function CodeTable({ of }: { of: string }) {
+  const table = CODE_TABLES[of];
+  if (!table) throw new Error(`<CodeTable> names an unknown list ${JSON.stringify(of)}`);
+  return (
+    <div className="table-wrap">
+      <table className="codes" aria-label={table.label}>
+        <thead>
+          <tr>
+            <th scope="col">Code</th>
+            <th scope="col">Cause</th>
+            <th scope="col">Fix</th>
+          </tr>
+        </thead>
+        <tbody>
+          {table.codes.map((code) => {
+            const help = table.help[code];
+            if (!help) throw new Error(`${table.label}: ${code} has no cause and fix in src/docs/reference.ts`);
+            return (
+              <tr key={code} id={code}>
+                <td>
+                  <code>{code}</code>
+                </td>
+                <td>
+                  <Rich text={help.cause} />
+                </td>
+                <td>
+                  <Rich text={help.fix} />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** The product-default guarded globs, from the core package: the list verification uses. */
 function GuardedDefaults() {
   return (
@@ -185,6 +253,7 @@ function GuardedDefaults() {
   );
 }
 
+/** The sandbox markers the library ships. */
 function SandboxMarkers() {
   return (
     <ul>
@@ -251,6 +320,7 @@ export const MDX_COMPONENTS = {
   VendorSteps,
   Fact,
   CodeList,
+  CodeTable,
   GuardedDefaults,
   SandboxMarkers,
   BaselineEnvironment,
