@@ -499,6 +499,18 @@ describe("each refusal code through testnotary run", () => {
   for (const { refusal, gap } of refusalGaps) test.todo(`${refusal}: ${gap}`);
 });
 
+describe("what isn't a dirty tree", () => {
+  test("a submodule at the commit HEAD records, with nothing changed in it, attests", async () => {
+    const s = await suite();
+    const scene = await withSubmodule(s, { ignore: "all" });
+
+    const result = await world.runCli(["run", "--json"], { cwd: scene.cwd, machine: scene.machine });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "passed", attested: true });
+  });
+});
+
 describe("what isn't a history-dependent command", () => {
   test("a turbo package filter without a git range, and words that only look alike, run as usual", async () => {
     const command = ["node", "-e", "process.exit(0)", "--", "--filter=@acme/web", "--changed-files-report", "affected"];

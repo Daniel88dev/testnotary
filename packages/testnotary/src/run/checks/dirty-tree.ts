@@ -6,7 +6,7 @@ const SHOWN = 5;
 /**
  * `dirty_tree`: anything `git status` reports, untracked files that aren't ignored included, would
  * make the tested files differ from the tree an attestation names. An unpushed commit is fine.
- * (Submodule rules belong to T-816 and go in their own check.)
+ * Submodules, which git's own settings can hide from this, have their own check (`submodules.ts`).
  */
 export const dirtyTree: RunCheck = {
   name: "dirty_tree",

@@ -16,6 +16,7 @@ import { laptopTokenInSandbox } from "./laptop-token-in-sandbox.ts";
 // Imports for the command and tree checks (T-816).
 import { extraArguments } from "./extra-arguments.ts";
 import { historyDependentCommand } from "./history-dependent-command.ts";
+import { submodules } from "./submodules.ts";
 
 // Imports for the platform and environment floor checks (T-815).
 
@@ -30,6 +31,7 @@ export const BEFORE_START: readonly RunCheck[] = [
 
   // 3. The tree. (T-816: submodules, after `dirtyTree`.)
   dirtyTree,
+  submodules,
 
   // 4. The platform and the environment floor (T-815: `platform_unsupported`, `platform_not_allowed`,
   //    `package_manager_unsupported`, `runtime_mismatch`, `package_manager_mismatch`, `install_stale`).
