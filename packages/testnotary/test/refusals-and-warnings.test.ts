@@ -222,6 +222,7 @@ const REFUSALS: Record<RefusalCode, RefusalCase[] | Gap> = {
         ["a turbo git-ref filter in the command", ["pnpm", "turbo", "run", "test", "--filter=...[origin/main]"], /--filter=\.\.\.\[origin\/main\]/],
         ["turbo's -F with a git-ref filter in the command", ["npx", "turbo", "test", "-F", "[HEAD^1]"], /\[HEAD\^1\]/],
         ["turbo --affected in the command", ["npx", "turbo", "run", "test", "--affected"], /--affected/],
+        ["jest's -o (--onlyChanged) in the command", ["npx", "jest", "-o"], /jest -o/],
       ] as const
     ).map(
       ([name, command, says]): RefusalCase => ({
@@ -239,6 +240,7 @@ const REFUSALS: Record<RefusalCode, RefusalCase[] | Gap> = {
         ["nx affected in the script pnpm run names", ["pnpm", "run", "test:ci"], "test:ci", "nx affected --target=test"],
         ["a quoted turbo filter in the script yarn names", ["yarn", "test:ci"], "test:ci", "turbo run test --filter='[origin/main]' && echo done"],
         ["--since in the script npm run-script names", ["npm", "run-script", "--silent", "check"], "check", "lerna run test --since=main"],
+        ["jest's -o in the script npm test names", ["npm", "test"], "test", "jest --ci -o"],
       ] as const
     ).map(
       ([name, command, script, text]): RefusalCase => ({

@@ -5,8 +5,8 @@ import type { RunCheck } from "../context.ts";
 
 /**
  * `history_dependent_command`: a command that picks its tests by what changed since some commit
- * (`--changed`, `--changedSince`, `--onlyChanged`, `--since`, `nx affected`, turbo's git-ref
- * filters and `--affected`) tests less than the tree it would attest. Checked in the declared argv
+ * (`--changed`, `--changedSince`, `--onlyChanged` and Jest's `-o`, `--since`, `nx affected`,
+ * turbo's git-ref filters and `--affected`) tests less than the tree it would attest. Checked in the declared argv
  * and in the `package.json` script it names, one level deep: a flag in a script that script calls
  * is left to audits.
  */
@@ -43,6 +43,8 @@ function historyMarker(words: readonly string[]): string | undefined {
   for (const [index, word] of words.entries()) {
     const flag = word.split("=", 1)[0]!;
     if (HISTORY_FLAGS.includes(flag)) return word;
+    // Jest's short form of --onlyChanged; `-o` means other things to other tools.
+    if (word === "-o" && words.slice(0, index).some((earlier) => programName(earlier) === "jest")) return "jest -o";
     if (programName(word) === "nx" && words[index + 1]?.startsWith("affected")) return `nx ${words[index + 1]}`;
     // Turbo's filters name a git range in brackets: `[main]`, `...[HEAD^1]`, `pkg...[origin/main]`.
     if (flag === "--filter" || word === "-F") {

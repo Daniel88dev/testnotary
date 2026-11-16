@@ -39,7 +39,7 @@ export const REFUSAL_HELP: Record<RefusalCode, CodeHelp> = {
   },
   history_dependent_command: {
     cause:
-      "The command, or the `package.json` script it names (one level deep), picks tests by what changed since a commit: `--changed`, `--changedSince`, `--onlyChanged`, `--since`, `--affected`, `nx affected`, or turbo’s `--filter`/`-F` with a `[git range]`. Such a run tests less than the tree it would attest.",
+      "The command, or the `package.json` script it names (one level deep), picks tests by what changed since a commit: `--changed`, `--changedSince`, `--onlyChanged` (or Jest’s `-o`), `--since`, `--affected`, `nx affected`, or turbo’s `--filter`/`-F` with a `[git range]`. Such a run tests less than the tree it would attest.",
     fix: "Declare a suite that runs every test, without history filters, in `testnotary.json` on the base branch.",
   },
   command_not_found: {
