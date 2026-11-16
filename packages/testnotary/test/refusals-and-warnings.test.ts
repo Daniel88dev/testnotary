@@ -499,6 +499,171 @@ describe("each refusal code through testnotary run", () => {
   for (const { refusal, gap } of refusalGaps) test.todo(`${refusal}: ${gap}`);
 });
 
+interface WarningCase {
+  name: string;
+  arrange(suite: Suite): Promise<Scene>;
+  /** The warning's own line on stderr, after the `testnotary: ` prefix. */
+  says: RegExp;
+  /** Whether the pass is still attested. */
+  attested: boolean;
+}
+
+const WARNINGS: Record<WarningCode, WarningCase[] | Gap> = {
+  not_signed_in: [
+    {
+      name: "no token on the laptop",
+      arrange: (s) => signedInRepo(s, { signedIn: false }),
+      says: /^not signed in: .*testnotary login/,
+      attested: false,
+    },
+  ],
+  service_unreachable: [
+    {
+      name: "the service doesn't answer",
+      async arrange(s) {
+        return { ...(await signedInRepo(s)), env: { TESTNOTARY_URL: "http://127.0.0.1:9" } };
+      },
+      says: /^the Testnotary service could not be reached/,
+      attested: false,
+    },
+  ],
+  upload_failed: [
+    {
+      name: "the service fails the upload",
+      async arrange(s) {
+        const scene = await signedInRepo(s);
+        const restore = world.service.override("POST", "/api/v1/runs", () => Response.json({ error: "internal" }, { status: 500 }));
+        return { ...scene, cleanup: restore };
+      },
+      says: /^the run could not be uploaded .*nothing was attested/,
+      attested: false,
+    },
+  ],
+  base_fetch_skipped: [
+    {
+      name: "origin can't be fetched (offline)",
+      async arrange(s) {
+        const scene = await signedInRepo(s);
+        const { fixture, repo } = scene.dev!;
+        await fixture.git("config", `url.${fixture.remoteDir}-gone.insteadOf`, `https://github.com/${repo.fullName}.git`);
+        await fixture.git("config", "--unset", `url.${fixture.remoteDir}.insteadOf`);
+        return scene;
+      },
+      says: /^couldn't fetch origin\/main .*the last fetched origin\/main/,
+      attested: true,
+    },
+  ],
+  branch_behind_base: [
+    {
+      name: "the base has a commit the branch doesn't",
+      async arrange(s) {
+        const scene = await signedInRepo(s);
+        const { fixture } = scene.dev!;
+        const fork = await fixture.revParse("HEAD");
+        await fixture.commit("Move main on", { "src/main-only.js": "export {};\n" });
+        await fixture.push("main");
+        await fixture.branch("feature", fork);
+        return scene;
+      },
+      says: /^this branch is behind origin\/main .*won't skip until you update it/,
+      attested: true,
+    },
+  ],
+  local_config_differs: [
+    {
+      name: "the branch changes testnotary.json",
+      async arrange(s) {
+        const scene = await signedInRepo(s);
+        const { fixture } = scene.dev!;
+        await fixture.branch("feature");
+        await fixture.commit("Add a suite", { "testnotary.json": JSON.stringify({ suites: { ...s.config.suites, lint: s.config.suites.test } }) });
+        return scene;
+      },
+      says: /^testnotary\.json here differs from origin\/main's, which is the one used/,
+      attested: true,
+    },
+  ],
+  ignored_env_file: [
+    {
+      name: "an ignored .env.local",
+      async arrange(s) {
+        const scene = await signedInRepo(s, { files: { ".gitignore": ".env*\n!.env.example\n" } });
+        await scene.dev!.fixture.write({ ".env.local": "DATABASE_URL=postgres://localhost/dev\n" });
+        return scene;
+      },
+      says: /^an ignored \.env file exists \(\.env\.local\)/,
+      attested: true,
+    },
+    {
+      name: "an ignored .env in a package of a workspace",
+      async arrange(s) {
+        const scene = await signedInRepo(s, { files: { ".gitignore": ".env\n" } });
+        await scene.dev!.fixture.write({ "packages/api/.env": "SECRET=1\n" });
+        return scene;
+      },
+      says: /^an ignored \.env file exists \(packages\/api\/\.env\)/,
+      attested: true,
+    },
+  ],
+  runtime_sources_disagree: ENVIRONMENT_FLOOR,
+  no_signing_key: [
+    {
+      name: "signature mode with no signing key set up",
+      arrange: (s) => signedInRepo(s, { config: { ...s.config, signatures: "required" } }),
+      says: /^the repo requires signatures, but /,
+      attested: true,
+    },
+  ],
+};
+
+const warningCases = WARNING_CODES.flatMap((warning) => {
+  const cases = WARNINGS[warning];
+  return "gap" in cases ? [] : cases.map((scenario) => ({ warning, ...scenario }));
+});
+const warningGaps = WARNING_CODES.flatMap((warning) => {
+  const cases = WARNINGS[warning];
+  return "gap" in cases ? [{ warning, gap: cases.gap }] : [];
+});
+
+describe("each warning through testnotary run: a line on stderr, a code in warnings[], never a refusal", () => {
+  test.each(warningCases)("$warning: $name", async (scenario) => {
+    const s = await suite();
+    const scene = await scenario.arrange(s);
+    const mark = world.service.requests.length;
+
+    let result: ProcessResult;
+    try {
+      result = await world.runCli(["run", "--json"], { cwd: scene.cwd, machine: scene.machine, env: scene.env });
+    } finally {
+      scene.cleanup?.();
+    }
+
+    expect(s.started()).toBe(true);
+    expect(result.exitCode).toBe(0);
+    const out = JSON.parse(result.stdout) as { warnings: string[] };
+    expect(out).toMatchObject({ outcome: "passed", refusal: null, attested: scenario.attested });
+    expect(out.warnings).toContain(scenario.warning);
+    const lines = result.stderr.split("\n").filter((line) => line.startsWith("testnotary: ")).map((line) => line.slice("testnotary: ".length));
+    expect(lines.some((line) => scenario.says.test(line)), result.stderr).toBe(true);
+    // The warning goes with the run's record whenever the run is uploaded (`upload_failed` comes
+    // from the upload itself, so the record can't carry it).
+    if (scenario.warning !== "upload_failed") for (const upload of uploadsSince(mark)) expect(upload.warnings).toContain(scenario.warning);
+  });
+
+  for (const { warning, gap } of warningGaps) test.todo(`${warning}: ${gap}`);
+
+  test("a clean run on the base's tip warns about nothing; an ignored .env.example is not a .env file", async () => {
+    const s = await suite();
+    const scene = await signedInRepo(s, { files: { ".gitignore": ".env.example\n" } });
+    await scene.dev!.fixture.write({ ".env.example": "DATABASE_URL=\n" });
+
+    const result = await world.runCli(["run", "--json"], { cwd: scene.cwd, machine: scene.machine });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "passed", attested: true, warnings: [] });
+  });
+});
+
 describe("what isn't a dirty tree", () => {
   test("a submodule at the commit HEAD records, with nothing changed in it, attests", async () => {
     const s = await suite();

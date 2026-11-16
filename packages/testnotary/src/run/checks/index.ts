@@ -7,6 +7,8 @@
 // `config_invalid`) are found before these run, in `../locate.ts`; the service's clear no's
 // (`token_rejected`, `repo_not_installed`, `no_write_access`) come from the preflight after them;
 // `command_not_found` comes from starting the command.
+//
+// `WARNINGS` are checks that only ever warn: they run once every refusal check passed.
 import type { RunCheck } from "../context.ts";
 import { dirtyTree } from "./dirty-tree.ts";
 
@@ -18,6 +20,10 @@ import { extraArguments } from "./extra-arguments.ts";
 import { historyDependentCommand } from "./history-dependent-command.ts";
 import { submodules } from "./submodules.ts";
 import { treeChangedDuringRun } from "./tree-changed-during-run.ts";
+import { baseFetchSkipped } from "./base-fetch-skipped.ts";
+import { branchBehindBase } from "./branch-behind-base.ts";
+import { localConfigDiffers } from "./local-config-differs.ts";
+import { ignoredEnvFile } from "./ignored-env-file.ts";
 
 // Imports for the platform and environment floor checks (T-815).
 
@@ -36,6 +42,21 @@ export const BEFORE_START: readonly RunCheck[] = [
 
   // 4. The platform and the environment floor (T-815: `platform_unsupported`, `platform_not_allowed`,
   //    `package_manager_unsupported`, `runtime_mismatch`, `package_manager_mismatch`, `install_stale`).
+
+];
+
+/**
+ * Warnings, never refusals, after every check in `BEFORE_START` passed and before the preflight.
+ * Each returns nothing and raises its warning with `warn()`.
+ */
+export const WARNINGS: readonly RunCheck[] = [
+  // The base and its config (T-816).
+  baseFetchSkipped,
+  branchBehindBase,
+  localConfigDiffers,
+
+  // The environment (T-816: `ignored_env_file`; T-815: `runtime_sources_disagree`).
+  ignoredEnvFile,
 
 ];
 
