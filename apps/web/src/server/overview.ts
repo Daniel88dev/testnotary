@@ -1,5 +1,5 @@
 import { and, asc, eq, gte, sql } from "drizzle-orm";
-import type { RepoMode } from "@testnotary/core";
+import { VERIFICATION_RESULTS, type RepoMode, type VerificationResult } from "@testnotary/core";
 import { DELETED_ACCOUNT, accountName } from "@testnotary/protocol";
 import { repoStates, runs, tokens, verifications } from "../db/schema.ts";
 import { retainedSince, verificationRows } from "./history.ts";
@@ -107,8 +107,8 @@ export const DEFAULT_PERIOD: Period = 14;
 const DAY_MS = 86_400_000;
 
 /** The results a verification can have, in the order the jobs chart stacks them. */
-export const JOB_RESULTS = ["skip", "audit", "fallback", "would_skip", "would_fall_back"] as const;
-export type JobResult = (typeof JOB_RESULTS)[number];
+export const JOB_RESULTS = VERIFICATION_RESULTS;
+export type JobResult = VerificationResult;
 type ByResult = Record<JobResult, number>;
 
 const noJobs = (): ByResult => ({ skip: 0, audit: 0, fallback: 0, would_skip: 0, would_fall_back: 0 });

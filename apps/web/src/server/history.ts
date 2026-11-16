@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, count, desc, eq, gte, inArray, sql, type SQL } from "drizzle-orm";
-import type { FallbackReason, VerificationResult } from "@testnotary/core";
+import type { FallbackReason, Outcome, RepoMode, TokenKind, VerificationResult } from "@testnotary/core";
 import type { CiEnvironment, RunEnvironment, SessionLabels } from "@testnotary/protocol";
 import { attestations, jobReports, mismatches, runs, tokens, verifications } from "../db/schema.ts";
 import { accountsAsOf, shownPayload, type ShownAccount } from "./accounts.ts";
@@ -27,8 +27,6 @@ export function retainedSince(at: Date = now()): Date {
   return new Date(at.getTime() - RETAINED_DAYS * 86_400_000);
 }
 
-export type TokenKind = "laptop" | "sandbox";
-
 /** A token as the dashboard names it: its kind and its current name (after renames). */
 export interface TokenShown {
   id: string;
@@ -44,7 +42,7 @@ export interface Attester {
 
 /** A CI job's latest report on a verification. */
 export interface JobReportShown {
-  outcome: "passed" | "failed" | "refused";
+  outcome: Outcome;
   durationMs: number;
   environment: CiEnvironment;
   createdAt: Date;
@@ -74,7 +72,7 @@ export interface VerificationShown {
   tree: string;
   suite: string | null;
   event: string;
-  mode: "shadow" | "enforce";
+  mode: RepoMode;
   result: VerificationResult;
   reason: FallbackReason | null;
   detail: string | null;
@@ -323,7 +321,7 @@ export interface RunShown {
   receivedAt: Date;
   startedAt: Date | null;
   endedAt: Date | null;
-  outcome: "passed" | "failed" | "refused";
+  outcome: Outcome;
   refusal: string | null;
   suite: string | null;
   tree: string | null;
@@ -338,8 +336,8 @@ export interface RunShown {
   flaky: boolean;
 }
 
-export const RUN_OUTCOMES = ["passed", "failed", "refused"] as const;
-export type RunOutcome = (typeof RUN_OUTCOMES)[number];
+export const RUN_OUTCOMES = ["passed", "failed", "refused"] as const satisfies readonly Outcome[];
+export type RunOutcome = Outcome;
 
 type RunRow = typeof runs.$inferSelect;
 
