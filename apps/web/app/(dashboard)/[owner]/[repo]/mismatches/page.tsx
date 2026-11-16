@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { accountName } from "@testnotary/protocol";
+import { DELETED_ACCOUNT, accountName, decodeAttestationPayload } from "@testnotary/protocol";
 import { database } from "../../../../../src/db/client.ts";
 import { isAdmin } from "../../../../../src/server/access.ts";
 import { now } from "../../../../../src/server/config.ts";
+import { stillRetained } from "../../../../../src/server/history.ts";
 import { repoMismatches, type MismatchShown } from "../../../../../src/server/settings.ts";
+import { AttestationExplainer } from "../../../_components/attestation-explainer.tsx";
 import { EnvCompare, Panel, SessionLine, TokenLine, short } from "../../../_components/history.tsx";
 import { Section } from "../../../_components/section.tsx";
 import { ExplainMismatch } from "../../../_components/settings-controls.tsx";
@@ -17,6 +19,9 @@ import { CAUSE_LABELS } from "../../../_lib/words.ts";
 // account's attestations since its last agreeing audit, so an admin can re-run those by hand. An
 // admin explains an open one; an explanation never switches enforce back on (Settings does).
 // Readable by everyone who can read the repo, signed out on a public repo included, without controls.
+// A mismatch is self-contained: it renders from its own copies (account, token, payload, both
+// environments) after retention has deleted the run, attestation and verification it came from
+// (at 90 days), and then names those instead of linking to pages that no longer exist.
 
 export default async function MismatchesPage({ params }: { params: Promise<{ owner: string; repo: string }> }) {
   const access = await requireRepoAccess(params);
@@ -27,6 +32,10 @@ export default async function MismatchesPage({ params }: { params: Promise<{ own
   const open = all.filter((shown) => !shown.explanation);
   const explained = all.filter((shown) => shown.explanation);
   const at = now();
+  const retained = await stillRetained(database(), repo.id, {
+    runIds: all.map((shown) => shown.mismatch.attestation.runId),
+    commits: all.flatMap((shown) => [shown.mismatch.commit, ...shown.mismatch.skippedCommits.map((skipped) => skipped.commit)]),
+  });
   return (
     <Section
       title="Mismatches"
@@ -50,7 +59,7 @@ export default async function MismatchesPage({ params }: { params: Promise<{ own
           {open.length === 0 ? <p className="empty-line">No open mismatch on {repo.fullName}.</p> : null}
           <div className="stack" style={{ gap: 28 }}>
             {open.map((shown) => (
-              <MismatchArticle key={shown.mismatch.id} shown={shown} fullName={repo.fullName} admin={admin} now={at} />
+              <MismatchArticle key={shown.mismatch.id} shown={shown} fullName={repo.fullName} admin={admin} now={at} retained={retained} />
             ))}
           </div>
         </div>
@@ -60,7 +69,7 @@ export default async function MismatchesPage({ params }: { params: Promise<{ own
           {explained.length === 0 ? <p className="empty-line">No explained mismatch on {repo.fullName}.</p> : null}
           <div className="stack" style={{ gap: 28 }}>
             {explained.map((shown) => (
-              <MismatchArticle key={shown.mismatch.id} shown={shown} fullName={repo.fullName} admin={false} now={at} />
+              <MismatchArticle key={shown.mismatch.id} shown={shown} fullName={repo.fullName} admin={false} now={at} retained={retained} />
             ))}
           </div>
         </div>
@@ -69,11 +78,29 @@ export default async function MismatchesPage({ params }: { params: Promise<{ own
   );
 }
 
-function MismatchArticle({ shown, fullName, admin, now }: { shown: MismatchShown; fullName: string; admin: boolean; now: Date }) {
+/** Said where a mismatch names a row retention has deleted. */
+const DELETED_AFTER_90_DAYS = <span className="muted">deleted after 90 days</span>;
+
+function MismatchArticle({
+  shown,
+  fullName,
+  admin,
+  now,
+  retained,
+}: {
+  shown: MismatchShown;
+  fullName: string;
+  admin: boolean;
+  now: Date;
+  retained: { runs: Set<string>; commits: Set<string> };
+}) {
   const { mismatch, explanation } = shown;
   const heading = `mismatch-${mismatch.id}-title`;
   const commitHref = repoHref(fullName, `commit/${mismatch.commit}`);
+  const commitKept = retained.commits.has(mismatch.commit);
+  const runKept = retained.runs.has(mismatch.attestation.runId);
   const who = accountName(mismatch.account);
+  const payload = mismatch.attestation.payload === null ? undefined : decodeAttestationPayload(mismatch.attestation.payload);
   return (
     <article id={`mismatch-${mismatch.id}`} aria-labelledby={heading} className="stack" style={{ gap: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -88,9 +115,13 @@ function MismatchArticle({ shown, fullName, admin, now }: { shown: MismatchShown
         <dl className="kv">
           <dt>Commit</dt>
           <dd>
-            <Link className="mono link" href={commitHref}>
-              {short(mismatch.commit)}
-            </Link>{" "}
+            {commitKept ? (
+              <Link className="mono link" href={commitHref}>
+                {short(mismatch.commit)}
+              </Link>
+            ) : (
+              <span className="mono">{short(mismatch.commit)}</span>
+            )}{" "}
             <span className="muted">{mismatch.event}</span>
           </dd>
           <dt>Suite</dt>
@@ -107,12 +138,17 @@ function MismatchArticle({ shown, fullName, admin, now }: { shown: MismatchShown
           </dd>
           <dt>Attested run</dt>
           <dd>
-            <Link className="mono link" href={repoHref(fullName, `runs/${mismatch.attestation.runId}`)}>
-              {mismatch.attestation.runId.slice(0, 8)}
-            </Link>{" "}
+            {runKept ? (
+              <Link className="mono link" href={repoHref(fullName, `runs/${mismatch.attestation.runId}`)}>
+                {mismatch.attestation.runId.slice(0, 8)}
+              </Link>
+            ) : (
+              <span className="mono">{mismatch.attestation.runId.slice(0, 8)}</span>
+            )}{" "}
             <span className="muted">
               passed on commit <span className="mono">{short(mismatch.attestation.commit)}</span>
             </span>
+            {runKept ? null : <> · {DELETED_AFTER_90_DAYS}</>}
           </dd>
           <dt>CI test job</dt>
           <dd>
@@ -138,15 +174,27 @@ function MismatchArticle({ shown, fullName, admin, now }: { shown: MismatchShown
           )}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {admin && !explanation ? <ExplainMismatch repository={fullName} mismatch={mismatch.id} commit={short(mismatch.commit)} /> : null}
-            <Link className="btn" href={commitHref}>
-              Open commit
-            </Link>
+            {commitKept ? (
+              <Link className="btn" href={commitHref}>
+                Open commit
+              </Link>
+            ) : null}
           </div>
         </div>
       </div>
       <div className="stack" style={{ gap: 8 }}>
         <h4>Both environments</h4>
         <EnvCompare run={mismatch.environments.run} ci={mismatch.environments.ci} />
+      </div>
+      <div className="stack" style={{ gap: 8 }}>
+        <h4>The attestation</h4>
+        {payload ? (
+          <AttestationExplainer payload={payload as unknown as Record<string, unknown>} accountWithheld={mismatch.account.id === DELETED_ACCOUNT.id} />
+        ) : (
+          <pre className="json" aria-label="Attestation payload">
+            {mismatch.attestation.payload ?? "(withheld: deleted account)"}
+          </pre>
+        )}
       </div>
       <div className="stack" style={{ gap: 8 }}>
         <h4>Skipped on {who}&apos;s attestations since the last agreeing audit</h4>
@@ -168,9 +216,13 @@ function MismatchArticle({ shown, fullName, admin, now }: { shown: MismatchShown
                 {mismatch.skippedCommits.map((skipped) => (
                   <tr key={`${skipped.commit} ${skipped.suite ?? ""}`}>
                     <td>
-                      <Link className="mono link" href={repoHref(fullName, `commit/${skipped.commit}`)}>
-                        {short(skipped.commit)}
-                      </Link>
+                      {retained.commits.has(skipped.commit) ? (
+                        <Link className="mono link" href={repoHref(fullName, `commit/${skipped.commit}`)}>
+                          {short(skipped.commit)}
+                        </Link>
+                      ) : (
+                        <span className="mono">{short(skipped.commit)}</span>
+                      )}
                     </td>
                     <td className="mono">{skipped.suite ?? "—"}</td>
                     <td className="muted">{skipped.event}</td>

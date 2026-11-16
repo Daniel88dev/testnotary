@@ -14,6 +14,8 @@
     "./tokens": "./src/server/tokens.ts",
     "./revocations": "./src/server/revocations.ts",
     "./settings": "./src/server/settings.ts",
+    "./accounts": "./src/server/accounts.ts",
+    "./retention": "./src/server/retention.ts",
     "./migrate": "./src/db/migrate.ts",
     "./package.json": "./package.json"
   },
@@ -24,7 +26,8 @@
     "typecheck": "next typegen && tsc -p . && tsc -p test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.ts",
-    "build:migrate": "esbuild scripts/migrate.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/scripts/migrate.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
+    "build:migrate": "esbuild scripts/migrate.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/scripts/migrate.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build:retention": "esbuild scripts/retention.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/scripts/retention.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1164.0",

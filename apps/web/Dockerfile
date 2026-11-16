@@ -12,6 +12,7 @@
 #
 # The same image runs the one-off jobs:
 #   node apps/web/dist/scripts/migrate.mjs     with MIGRATION_DATABASE_URL (the migration role)
+#   node apps/web/dist/scripts/retention.mjs   with RETENTION_DATABASE_URL (the retention role), on a schedule
 
 ARG NODE_VERSION=24
 
@@ -26,7 +27,8 @@ RUN pnpm fetch --frozen-lockfile
 COPY . .
 RUN pnpm install --offline --frozen-lockfile --filter "@testnotary/web..." \
  && pnpm --filter @testnotary/web build \
- && pnpm --filter @testnotary/web build:migrate
+ && pnpm --filter @testnotary/web build:migrate \
+ && pnpm --filter @testnotary/web build:retention
 
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 # The commit the image was built from; Sentry tags events with it.

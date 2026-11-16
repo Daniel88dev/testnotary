@@ -107,7 +107,8 @@ resource "aws_ecs_task_definition" "job" {
   }
 }
 
-# The retention job's scheduled slot. Off until the retention job ships (retention_job_enabled).
+# The retention job's schedule: nightly, one task, no retries (the next night's pass catches up).
+# `retention_job_enabled = false` pauses it.
 resource "aws_iam_role" "scheduler" {
   name = "${var.name}-retention-scheduler"
   assume_role_policy = jsonencode({
