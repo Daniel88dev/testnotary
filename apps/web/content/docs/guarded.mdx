@@ -1,0 +1,73 @@
+<Lede>A change to a guarded file can make CI behave differently from the run that attested the tree. So a pull request that changes one always runs its tests.</Lede>
+
+When a change touches a guarded file, the verification falls back with `guarded_file_changed`, and the pull request line names the first such path: `Fell back: guarded_file_changed (pnpm-lock.yaml), the pull request changes a guarded file`. Nothing else about the attestation matters then.
+
+## The product defaults
+
+Every repo guards these, and a repo can’t remove one:
+
+<GuardedDefaults />
+
+That is the workflows and local actions, Testnotary’s own config and allowed signers, every lockfile, every `package.json`, and the Node version files. A name without a `/` matches at any depth, so in a monorepo every package’s `package.json` and lockfile is guarded too.
+
+When `testnotary.json` sets `nodeVersionFile`, that file is guarded as well, since it picks CI’s Node the way `.nvmrc` does.
+
+Not defaults, because v1 doesn’t treat them as part of the environment: `pnpm-workspace.yaml`, `.npmrc`, `.yarnrc.yml`. Add them if your installs depend on them.
+
+## Adding your own
+
+List globs under `guarded` in `testnotary.json`. They add to the defaults:
+
+```json testnotary.json
+{
+  "$schema": "https://testnotary.dev/schema/v1.json",
+  "guarded": ["compose.yaml", "docker/**", "/scripts/*.sh"],
+  "suites": {
+    "unit": { "command": {{test}} }
+  }
+}
+```
+
+Guard what can change a test’s result without changing a test: a compose file that starts the services, a Dockerfile, seed data, a script the command calls. See [Postgres and other services](/docs/services) and [Run the suite in Docker](/docs/docker).
+
+Like the rest of the config, `guarded` is read at the built commit’s first parent: a pull request that adds a glob is checked against the globs before it, and the new glob counts from the next pull request on. Changing `testnotary.json` is itself a guarded change.
+
+## How globs match
+
+Globs match changed paths the way `.gitignore` lines do:
+
+- A glob with no `/`, except one at its end, matches the name at any depth: `package.json`, `*.sql`.
+- Any other glob is anchored at the top of the repo. A leading `/` only anchors: `/scripts/*.sh`.
+- A glob that matches a directory matches everything under it: `docker`, `docker/` and `docker/**` are the same.
+- `*` and `?` stay within one path segment; `**` spans any number of them. `[abc]` and `[!abc]` are classes, `{a,b}` is a choice, and a backslash takes the next character as it is.
+- Dotfiles match like any other name.
+- A leading `!` is just a character. Nothing negates, so a repo can’t un-guard a default.
+
+| Glob | Path | Verdict |
+|---|---|---|
+| `package.json` | `packages/api/package.json` | matches |
+| `compose.yaml` | `services/db/compose.yaml` | matches |
+| `*.sql` | `db/migrations/0001_init.sql` | matches |
+| `migrations/*.sql` | `db/migrations/0001_init.sql` | doesn’t match |
+| `/scripts/*.sh` | `scripts/seed.sh` | matches |
+| `/scripts/*.sh` | `tools/scripts/seed.sh` | doesn’t match |
+| `scripts/*.sh` | `scripts/ci/deploy.sh` | doesn’t match |
+| `scripts/**/*.sh` | `scripts/ci/deploy.sh` | matches |
+| `docker` | `docker/postgres/init.sql` | matches |
+| `.env.{test,ci}` | `.env.ci` | matches |
+| `!package.json` | `package.json` | doesn’t match |
+
+## What counts as changed
+
+The service asks GitHub which files the built commit changes against its first parent: for a pull request, everything the pull request changes. A moved file counts at both its old and its new path, so moving `package.json` away is a guarded change. A deleted lockfile is one too.
+
+GitHub lists at most 300 changed files. A change it lists 300 or more files for falls back with `guarded_file_changed` and says so, because a guarded file could be among the ones not listed.
+
+The setup pull request, which adds `testnotary.json`, is checked against the defaults alone and reads `guarded_file_changed`, as the [setup guide](/docs/setup#merge) says.
+
+## Elsewhere
+
+- A laptop or sandbox run records which globs its change against the base matched, and uploads the globs, never the file names. It doesn’t refuse or warn: CI will run the tests anyway.
+- In signature mode the action checks guarded files itself, with the same list and the same matching, from the job’s own checkout. See [Security](/docs/security).
+
+<Next pages="config how reasons services" />

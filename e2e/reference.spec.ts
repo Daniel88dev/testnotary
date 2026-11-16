@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { FALLBACK_REASONS, GUARDED_DEFAULTS, REFUSAL_CODES, VERIFICATION_RESULTS, WARNING_CODES, matchesGuardedGlob } from "@testnotary/core";
+import { FALLBACK_REASONS, GUARDED_DEFAULTS, REFUSAL_CODES, VERIFICATION_RESULTS, WARNING_CODES, matchesGuardedGlob, type FallbackReason } from "@testnotary/core";
 import { expect, test } from "@testnotary/test-world/playwright";
 import type { Page } from "@playwright/test";
+import { REASON_LINES } from "../packages/action/src/pr-line.ts";
 import { EXIT } from "../packages/testnotary/src/report.ts";
 
 // The Reference group of the docs, checked against what the product does: every list on these
@@ -39,14 +40,23 @@ for (const { path, table, codes } of CODE_PAGES) {
   });
 }
 
-/** The first cell of every row of each docs table whose first header is `header`, one list per table. */
-async function firstColumns(page: Page, header: string): Promise<string[][]> {
-  const lists: string[][] = [];
+/** The rows (cells' text) of each docs table whose first header is `header`, one list per table. */
+async function rowsByHeader(page: Page, header: string): Promise<string[][][]> {
+  const tables: string[][][] = [];
   for (const table of await page.getByRole("main").locator("table").all()) {
     if ((await table.locator("thead th").first().innerText()).trim() !== header) continue;
-    lists.push((await table.locator("tbody tr td:first-child").allInnerTexts()).map((text) => text.trim()));
+    tables.push(
+      await table.locator("tbody tr").evaluateAll((rows) =>
+        rows.map((row) => Array.from(row.querySelectorAll("td")).map((cell) => (cell.textContent ?? "").replace(/\s+/g, " ").trim())),
+      ),
+    );
   }
-  return lists;
+  return tables;
+}
+
+/** The first cell of every row of each docs table whose first header is `header`, one list per table. */
+async function firstColumns(page: Page, header: string): Promise<string[][]> {
+  return (await rowsByHeader(page, header)).map((rows) => rows.map(([first = ""]) => first));
 }
 
 test("/docs/cli documents exactly the commands and flags `testnotary --help` lists, one section each", async ({ page, world }) => {
@@ -142,11 +152,29 @@ test("/docs/guarded lists exactly the product defaults the verification uses, an
   expect(await main.locator("ul.guarded-defaults code").allInnerTexts()).toEqual([...GUARDED_DEFAULTS]);
 
   // The worked examples of a repo's own globs: each "matches" / "doesn't match" row agrees with the matcher.
-  const rows = await tableRows(page, "How guarded globs match");
+  const tables = await rowsByHeader(page, "Glob");
+  expect(tables).toHaveLength(1);
+  const rows = tables[0]!;
   expect(rows.length).toBeGreaterThanOrEqual(6);
   for (const [glob = "", path = "", verdict = ""] of rows) {
     expect(matchesGuardedGlob(glob, path), `${glob} ${verdict} ${path}`).toBe(verdict === "matches");
   }
+});
+
+test("/docs/pr shows every result's line, and each fallback in the action's own words", async ({ page }) => {
+  await page.goto("/docs/pr");
+  const lines = (await page.getByRole("main").locator("figure.code.check pre").allInnerTexts()).map((text) => text.trim());
+  for (const start of ["Skipped · ", "Would have skipped · ", "Fell back: ", "Would have fallen back: ", "Audit · ", "Mismatch: the audit failed · ", "Mismatch: would have skipped · "]) {
+    expect(lines.some((line) => line.startsWith(start)), start).toBe(true);
+  }
+  let fallbacks = 0;
+  for (const line of lines) {
+    const fallback = /^(?:Fell back|Would have fallen back): ([a-z_]+)(?: \(([^)]*)\))?, ([^·]+?)(?: · |$)/.exec(line);
+    if (!fallback) continue;
+    fallbacks++;
+    expect(fallback[3], line).toBe(REASON_LINES[fallback[1] as FallbackReason]);
+  }
+  expect(fallbacks).toBeGreaterThanOrEqual(3);
 });
 
 test("/docs/output lists the CLI's exit codes and the fields its --json objects really have", async ({ page, world }) => {
