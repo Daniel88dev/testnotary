@@ -330,6 +330,9 @@ test("the docs use only real codes, the checks-list shape and none of the banned
 });
 
 test("every page in the tree exists with content, and every link inside the docs resolves", async ({ page, request }) => {
+  // Loads every docs page twice from a dev server that compiles each on first use: three times the
+  // usual time limit, for a slow CI runner.
+  test.slow();
   await page.goto("/docs/setup");
   const tree = page.getByRole("navigation", { name: "Docs" });
 
@@ -357,18 +360,21 @@ test("every page in the tree exists with content, and every link inside the docs
   // Every link inside the docs resolves, and an in-page anchor lands on an element of that id.
   const hrefs = new Set<string>();
   for (const link of await page.locator("a[href^='/docs']").all()) hrefs.add((await link.getAttribute("href"))!.split("#")[0]!);
-  const anchors = new Map<string, string>();
+  // Each target is asked for once, and each page with anchors is opened once, however many links
+  // point there.
+  const statuses = new Map<string, number>();
+  const anchors = new Map<string, Map<string, string>>();
   for (const href of hrefs) {
     await page.goto(href);
     for (const link of await page.getByRole("main").locator("a[href^='/docs']").all()) {
       const [target = "", anchor] = (await link.getAttribute("href"))!.split("#");
-      expect((await request.get(target)).status(), `${href} → ${target}`).toBe(200);
-      if (anchor) anchors.set(`${target}#${anchor}`, href);
+      if (!statuses.has(target)) statuses.set(target, (await request.get(target)).status());
+      expect(statuses.get(target), `${href} → ${target}`).toBe(200);
+      if (anchor) anchors.set(target, (anchors.get(target) ?? new Map<string, string>()).set(anchor, href));
     }
   }
-  for (const [target, from] of anchors) {
-    const [path = "", id = ""] = target.split("#");
+  for (const [path, ids] of anchors) {
     await page.goto(path);
-    expect(await page.locator(`[id="${id}"]`).count(), `${from} → ${target}`).toBe(1);
+    for (const [id, from] of ids) expect(await page.locator(`[id="${id}"]`).count(), `${from} → ${path}#${id}`).toBe(1);
   }
 });
