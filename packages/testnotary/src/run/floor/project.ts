@@ -35,7 +35,8 @@ export function project(context: RunContext): Promise<Project> {
   return found;
 }
 
-async function readProject(root: string): Promise<Project> {
+/** The repo's top level read afresh (`init` uses it; a run goes through `project`). */
+export async function readProject(root: string): Promise<Project> {
   const text = await readText(root, "package.json");
   let manifest: Record<string, unknown> | undefined;
   if (text !== undefined) {

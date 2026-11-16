@@ -12,6 +12,8 @@ export const LINKS = {
   githubEnterpriseLimits: "https://testnotary.dev/docs/limits#github-enterprise",
   /** "Agents and sandbox tokens". */
   sandboxTokens: "https://testnotary.dev/docs/agents",
+  /** The setup guide, which `init`'s next steps follow. */
+  setupGuide: "https://testnotary.dev/docs/setup",
 } as const;
 
 /** `POST /api/v1/login/device`: starts a device flow. */
