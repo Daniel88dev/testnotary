@@ -62,7 +62,7 @@ async function scene(options: { files?: Record<string, string> } = {}): Promise<
     user,
     key,
     attestation,
-    payload: decodeAttestationPayload(attestation.payload)!,
+    payload: decodeAttestationPayload(attestation.payload!)!,
     async gate({ service, fetchDepth = 2 } = {}) {
       const workspace = await fixture.ciCheckout(merge.sha, { fetchDepth });
       return world.runAction({

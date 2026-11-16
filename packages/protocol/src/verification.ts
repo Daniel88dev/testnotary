@@ -104,7 +104,11 @@ export const mismatch = z.object({
   account: z.object({ id: z.number(), login: z.string().nullable() }),
   /** The token, with its type and its name when the mismatch was recorded. */
   token: z.object({ id: z.string(), kind: z.enum(["laptop", "sandbox"]), name: z.string() }),
-  /** The attestation's payload exactly as stored, and its signature fields (null without a signature). */
+  /**
+   * The attestation's payload exactly as stored, and its signature fields (null without a
+   * signature). Both are withheld (null) once the account reads *deleted account*: the payload
+   * names the account's GitHub id and the signature its key. The mismatch keeps its copy.
+   */
   attestation: z.object({
     id: z.string(),
     runId: z.string(),
@@ -112,7 +116,7 @@ export const mismatch = z.object({
     commit: z.string(),
     endedAt: z.string(),
     format: z.string(),
-    payload: z.string(),
+    payload: z.string().nullable(),
     signature: attestationSignature.nullable(),
   }),
   /** Both environments: the attested run's and the CI runner's. */
@@ -163,7 +167,12 @@ export const verification = z.object({
       /** The attested run: its id (the run page), its environment and its unverified session labels. */
       run: z.object({ id: z.string(), environment: runEnvironment.nullable(), session: sessionLabels.nullable() }),
       format: z.string(),
-      payload: z.string(),
+      /**
+       * Exactly as stored; null (withheld, with the signature) when the attester reads *deleted
+       * account*, because it names the account's GitHub id. Such an attestation's token is revoked,
+       * so it never lets CI skip.
+       */
+      payload: z.string().nullable(),
       /**
        * The signature fields stored with it (signature mode); null when the run uploaded none. The
        * action checks `sshsig` over `payload`'s exact bytes itself and trusts nothing else here.

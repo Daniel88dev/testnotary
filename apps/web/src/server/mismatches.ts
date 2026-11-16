@@ -1,5 +1,5 @@
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
-import type { Mismatch, SkippedCommit } from "@testnotary/protocol";
+import { DELETED_ACCOUNT, type Mismatch, type SkippedCommit } from "@testnotary/protocol";
 import { attestations, jobReports, mismatches, repoSettingChanges, runs, tokens, verifications } from "../db/schema.ts";
 import { accountsAsOf } from "./accounts.ts";
 import { now } from "./config.ts";
@@ -144,28 +144,34 @@ export async function mismatchViews(db: Executor, rows: MismatchRow[]): Promise<
     db,
     rows.map((row) => ({ accountId: row.accountId, at: row.attestedAt })),
   );
-  return rows.map((row, index) => ({
-    id: row.id,
-    result: row.result === "audit" ? "audit" : "would_skip",
-    suite: row.suite,
-    commit: row.commit,
-    tree: row.tree,
-    event: row.event,
-    account: accounts[index]!,
-    token: { id: row.tokenId, kind: row.tokenKind === "sandbox" ? "sandbox" : "laptop", name: row.tokenName },
-    attestation: {
-      id: row.attestationId,
-      runId: row.runId,
-      commit: row.attestedCommit,
-      endedAt: row.attestationEndedAt.toISOString(),
-      format: row.attestationFormat,
-      payload: row.attestationPayload.toString("utf8"),
-      signature: row.signature ?? null,
-    },
-    environments: { run: row.runEnvironment ?? null, ci: row.ciEnvironment },
-    session: row.session ?? null,
-    tests: { outcome: row.outcome === "passed" ? "passed" : row.outcome === "refused" ? "refused" : "failed", durationMs: row.durationMs },
-    skippedCommits: row.skippedCommits,
-    createdAt: row.createdAt.toISOString(),
-  }));
+  return rows.map((row, index) => {
+    // A deleted account's mismatch keeps its copy of the payload and the signature (never removed
+    // on request), but no read hands them out: the payload names the account's GitHub id, the
+    // signature its key.
+    const withheld = accounts[index]!.id === DELETED_ACCOUNT.id;
+    return {
+      id: row.id,
+      result: row.result === "audit" ? "audit" : "would_skip",
+      suite: row.suite,
+      commit: row.commit,
+      tree: row.tree,
+      event: row.event,
+      account: accounts[index]!,
+      token: { id: row.tokenId, kind: row.tokenKind === "sandbox" ? "sandbox" : "laptop", name: row.tokenName },
+      attestation: {
+        id: row.attestationId,
+        runId: row.runId,
+        commit: row.attestedCommit,
+        endedAt: row.attestationEndedAt.toISOString(),
+        format: row.attestationFormat,
+        payload: withheld ? null : row.attestationPayload.toString("utf8"),
+        signature: withheld ? null : (row.signature ?? null),
+      },
+      environments: { run: row.runEnvironment ?? null, ci: row.ciEnvironment },
+      session: row.session ?? null,
+      tests: { outcome: row.outcome === "passed" ? "passed" : row.outcome === "refused" ? "refused" : "failed", durationMs: row.durationMs },
+      skippedCommits: row.skippedCommits,
+      createdAt: row.createdAt.toISOString(),
+    };
+  });
 }
