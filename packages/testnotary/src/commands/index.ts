@@ -3,6 +3,7 @@
 import type { Command } from "../command.ts";
 import { check } from "./check.ts";
 import { exec } from "./exec.ts";
+import { init } from "./init.ts";
 import { login } from "./login.ts";
 import { logout } from "./logout.ts";
 import { run } from "./run.ts";
@@ -12,6 +13,7 @@ import { whoami } from "./whoami.ts";
 export const commands: readonly Command[] = [
   check,
   exec,
+  init,
   login,
   logout,
   run,

@@ -162,7 +162,7 @@ test("the setup guide has nine numbered steps in three parts at the anchors the 
   await expect(workflow).toContainText("uses: Daniel88dev/testnotary@v1");
 
   // The CLI's links land on real sections.
-  for (const url of [LINKS.githubEnterpriseLimits, LINKS.sandboxTokens]) {
+  for (const url of [LINKS.githubEnterpriseLimits, LINKS.sandboxTokens, LINKS.setupGuide]) {
     const { pathname, hash } = new URL(url);
     await page.goto(pathname + hash);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
