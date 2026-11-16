@@ -37,6 +37,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
 
+  # Every installed package carries an OSI-approved license or is a named exception
+  # (scripts/release/license-allowlist.json).
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm licenses:check
+
   # Formats and validates the production Terraform without a backend or AWS credentials.
   terraform:
     runs-on: ubuntu-latest

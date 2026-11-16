@@ -18,7 +18,10 @@
     "db:migrate": "pnpm --filter @testnotary/web db:migrate",
     "db:generate": "pnpm --filter @testnotary/web db:generate",
     "schema:write": "node packages/core/scripts/write-config-schema.ts",
-    "changeset": "changeset"
+    "changeset": "changeset",
+    "licenses:check": "node scripts/release/check-licenses.ts",
+    "release:build": "node scripts/release/build.ts",
+    "release:test": "TESTNOTARY_WORLD_ACTION=\"$PWD/dist/action/index.js\" TESTNOTARY_WORLD_CLI=\"$PWD/packages/testnotary/dist/cli.js\" vitest run packages/action packages/testnotary tests"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",

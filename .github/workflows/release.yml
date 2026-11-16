@@ -1,0 +1,182 @@
+name: Release
+
+# On a push to main: while changesets are pending, opens or updates the "Version packages" pull
+# request. Once that is merged, releases the version it set, for the library and the action
+# together: the action bundle is built from this commit onto a detached commit tagged vX.Y.Z (an
+# immutable GitHub release), the plain tag v1 moves to it, and `testnotary` goes to npm from the
+# same run with trusted publishing and provenance. The bundle is never committed to main.
+#
+# Every run is a dry run (build, test the builds, check licenses, tag on the runner, `npm publish
+# --dry-run`; nothing is pushed or published) until the repository variable RELEASE_PUBLISH is
+# `true`. A manual run is a dry run unless `dry_run` is unticked, and then only with that variable.
+# docs/runbook/release.md has the one-time setup.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build, test and tag on the runner only; push and publish nothing.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  changesets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the version commit on the pull request's branch
+      pull-requests: write # the "Version packages" pull request
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `version` while changesets are pending, `publish` when a version is unpublished, else `none`.
+      - id: mode
+        uses: changesets/action/select-mode@v2
+      - if: ${{ steps.mode.outputs.mode == 'version' && github.event_name == 'push' }}
+        uses: changesets/action/version@v2
+        with:
+          commit-message: Version packages
+          pr-title: Version packages
+
+  release:
+    needs: changesets
+    # A manual run releases (or rehearses) the version on main even while changesets are pending.
+    if: ${{ !cancelled() && needs.changesets.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.changesets.outputs.mode != 'version') }}
+    runs-on: ubuntu-latest
+    # npm's trusted publisher for `testnotary` names this workflow file and this environment.
+    environment: release
+    permissions:
+      contents: write # push the tags and create the release
+      id-token: write # npm trusted publishing and its provenance
+    env:
+      DRY_RUN: ${{ vars.RELEASE_PUBLISH != 'true' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+      # The detached release commit and the annotated tag are made by the Actions bot.
+      GIT_AUTHOR_NAME: github-actions[bot]
+      GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+      GIT_COMMITTER_NAME: github-actions[bot]
+      GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # every tag, so a released version is never tagged again
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+
+      - id: version
+        name: Find the version to release
+        run: |
+          version="$(node -p 'require("./packages/testnotary/package.json").version')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse --quiet --verify "refs/tags/v$version" > /dev/null; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$version is already released; nothing to do."
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: ${{ steps.version.outputs.released == 'false' }}
+        name: Check dependency licenses
+        run: pnpm licenses:check
+
+      - if: ${{ steps.version.outputs.released == 'false' }}
+        name: Build the action bundle and the library
+        run: pnpm release:build
+
+      # The action and library suites again, against dist/action/index.js and the built CLI.
+      - if: ${{ steps.version.outputs.released == 'false' }}
+        name: Test the builds
+        run: pnpm release:test
+
+      - if: ${{ steps.version.outputs.released == 'false' }}
+        id: tag
+        name: Commit the bundle onto a detached commit and tag it
+        run: node scripts/release/tag.ts
+
+      - if: ${{ steps.version.outputs.released == 'false' }}
+        id: pack
+        name: Pack the library
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm"
+          pnpm --filter testnotary pack --pack-destination "$RUNNER_TEMP/npm"
+          tarball="$(find "$RUNNER_TEMP/npm" -name 'testnotary-*.tgz' -print -quit)"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - if: ${{ steps.version.outputs.released == 'false' }}
+        name: Rehearse the npm publish
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: npm publish "$TARBALL" --dry-run --access public
+
+      # Past this point the release reaches GitHub and npm.
+
+      - if: ${{ steps.version.outputs.released == 'false' && env.DRY_RUN != 'true' }}
+        name: Check npm supports trusted publishing
+        run: |
+          # shellcheck disable=SC2016 # the single quotes hold JavaScript, not shell
+          node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            if (major < 11 || (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))) {
+              console.error(`npm ${process.argv[1]} cannot publish with trusted publishing; it needs 11.5.1 or later`);
+              process.exit(1);
+            }' "$(npm --version)"
+
+      - if: ${{ steps.version.outputs.released == 'false' && env.DRY_RUN != 'true' }}
+        name: Push the release tag
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: git push origin "refs/tags/$TAG"
+
+      - if: ${{ steps.version.outputs.released == 'false' && env.DRY_RUN != 'true' }}
+        name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          NOTES: ${{ steps.tag.outputs.notes }}
+        run: gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$NOTES"
+
+      - if: ${{ steps.version.outputs.released == 'false' && env.DRY_RUN != 'true' }}
+        name: Publish to npm with provenance
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: npm publish "$TARBALL" --provenance --access public
+
+      # Last, so `@v1` users get the new version only once everything above succeeded.
+      - if: ${{ steps.version.outputs.released == 'false' && env.DRY_RUN != 'true' }}
+        name: Move the major tag
+        env:
+          MAJOR: ${{ steps.tag.outputs.major }}
+        run: git push --force origin "refs/tags/$MAJOR"
+
+      - if: ${{ always() && steps.tag.outputs.tag != '' }}
+        name: Summary
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          MAJOR: ${{ steps.tag.outputs.major }}
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          {
+            if [ "$DRY_RUN" = "true" ]; then echo "### Dry run of $TAG"; else echo "### Released $TAG"; fi
+            echo
+            echo "- Release commit \`$COMMIT\` (detached from \`$GITHUB_SHA\`), tagged \`$TAG\`; \`$MAJOR\` moved to it."
+            if [ "$DRY_RUN" = "true" ]; then echo "- Nothing was pushed, released or published."; fi
+          } >> "$GITHUB_STEP_SUMMARY"
