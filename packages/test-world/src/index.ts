@@ -76,6 +76,8 @@ export interface WorldOptions {
   secrets?: string[];
   /** `next` only: environment for the service, over the world's defaults. `undefined` removes one. */
   serviceEnv?: Record<string, string | undefined>;
+  /** The service's `AUDIT_MASTER_KEY`: the world's fixed key (`WORLD_AUDIT_MASTER_KEY`) unless set; null for none. */
+  auditMasterKey?: string | null;
 }
 
 /** The secret id under which the world stores a service variable named in `WorldOptions.secrets`. */
@@ -250,7 +252,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       githubAppPrivateKey: github.app.privateKey,
       actionsOidcIssuer: github.oidc.issuer,
       legalDir: undefined,
-      auditMasterKey: WORLD_AUDIT_MASTER_KEY,
+      auditMasterKey: options.auditMasterKey === null ? undefined : (options.auditMasterKey ?? WORLD_AUDIT_MASTER_KEY),
       now: () => clock.now(),
       log: (entry) => logs.push(entry),
     };
