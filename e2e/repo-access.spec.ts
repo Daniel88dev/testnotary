@@ -54,6 +54,20 @@ test("a private repo's pages are not found for anyone GitHub does not show it to
   expect((await page.goto("/fernpay/ledger"))?.status()).toBe(404);
 });
 
+test("access is asked of GitHub by the repo's id: a missed rename and another repo under the old name lend nothing", async ({ page, world }) => {
+  const { repo } = await installedRepo(world, "quillco", "vault", "private");
+  const eve = world.github.addUser({ login: "eve-renamed" });
+  // GitHub renames the private repo, and the service misses the webhook; a public repo then takes
+  // the old name, outside the installation, and Eve is its admin.
+  world.github.state.moveRepo(repo, "quillco", "vault-renamed");
+  const lookalike = world.github.addRepo(await world.fixtureRepo(), { owner: "quillco", name: "vault", visibility: "public" });
+  world.github.setPermission(lookalike, eve, "admin");
+
+  await signIn(page, world, eve);
+  expect((await page.goto("/quillco/vault"))?.status()).toBe(404);
+  expect((await page.goto("/quillco/vault/settings"))?.status()).toBe(404);
+});
+
 test("a public repo that goes private stops anonymous reads at the next request", async ({ page, world }) => {
   const { repo, installation } = await installedRepo(world, "oss-lab", "gadgets", "public");
   expect((await page.goto("/oss-lab/gadgets"))?.status()).toBe(200);

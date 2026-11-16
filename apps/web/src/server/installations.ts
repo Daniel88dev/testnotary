@@ -218,6 +218,28 @@ async function revokeSandboxTokens(db: Executor, repoId: number): Promise<void> 
     .onConflictDoNothing();
 }
 
+/**
+ * What GitHub says about an installed repo now, asked by its id, when it differs from the recorded
+ * name or visibility: a webhook was missed. Recorded as a new state (no delivery), so the repo
+ * heals itself, and the view comes back with GitHub's answer.
+ */
+export async function healRepoState(db: Executor, repo: RepoView, live: { fullName: string; private: boolean }): Promise<RepoView> {
+  const visibility = live.private ? "private" : "public";
+  if (live.fullName === repo.fullName && visibility === repo.visibility) return repo;
+  const change: RepoChange = live.fullName !== repo.fullName ? "renamed" : live.private ? "privatized" : "publicized";
+  await db.insert(repoStates).values({
+    repoId: repo.id,
+    installationId: repo.installationId,
+    fullName: live.fullName,
+    visibility,
+    installed: repo.installed,
+    change,
+    deliveryId: null,
+    at: now(),
+  });
+  return { ...repo, fullName: live.fullName, visibility };
+}
+
 /** The latest recorded state of a repo, whatever its installation. */
 export async function latestRepoState(db: Executor, repoId: number) {
   const [state] = await db.select().from(repoStates).where(eq(repoStates.repoId, repoId)).orderBy(desc(repoStates.id)).limit(1);

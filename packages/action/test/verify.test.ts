@@ -358,6 +358,24 @@ describe("the gate job falls back", () => {
     }
   });
 
+  test("the attester's write access is asked of the repo by its id: a missed rename and a new repo under the old name lend nothing", async () => {
+    const { s, merge } = await attestedPullRequest();
+    const installation = [...world.github.state.installations.values()].find((candidate) => candidate.repoIds.has(s.repo.id))!;
+    const oldName = s.repo.name;
+    // GitHub renames the repo, and the service misses the webhook.
+    world.github.state.moveRepo(s.repo, s.repo.owner, `${oldName}-renamed`);
+    // A new repo takes the old name in the same installation (with the same history, say a copy),
+    // and the attester can write there only.
+    const newcomer = world.github.addRepo(s.fixture, { owner: s.repo.owner, name: oldName });
+    await world.github.addInstallationRepos(installation, [newcomer]);
+    world.github.setPermission(newcomer, s.user, "write");
+    world.github.setPermission(s.repo, s.user, "read");
+
+    const result = await s.gate({ sha: merge.sha });
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "attester_no_write", skip: "false" });
+  });
+
   test.each(["read", "triage", "none"] as const)("when the attester now has only %s: attester_no_write", async (permission) => {
     const { s, merge } = await attestedPullRequest();
     world.github.setPermission(s.repo, s.user, permission);

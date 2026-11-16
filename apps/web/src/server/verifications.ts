@@ -18,7 +18,7 @@ import { attestations, jobReports, runs, tokens, verifications } from "../db/sch
 import { now } from "./config.ts";
 import { GitHubDenied, GitHubUnavailable, changedPaths, fileAt, gitCommit, installationToken, repositoryById } from "./github.ts";
 import { apiError } from "./http.ts";
-import { installedRepo, latestRepoState, type Executor, type RepoView } from "./installations.ts";
+import { healRepoState, installedRepo, latestRepoState, type Executor, type RepoView } from "./installations.ts";
 import { acceptActionsToken, type ActionsClaims } from "./oidc.ts";
 import { accountAsOf, shownPayload, withheld } from "./accounts.ts";
 import { auditKeyOf } from "./audits.ts";
@@ -96,8 +96,13 @@ export async function verifyJob(db: Database, job: { claims: ActionsClaims; repo
 
 /** The decision, from GitHub and the attestations. `seen.tree` is the built tree once GitHub gave it (empty before). */
 async function decide(db: Database, job: { claims: ActionsClaims; repo: RepoView }, request: VerifyRequest, seen: { tree: string }): Promise<VerificationDecision> {
-  const { claims, repo } = job;
-  const installation = await installationToken(repo.installationId);
+  const { claims } = job;
+  const installation = await installationToken(job.repo.installationId);
+  // Every call names the repo as GitHub has it now, asked by its id: after a missed rename another
+  // repo may carry the recorded name. The answer heals the recorded name.
+  const live = await repositoryById(installation, job.repo.id);
+  if (!live) throw new GitHubUnavailable(`GitHub does not show the installation repo ${job.repo.id}`);
+  const repo = await healRepoState(db, job.repo, live);
   const commit = await gitCommit(installation, repo.fullName, claims.sha);
   if (!commit) throw new GitHubUnavailable(`GitHub has no commit ${claims.sha} in ${repo.fullName}`);
   seen.tree = commit.tree;
@@ -112,11 +117,11 @@ async function decide(db: Database, job: { claims: ActionsClaims; repo: RepoView
     rates: { auditOneIn: repo.auditOneIn, sandboxAuditOneIn: repo.sandboxAuditOneIn },
     now: now(),
     sources: {
-      defaultBranch: async () => (await repositoryById(installation, repo.id))?.defaultBranch,
+      defaultBranch: async () => live.defaultBranch,
       auditKey: () => auditKeyOf(db, repo.id),
       configAtBase: async () => (firstParent ? fileAt(installation, repo.fullName, CONFIG_FILE, firstParent) : undefined),
       attestations: (suite) => attestationsOfTree(db, repo.id, suite, commit.tree),
-      hasWriteAccess: (accountId) => hasWriteAccess(db, repo, accountId, installation),
+      hasWriteAccess: (accountId) => hasWriteAccess(db, repo, accountId, installation, live.fullName),
       tokenVoided: (tokenId) => tokenVoided(db, tokenId, repo.id),
       changedPaths: async () => {
         if (!firstParent) return undefined;

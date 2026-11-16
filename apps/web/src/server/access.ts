@@ -2,7 +2,7 @@ import { desc, sql } from "drizzle-orm";
 import { database } from "../db/client.ts";
 import { repoStates } from "../db/schema.ts";
 import { fetchAccessibleRepos, fetchRepoPermission, type RepoPermission } from "./github.ts";
-import { repoViews, type RepoView } from "./installations.ts";
+import { healRepoState, repoViews, type RepoView } from "./installations.ts";
 import type { Viewer } from "./sessions.ts";
 
 // Who may see and do what on a repo's dashboard pages. Access follows GitHub, asked live with the
@@ -11,6 +11,8 @@ import type { Viewer } from "./sessions.ts";
 // - a private repo exists only for people GitHub shows it to; for everyone else it is not found;
 // - write access (admin, maintain or write on GitHub) creates sandbox tokens;
 // - admins change settings, explain mismatches, revoke and block.
+// GitHub is asked about the repo by its id, never by the name the last webhook left: after a missed
+// rename another repo may carry that name. Its answer heals the recorded name and visibility.
 
 export type { RepoPermission } from "./github.ts";
 
@@ -55,9 +57,10 @@ export async function repoAccess(viewer: Viewer | undefined, owner: string, name
   const repo = await installedRepoNamed(owner, name);
   if (!repo) return undefined;
   if (!viewer) return repo.visibility === "public" ? { repo, permission: undefined } : undefined;
-  const permission = await fetchRepoPermission(viewer.githubToken, repo.fullName);
-  if (!permission && repo.visibility !== "public") return undefined;
-  return { repo, permission: permission ?? "read" };
+  const live = await fetchRepoPermission(viewer.githubToken, repo.id);
+  // GitHub shows a public repo to everyone: one it doesn't show this person is private now, or gone.
+  if (!live) return undefined;
+  return { repo: await healRepoState(database(), repo, live), permission: live.permission };
 }
 
 export interface ReadableRepo extends RepoView {

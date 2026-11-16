@@ -334,16 +334,19 @@ function asUser(userToken: string): RequestInit {
 }
 
 /**
- * The person's permission on a repo, asked as them: `undefined` when GitHub does not show them the
- * repo (404, or no permission). A user token of the App reaches only repos the App is installed on.
+ * The person's permission on a repo, asked as them by the repo's id (`GET /repositories/{id}`),
+ * never by a name a missed rename may have handed to another repo: `undefined` when GitHub does
+ * not show them the repo (404, or no permission). A user token of the App reaches only repos the
+ * App is installed on. With it, the repo's name and visibility as GitHub has them now.
  */
-export async function fetchRepoPermission(userToken: string, fullName: string): Promise<RepoPermission | undefined> {
-  const path = fullName.split("/").map(encodeURIComponent).join("/");
-  const response = await call(`${serviceConfig().githubApiUrl}/repos/${path}`, asUser(userToken));
+export async function fetchRepoPermission(userToken: string, repoId: number): Promise<{ permission: RepoPermission; fullName: string; private: boolean } | undefined> {
+  const response = await call(`${serviceConfig().githubApiUrl}/repositories/${repoId}`, asUser(userToken));
   if (response.status === 404 || response.status === 403 || response.status === 401) return undefined;
   const body = await jsonBody(response);
-  if (!response.ok) throw new GitHubUnavailable(`GET /repos/${fullName} answered ${response.status}`);
-  return foldPermissions(body.permissions);
+  if (!response.ok) throw new GitHubUnavailable(`GET /repositories/${repoId} answered ${response.status}`);
+  const permission = foldPermissions(body.permissions);
+  if (!permission || body.id !== repoId || typeof body.full_name !== "string" || typeof body.private !== "boolean") return undefined;
+  return { permission, fullName: body.full_name, private: body.private };
 }
 
 export interface AccessibleRepo {
