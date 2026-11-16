@@ -2,13 +2,15 @@
 // `scripts.test` the way the environment floor does (never running a package manager), writes
 // `testnotary.json` with one suite `test`, adds the agent block to `CLAUDE.md` or `AGENTS.md`, and
 // prints the workflow snippet and the next steps. It never touches the workflows. Interactive by
-// default: it asks before writing each file; `--yes` takes every default without asking.
+// default: it asks before writing each file; `--yes` takes every default without asking. With
+// `--json`, stdout carries one object instead of the snippet and the steps.
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { UsageError, parseCommandArgs, type Command } from "../command.ts";
 import { tryGit } from "../git.ts";
+import { Output } from "../output.ts";
 import { EXIT, say } from "../report.ts";
 import { isSupported, packageManagerOf, type PackageManagerUse } from "../run/floor/package-manager.ts";
 import { readProject, type Project } from "../run/floor/project.ts";
@@ -19,6 +21,7 @@ import {
   PACKAGE_MANAGERS,
   agentsBlock,
   parseConfig,
+  suiteFromConfig,
   suiteNames,
   workflowSnippet,
   type PackageManagerName,
@@ -35,29 +38,54 @@ const NODE_VERSION_FILES = [".nvmrc", ".node-version"] as const;
 
 export const init: Command = {
   name: "init",
-  usage: "init [--yes]",
+  usage: "init [--yes] [--json]",
   summary: "Set this repo up: write testnotary.json, add the agent block, print the workflow snippet.",
   async run(args, context) {
     const { flags, positionals } = parseCommandArgs(args, ["yes"]);
     if (positionals.length > 0) throw new UsageError("init takes no arguments");
-    if (flags.json) throw new UsageError("init has no --json output");
+    const out = new Output(flags.json);
     const root = (await tryGit(context.cwd, ["rev-parse", "--show-toplevel"], context.env)) ?? context.cwd;
     const ask = new Questions(flags.yes);
     try {
-      return await setUp(root, ask, context.env);
+      const done = await setUp(root, ask, context.env);
+      if ("error" in done) return out.fail(done.error, done.lines, done.details);
+      if (!out.json) process.stdout.write(humanText(done.result));
+      out.result(done.result);
+      return EXIT.passed;
     } finally {
       ask.close();
     }
   },
 };
 
-async function setUp(root: string, ask: Questions, env: Readonly<Record<string, string | undefined>>): Promise<number> {
+/** The `--json` object of a set-up that went ahead. Paths are relative to `root`. */
+interface InitResult {
+  /** The repo's top level. */
+  root: string;
+  packageManager: PackageManagerName;
+  config: { path: string; status: "written" | "existed" | "declined" };
+  /** The suite the agent block and the workflow snippet name, and the argv it runs. */
+  suite: { name: string; command: string[] };
+  agentFile: { path: string; status: "added" | "present" | "declined"; block: string };
+  workflowSnippet: string;
+  nextSteps: string[];
+}
+
+/** Why nothing could be written: `{ error, …details }` with `--json`, and exit 1. */
+type InitError = "package_manager_unsupported" | "config_invalid" | "no_package_json" | "no_test_script";
+
+type SetUp = { result: InitResult } | { error: InitError; lines: string[]; details: Record<string, unknown> };
+
+async function setUp(root: string, ask: Questions, env: Readonly<Record<string, string | undefined>>): Promise<SetUp> {
   const project = await readProject(root);
   const use = packageManagerOf(project);
   const name = use.name ?? "npm";
   if (!isSupported(name)) {
-    say(`this repo uses ${name}, and Testnotary runs only npm, pnpm and Yarn; nothing was written`);
-    return EXIT.failed;
+    return {
+      error: "package_manager_unsupported",
+      lines: [`this repo uses ${name}, and Testnotary runs only npm, pnpm and Yarn; nothing was written`],
+      details: { packageManager: name },
+    };
   }
   const pm = PACKAGE_MANAGERS[name];
   say(`package manager: ${name} (${packageManagerSource(use, name)})`);
@@ -65,67 +93,81 @@ async function setUp(root: string, ask: Questions, env: Readonly<Record<string, 
   // testnotary.json: an existing one is kept, and its first suite is the one the rest names.
   const configPath = join(root, CONFIG_FILE);
   const existing = await readText(configPath);
-  let suite = SUITE;
-  const written: string[] = [];
+  let suite: InitResult["suite"];
+  let configStatus: InitResult["config"]["status"];
   if (existing !== undefined) {
     const parsed = parseConfig(existing);
     if (!parsed.ok) {
-      say(`${CONFIG_FILE} already exists and the library refuses it; fix it and run init again:`);
-      for (const problem of parsed.problems) say(`  ${problem}`);
-      return EXIT.failed;
+      return {
+        error: "config_invalid",
+        lines: [`${CONFIG_FILE} already exists and the library refuses it; fix it and run init again:`, ...parsed.problems.map((problem) => `  ${problem}`)],
+        details: { packageManager: name, problems: parsed.problems },
+      };
     }
-    suite = suiteNames(parsed.config)[0] ?? SUITE;
-    say(`${CONFIG_FILE} already exists; left as it is (suite ${suite})`);
+    const first = suiteNames(parsed.config)[0]!;
+    suite = { name: first, command: [...suiteFromConfig(parsed.config, first)!.command] };
+    configStatus = "existed";
+    say(`${CONFIG_FILE} already exists; left as it is (suite ${first})`);
   } else {
-    const problem = missingTestScript(project);
-    if (problem) {
-      say(`${problem}; nothing was written`);
-      say(`add a test script to package.json, or write ${CONFIG_FILE} by hand (${LINKS.setupGuide})`);
-      return EXIT.failed;
+    const missing = missingTestScript(project);
+    if (missing) {
+      return {
+        error: missing.error,
+        lines: [`${missing.line}; nothing was written`, `add a test script to package.json, or write ${CONFIG_FILE} by hand (${LINKS.setupGuide})`],
+        details: missing.error === "no_test_script" ? { packageManager: name } : {},
+      };
     }
+    suite = { name: SUITE, command: [...pm.testCommand] };
     const text = configText(name);
     say(`suite ${SUITE} runs scripts.test: ${pm.testCommand.join(" ")}`);
     if (await ask.yes(`Write ${CONFIG_FILE} with suite "${SUITE}" (${pm.testCommand.join(" ")})?`)) {
       await writeFile(configPath, text, { flag: "wx" });
       say(`wrote ${CONFIG_FILE}`);
-      written.push(CONFIG_FILE);
+      configStatus = "written";
     } else {
       say(`${CONFIG_FILE} not written`);
+      configStatus = "declined";
     }
   }
 
   // The agent block.
-  const block = agentsBlock(name, suite);
+  const block = agentsBlock(name, suite.name);
   const agentFile = existsSync(join(root, "CLAUDE.md")) ? AGENT_FILES[0] : AGENT_FILES[1];
   const agentPath = join(root, agentFile);
   const before = await readText(agentPath);
-  let pasteBlock = false;
-  if (before?.includes(`testnotary run ${suite}`)) {
-    say(`${agentFile} already tells agents to run testnotary run ${suite}; left as it is`);
+  let agentStatus: InitResult["agentFile"]["status"];
+  if (before?.includes(`testnotary run ${suite.name}`)) {
+    say(`${agentFile} already tells agents to run testnotary run ${suite.name}; left as it is`);
+    agentStatus = "present";
   } else if (await ask.yes(`Add the Testnotary block to ${agentFile}?`)) {
     await writeFile(agentPath, appended(before, block));
     say(`${before === undefined ? "wrote" : "added the Testnotary block to"} ${agentFile}`);
-    written.push(agentFile);
+    agentStatus = "added";
   } else {
     say(`${agentFile} not changed`);
-    pasteBlock = true;
+    agentStatus = "declined";
   }
 
   const nodeVersionFile = NODE_VERSION_FILES.find((file) => existsSync(join(root, file)));
   const remoteHead = await tryGit(root, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], env);
   const defaultBranch = remoteHead?.replace(/^origin\//, "");
-  process.stdout.write(
-    nextSteps({
+  return {
+    result: {
+      root,
       packageManager: name,
+      config: { path: CONFIG_FILE, status: configStatus },
       suite,
-      snippet: workflowSnippet({ packageManager: name, suite, nodeVersionFile, defaultBranch }),
-      written,
-      pasteBlock: pasteBlock ? { file: agentFile, block } : undefined,
-      pinned: use.pin?.source === "packageManager" && use.pin.name !== undefined,
-      nodeVersionFile,
-    }),
-  );
-  return EXIT.passed;
+      agentFile: { path: agentFile, status: agentStatus, block },
+      workflowSnippet: workflowSnippet({ packageManager: name, suite: suite.name, nodeVersionFile, defaultBranch }),
+      nextSteps: nextSteps({
+        packageManager: name,
+        suite: suite.name,
+        written: [...(configStatus === "written" ? [CONFIG_FILE] : []), ...(agentStatus === "added" ? [agentFile] : [])],
+        pinned: use.pin?.source === "packageManager" && use.pin.name !== undefined,
+        nodeVersionFile,
+      }),
+    },
+  };
 }
 
 /** `testnotary.json` as `init` writes it, checked with the library's own reading first. */
@@ -137,11 +179,11 @@ function configText(name: PackageManagerName): string {
   return text;
 }
 
-function missingTestScript(project: Project): string | undefined {
-  if (!project.manifest) return "there is no package.json at the top level of the repo, so there is no scripts.test to run";
+function missingTestScript(project: Project): { error: "no_package_json" | "no_test_script"; line: string } | undefined {
+  if (!project.manifest) return { error: "no_package_json", line: "there is no package.json at the top level of the repo, so there is no scripts.test to run" };
   const scripts = project.manifest.scripts as Record<string, unknown> | undefined;
   const test = typeof scripts === "object" && scripts !== null ? scripts.test : undefined;
-  if (typeof test !== "string" || test.trim() === "") return "package.json has no scripts.test to run";
+  if (typeof test !== "string" || test.trim() === "") return { error: "no_test_script", line: "package.json has no scripts.test to run" };
   return undefined;
 }
 
@@ -159,29 +201,15 @@ function appended(before: string | undefined, block: string): string {
 interface NextSteps {
   packageManager: PackageManagerName;
   suite: string;
-  snippet: string;
+  /** The files this `init` wrote, for the setup pull request. */
   written: string[];
-  pasteBlock: { file: string; block: string } | undefined;
   pinned: boolean;
   nodeVersionFile: string | undefined;
 }
 
-/** What `init` prints on stdout: the workflow snippet, then the steps left to the person. */
-function nextSteps(options: NextSteps): string {
+/** The steps left to the person once `init` is done, in order. */
+function nextSteps(options: NextSteps): string[] {
   const x = PACKAGE_MANAGERS[options.packageManager].exec;
-  const lines: string[] = [];
-  if (options.pasteBlock) {
-    lines.push(`To tell agents yourself, add this to ${options.pasteBlock.file}:`, "", options.pasteBlock.block, "");
-  }
-  lines.push(
-    "init does not edit workflows. In your workflow, replace the test step with the Testnotary action",
-    "and keep the job's name, checkout, Node setup and the install before it:",
-    "",
-    "# .github/workflows/ci.yml",
-    options.snippet,
-    "",
-    "Next steps:",
-  );
   const steps: string[] = [];
   if (!options.pinned || !options.nodeVersionFile) {
     const pins = [
@@ -197,7 +225,26 @@ function nextSteps(options: NextSteps): string {
     `Give each agent a sandbox token: ${LINKS.sandboxTokens}`,
     `Before you push: ${x} testnotary run ${options.suite}`,
   );
-  lines.push(...steps.map((step, index) => `  ${index + 1}. ${step}`), "", `The setup guide: ${LINKS.setupGuide}`, "");
+  return steps;
+}
+
+/** What `init` prints on stdout without `--json`: a declined block to paste, the snippet, the next steps. */
+function humanText({ agentFile, workflowSnippet: snippet, nextSteps: steps }: InitResult): string {
+  const lines: string[] = [];
+  if (agentFile.status === "declined") lines.push(`To tell agents yourself, add this to ${agentFile.path}:`, "", agentFile.block, "");
+  lines.push(
+    "init does not edit workflows. In your workflow, replace the test step with the Testnotary action",
+    "and keep the job's name, checkout, Node setup and the install before it:",
+    "",
+    "# .github/workflows/ci.yml",
+    snippet,
+    "",
+    "Next steps:",
+    ...steps.map((step, index) => `  ${index + 1}. ${step}`),
+    "",
+    `The setup guide: ${LINKS.setupGuide}`,
+    "",
+  );
   return lines.join("\n");
 }
 

@@ -201,6 +201,99 @@ describe("testnotary init, interactive", () => {
   });
 });
 
+/** stdout must be exactly one JSON object on one line, and nothing else. */
+function onlyJson(stdout: string): Record<string, unknown> {
+  expect(stdout.endsWith("\n")).toBe(true);
+  expect(stdout.trimEnd().split("\n")).toHaveLength(1);
+  const value: unknown = JSON.parse(stdout);
+  expect(value).toEqual(expect.any(Object));
+  return value as Record<string, unknown>;
+}
+
+describe("testnotary init --json", () => {
+  test("with --yes, stdout is one object saying what was detected, written and what is left to do", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE, ".nvmrc": "24\n" } });
+
+    const result = await world.runCli(["init", "--yes", "--json"], { cwd: repo.dir });
+
+    expect(result.exitCode).toBe(0);
+    const report = onlyJson(result.stdout);
+    expect(report).toEqual({
+      root: repo.dir,
+      packageManager: "pnpm",
+      config: { path: "testnotary.json", status: "written" },
+      suite: { name: "test", command: ["pnpm", "run", "test"] },
+      agentFile: { path: "AGENTS.md", status: "added", block: PNPM_BLOCK },
+      workflowSnippet: workflowSnippet({ packageManager: "pnpm", suite: "test", nodeVersionFile: ".nvmrc", defaultBranch: "main" }),
+      nextSteps: expect.arrayContaining([expect.stringContaining("Install the Testnotary GitHub App"), expect.stringContaining("pnpm exec testnotary login")]),
+    });
+    expect(report.workflowSnippet).toContain("  id-token: write");
+    // The people's lines stay on stderr, prefixed.
+    expect(result.stderr).toContain("testnotary: wrote testnotary.json\n");
+    expect(result.stderr).toContain("testnotary: wrote AGENTS.md\n");
+    expect(parseConfig(await read(repo.dir, "testnotary.json")).ok).toBe(true);
+  });
+
+  test("an existing config and agent block are reported as already there, with the config's own suite", async () => {
+    const repo = await world.fixtureRepo({
+      config: { suites: { unit: { command: ["pnpm", "run", "test:unit"] } } },
+      files: { "package.json": PNPM_PACKAGE, "CLAUDE.md": "Run `pnpm exec testnotary run unit` before you push.\n" },
+    });
+
+    const result = await world.runCli(["init", "--yes", "--json"], { cwd: repo.dir });
+
+    expect(result.exitCode).toBe(0);
+    expect(onlyJson(result.stdout)).toMatchObject({
+      config: { path: "testnotary.json", status: "existed" },
+      suite: { name: "unit", command: ["pnpm", "run", "test:unit"] },
+      agentFile: { path: "CLAUDE.md", status: "present" },
+    });
+  });
+
+  test("interactive answers still leave stdout to the one object, with the questions on stderr", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE } });
+
+    const result = await world.runCli(["init", "--json"], { cwd: repo.dir, input: "n\nn\n" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain('Write testnotary.json with suite "test" (pnpm run test)? [Y/n]');
+    expect(onlyJson(result.stdout)).toMatchObject({
+      config: { path: "testnotary.json", status: "declined" },
+      agentFile: { path: "AGENTS.md", status: "declined", block: PNPM_BLOCK },
+    });
+    expect(await repo.git("status", "--porcelain", "--untracked-files=all")).toBe("");
+  });
+
+  test.each<{ case: string; files: Record<string, string>; expected: Record<string, unknown> }>([
+    { case: "no package.json", files: {}, expected: { error: "no_package_json" } },
+    {
+      case: "no scripts.test",
+      files: { "package.json": manifest({ packageManager: "yarn@4.5.3", scripts: { build: "tsc" } }) },
+      expected: { error: "no_test_script", packageManager: "yarn" },
+    },
+    {
+      case: "a Bun pin",
+      files: { "package.json": manifest({ packageManager: "bun@1.2.0", scripts: { test: "bun test" } }) },
+      expected: { error: "package_manager_unsupported", packageManager: "bun" },
+    },
+    {
+      case: "an invalid testnotary.json",
+      files: { "package.json": PNPM_PACKAGE, "testnotary.json": '{ "sutes": {} }\n' },
+      expected: { error: "config_invalid", packageManager: "pnpm", problems: expect.arrayContaining([expect.stringContaining('unknown key "sutes"')]) },
+    },
+  ])("with $case it exits 1 with an error code and writes nothing", async ({ files, expected }) => {
+    const repo = await world.fixtureRepo({ config: null, files });
+    const before = await repo.git("status", "--porcelain", "--untracked-files=all");
+
+    const result = await world.runCli(["init", "--yes", "--json"], { cwd: repo.dir });
+
+    expect(result.exitCode).toBe(1);
+    expect(onlyJson(result.stdout)).toEqual(expected);
+    expect(result.stderr).toMatch(/^testnotary: /m);
+    expect(await repo.git("status", "--porcelain", "--untracked-files=all")).toBe(before);
+  });
+});
+
 describe("what init prints", () => {
   test("it never touches .github/workflows and prints the snippet and the next steps", async () => {
     const workflow = "name: CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pnpm test\n";
@@ -257,13 +350,14 @@ describe("what init prints", () => {
     expect(await machine.packageManagerCalls()).toEqual([]);
   });
 
-  test("anything but --yes is a usage error", async () => {
+  test("anything but --yes and --json is a usage error, with nothing on stdout", async () => {
     const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE } });
 
-    for (const args of [["init", "unit"], ["init", "--json"], ["init", "--force"]]) {
+    for (const args of [["init", "unit"], ["init", "--force", "--json"]]) {
       const result = await world.runCli(args, { cwd: repo.dir });
       expect(result.exitCode).toBe(64);
-      expect(result.stderr).toContain("usage: testnotary init [--yes]");
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("usage: testnotary init [--yes] [--json]");
     }
     expect(existsSync(join(repo.dir, "testnotary.json"))).toBe(false);
   });
