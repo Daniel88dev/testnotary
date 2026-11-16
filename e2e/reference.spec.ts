@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { FALLBACK_REASONS, GUARDED_DEFAULTS, REFUSAL_CODES, VERIFICATION_RESULTS, WARNING_CODES, matchesGuardedGlob, type FallbackReason } from "@testnotary/core";
 import { expect, test } from "@testnotary/test-world/playwright";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { REASON_LINES } from "../packages/action/src/pr-line.ts";
 import { EXIT } from "../packages/testnotary/src/report.ts";
 
@@ -10,13 +10,18 @@ import { EXIT } from "../packages/testnotary/src/report.ts";
 // pages is the code's list, read here from the packages (or from the CLI and action.yml), never
 // retyped.
 
+/** Every body row of a table, as its cells' text. */
+async function cells(table: Locator): Promise<string[][]> {
+  const rows: string[][] = [];
+  for (const row of await table.locator("tbody tr").all()) rows.push((await row.locator("td").allInnerTexts()).map((text) => text.replace(/\s+/g, " ").trim()));
+  return rows;
+}
+
 /** The rows of a reference table: the first cell's code, then the other cells' text. */
 async function tableRows(page: Page, name: string): Promise<string[][]> {
   const table = page.getByRole("main").getByRole("table", { name });
   await expect(table).toBeVisible();
-  return table.locator("tbody tr").evaluateAll((rows) =>
-    rows.map((row) => Array.from(row.querySelectorAll("td")).map((cell) => (cell.textContent ?? "").replace(/\s+/g, " ").trim())),
-  );
+  return cells(table);
 }
 
 const CODE_PAGES = [
@@ -45,11 +50,7 @@ async function rowsByHeader(page: Page, header: string): Promise<string[][][]> {
   const tables: string[][][] = [];
   for (const table of await page.getByRole("main").locator("table").all()) {
     if ((await table.locator("thead th").first().innerText()).trim() !== header) continue;
-    tables.push(
-      await table.locator("tbody tr").evaluateAll((rows) =>
-        rows.map((row) => Array.from(row.querySelectorAll("td")).map((cell) => (cell.textContent ?? "").replace(/\s+/g, " ").trim())),
-      ),
-    );
+    tables.push(await cells(table));
   }
   return tables;
 }
