@@ -28,6 +28,13 @@ Local Postgres for the web app: `pnpm db:up`, then
 `MIGRATION_DATABASE_URL=postgres://testnotary_migration:testnotary_migration@127.0.0.1:54329/testnotary pnpm db:migrate`
 and run the app with `DATABASE_URL=postgres://testnotary_app:testnotary_app@127.0.0.1:54329/testnotary`.
 
+Releases (the action bundle, the npm package, notices and the license allowlist) are described in
+`docs/runbook/release.md`; `pnpm release:build` builds both locally into the ignored `dist/` folders.
+
 The JSON schema for `testnotary.json` is generated from the parser in `packages/core/src/config.ts`
 into `apps/web/public/schema/v1.json`, which the web app serves at
 `https://testnotary.dev/schema/v1.json`. Run `pnpm schema:write` after changing the config rules.
+
+## License
+
+MIT, see [LICENSE](LICENSE). `https://testnotary.dev` is the only official hosted instance.
