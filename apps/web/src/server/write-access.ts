@@ -2,7 +2,7 @@ import { GitHubUnavailable, collaboratorPermission, installationToken, repositor
 import type { Executor, RepoView } from "./installations.ts";
 import { rememberAccount } from "./tokens.ts";
 
-// Write access, checked live with GitHub every time: at preflight, at upload, and (T-814) at
+// Write access, checked live with GitHub every time: at preflight, at upload, and at
 // verification. Only `admin` or `write` counts; `read` is what anyone has on a public repo.
 // Throws GitHubUnavailable, GitHubDenied or GitHubNotConfigured when GitHub can't say; callers
 // wrap their handler in `withGitHubErrors`, so that is never taken as a no.

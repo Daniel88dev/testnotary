@@ -1,6 +1,6 @@
 // The Drizzle schema. Every table here is a history table: the app role may only INSERT and
-// SELECT (see drizzle/0000_roles.sql), so every state change is a new row. Tables arrive with the
-// tickets that need them; run `pnpm db:generate` after editing this file.
+// SELECT (see drizzle/0000_roles.sql), so every state change is a new row. Run `pnpm db:generate`
+// after editing this file.
 //
 // Where something changes over time (a repo's name or visibility, its settings, an account's
 // login), each change is a row carrying the whole state after it, and the latest row per key is
@@ -202,7 +202,7 @@ const jsonList = (name: string) => jsonb(name).$type<string[]>().notNull();
  * One run, for every outcome. A refused run carries only its refusal, tree and commit (the
  * library sends nothing else); a run whose command ran carries the whole record "What a run
  * uploads" lists. `receivedAt` is the service clock's time of the upload; the other times are the
- * library's. Hard-deleted at 90 days with its attestation (retention ticket).
+ * library's. Hard-deleted at 90 days with its attestation (the retention job).
  */
 export const runs = pgTable(
   "runs",
@@ -288,7 +288,7 @@ export const tokenRevocations = pgTable("token_revocations", {
     .references(() => tokens.id),
   /** The account that revoked it, when an admin or owner did so in the dashboard; null when the bearer did (`logout`, or a new sign-in on the same machine). */
   revokedBy: githubId("revoked_by").references(() => accounts.githubId),
-  /** `logout`, `replaced` (a new sign-in on the same machine), `revoked` (its owner, in the dashboard), `revoked_by_admin` (a repo admin, a sandbox token of that repo), `repo_removed` (a sandbox token whose repo left Testnotary), and whatever later tickets add. */
+  /** `logout`, `replaced` (a new sign-in on the same machine), `revoked` (its owner, in the dashboard), `revoked_by_admin` (a repo admin, a sandbox token of that repo), `repo_removed` (a sandbox token whose repo left Testnotary). */
   reason: text("reason").notNull(),
   at: at(),
 });
@@ -334,7 +334,7 @@ export const oidcTokenUses = pgTable("oidc_token_uses", {
  * OIDC `sha`, `tree` its tree from GitHub's commits API, `iss` the token's issuer. `result` is the
  * action's result (`skip`, `would_skip`, `fallback`, …) and `reason` its fallback reason code.
  * `attestationId` is the attestation matched, also when a later step refused it. `environment` is
- * the runner's, as the action sent it. Hard-deleted at 90 days (retention ticket).
+ * the runner's, as the action sent it. Hard-deleted at 90 days (the retention job).
  */
 export const verifications = pgTable(
   "verifications",
@@ -368,7 +368,7 @@ export const verifications = pgTable(
  * A CI job's report of its tests after a verification: `outcome` (`passed`, `failed`, `refused`),
  * the test command's wall-clock duration and the runner's environment. Append-only, because the
  * app role can't update a verification; a re-run job may add another, and the latest counts. A
- * verification with none reads "outcome unknown". Hard-deleted at 90 days (retention ticket).
+ * verification with none reads "outcome unknown". Hard-deleted at 90 days (the retention job).
  */
 export const jobReports = pgTable(
   "job_reports",
@@ -496,7 +496,7 @@ export const sessionEnds = pgTable("session_ends", {
  * An account deleted with *Delete account* (open decision 3). The app role cannot delete, so the
  * deletion is this row, and it takes effect at once: the account's tokens are revoked with it, its
  * sessions end, and every record made before `at` shows the shared *deleted account* instead of the
- * account. The retention job (T-830) later removes the account's row and login. Signing in again
+ * account. The retention job later removes the account's row and login. Signing in again
  * afterwards starts afresh: records made after `at` are the account's own.
  */
 export const accountDeletions = pgTable(

@@ -45,7 +45,7 @@ function parseNameStatus(output: string): { filename: string; status: string; pr
 }
 
 export const gitRoutes = [
-  // https://docs.github.com/rest/git/commits#get-a-commit-object (github-behaviours §4)
+  // https://docs.github.com/rest/git/commits#get-a-commit-object
   // The service resolves the OIDC `sha` claim through this to get the tree CI is building.
   route("GET", "/repos/:owner/:repo/git/commits/:sha", async (context) => {
     const { params, github } = context;
@@ -95,7 +95,7 @@ export const gitRoutes = [
     });
   }),
 
-  // https://docs.github.com/rest/commits/commits#compare-two-commits (github-behaviours §5)
+  // https://docs.github.com/rest/commits/commits#compare-two-commits
   // `{base}...{head}`: the changes from their merge base to `head`, as GitHub lists them. From a
   // pull request's merge commit to its first parent that is the PR's own files, never the
   // base-only ones. Renames come with `previous_filename`. Like GitHub, at most 300 files for the
@@ -145,7 +145,7 @@ export const gitRoutes = [
     });
   }),
 
-  // https://docs.github.com/rest/repos/contents#get-repository-content (github-behaviours §6)
+  // https://docs.github.com/rest/repos/contents#get-repository-content
   // One file at `?ref=` (default: the default branch), base64. The service reads `testnotary.json`
   // at the built commit's first parent through this. Paths of one segment only; add a route for
   // deeper paths (`.testnotary/allowed_signers`) when a ticket needs one.

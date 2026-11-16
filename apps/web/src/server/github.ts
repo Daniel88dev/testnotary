@@ -37,7 +37,7 @@ function clientId(): string {
   return id;
 }
 
-/** `POST https://github.com/login/device/code` with the App's client id (§11). */
+/** `POST https://github.com/login/device/code` with the App's client id. */
 export async function requestDeviceCode(): Promise<{ deviceCode: string; userCode: string; verificationUri: string; interval: number; expiresIn: number }> {
   const response = await call(`${serviceConfig().githubWebUrl}/login/device/code`, {
     method: "POST",
@@ -63,7 +63,7 @@ export type DevicePoll =
   | { kind: "ended"; error: "expired_token" | "access_denied" }
   | { kind: "error"; message: string };
 
-/** One poll of `POST https://github.com/login/oauth/access_token` for a device code (§11). */
+/** One poll of `POST https://github.com/login/oauth/access_token` for a device code. */
 export async function pollDeviceCode(deviceCode: string): Promise<DevicePoll> {
   const response = await call(`${serviceConfig().githubWebUrl}/login/oauth/access_token`, {
     method: "POST",
@@ -92,7 +92,7 @@ export type GitHubUser =
 export class GitHubDenied extends Error {}
 
 /**
- * The App JWT (§10): RS256 over `{iat, exp, iss: <App id>}`, back-dated 60 s for clock drift and
+ * The App JWT: RS256 over `{iat, exp, iss: <App id>}`, back-dated 60 s for clock drift and
  * valid for 9 minutes. Its times are GitHub's real time, not the service clock: GitHub checks them.
  */
 function appJwt(): string {
@@ -119,7 +119,7 @@ async function failure(response: Response, what: string): Promise<never> {
 
 /**
  * A fresh installation token (`contents: read`, `metadata: read`) for one installation. Bought for
- * each request that needs one; nothing caches it yet.
+ * each request that needs one, never cached.
  */
 export async function installationToken(installationId: number): Promise<string> {
   const response = await call(`${serviceConfig().githubApiUrl}/app/installations/${installationId}/access_tokens`, {
@@ -136,7 +136,7 @@ function withToken(token: string): RequestInit {
   return { headers: { accept: "application/vnd.github+json", authorization: `Bearer ${token}` } };
 }
 
-/** `GET /user/{id}` (§8): the account's login now, or undefined when GitHub knows no such id. */
+/** `GET /user/{id}`: the account's login now, or undefined when GitHub knows no such id. */
 export async function userById(token: string, accountId: number): Promise<{ id: number; login: string } | undefined> {
   const response = await call(`${serviceConfig().githubApiUrl}/user/${accountId}`, withToken(token));
   if (response.status === 404) return undefined;
@@ -147,7 +147,7 @@ export async function userById(token: string, accountId: number): Promise<{ id: 
 }
 
 /**
- * `GET /users/{login}/ssh_signing_keys` (§8): the account's SSH signing keys as `type base64`, or
+ * `GET /users/{login}/ssh_signing_keys`: the account's SSH signing keys as `type base64`, or
  * undefined when GitHub knows no such login. Up to 100, the most a page holds.
  */
 export async function sshSigningKeys(token: string, login: string): Promise<string[] | undefined> {
@@ -162,7 +162,7 @@ export async function sshSigningKeys(token: string, login: string): Promise<stri
 export type CollaboratorPermission = "admin" | "write" | "read" | "none";
 
 /**
- * `GET /repos/{owner}/{repo}/collaborators/{login}/permission` (§7). A login GitHub calls "not a
+ * `GET /repos/{owner}/{repo}/collaborators/{login}/permission`. A login GitHub calls "not a
  * user" reads `none`. Note `read` is what anyone gets on a public repo.
  */
 export async function collaboratorPermission(token: string, fullName: string, login: string): Promise<CollaboratorPermission> {
@@ -199,7 +199,7 @@ export async function repositoryById(token: string, repoId: number): Promise<Liv
 }
 
 /**
- * `GET /repos/{owner}/{repo}/git/commits/{sha}` (§4): the commit's tree and parents, or undefined
+ * `GET /repos/{owner}/{repo}/git/commits/{sha}`: the commit's tree and parents, or undefined
  * when GitHub has no such commit. A commit object never changes, so this answer can't go stale.
  */
 export async function gitCommit(token: string, fullName: string, sha: string): Promise<{ tree: string; parents: string[] } | undefined> {
@@ -216,7 +216,7 @@ export async function gitCommit(token: string, fullName: string, sha: string): P
 }
 
 /**
- * `GET /repos/{owner}/{repo}/compare/{base}...{head}` (§5), which needs only Contents read: every
+ * `GET /repos/{owner}/{repo}/compare/{base}...{head}`, which needs only Contents read: every
  * path `head` changes against `base`, a renamed file's old path included. From a merge commit to
  * its first parent that is the pull request's files. GitHub lists 300 files at most for a whole
  * comparison, so `count` is how many it listed; a caller treats a full list as possibly cut short.
@@ -280,7 +280,7 @@ export async function behindBy(token: string, fullName: string, base: string, he
 }
 
 /**
- * `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}` (§6): one file's text at a commit (with no
+ * `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}`: one file's text at a commit (with no
  * `ref`, on the default branch), or undefined when the commit has no such file.
  */
 export async function fileAt(token: string, fullName: string, path: string, ref?: string): Promise<string | undefined> {

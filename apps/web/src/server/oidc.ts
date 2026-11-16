@@ -6,7 +6,7 @@ import { GitHubUnavailable } from "./github.ts";
 import { logEvent } from "./log.ts";
 import { oidcTokenUses } from "../db/schema.ts";
 
-// The Actions OIDC token a CI job sends with each verification (NOTES/github-behaviours.md §2).
+// The Actions OIDC token a CI job sends with each verification.
 
 /** Tokens live 300 s from `iat`; the service allows 60 s of clock skew on every time claim. */
 const TOKEN_LIFETIME_S = 300;

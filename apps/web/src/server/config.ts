@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ACTIONS_OIDC_ISSUER } from "@testnotary/protocol";
 
-/** What the service needs from its surroundings. Later tickets add fields here. */
+/** What the service needs from its surroundings. */
 export interface ServiceConfig {
   /** Postgres, as the app role: INSERT and SELECT on history tables, nothing else. */
   databaseUrl: string | undefined;

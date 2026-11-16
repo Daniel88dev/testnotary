@@ -2,11 +2,10 @@ import { LINKS, accountName, mismatchesPageUrl, runPageUrl, resolveServiceUrl, t
 import type { RunnerEnv } from "./runner.ts";
 import { isFallbackReason, type JobAnswer } from "./verify.ts";
 
-// The one place that turns the answer a job acts on (and its tests, when they ran) into what the job shows:
-// the PR line (the check run's `output.title` and the job summary's headline), the summary below
-// it, the check run's conclusion and the step's outputs. Later tickets add their lines here:
-// a reason's explanation in REASON_LINES, a new result in `headline`, a new conclusion in
-// `conclusion`.
+// The one place that turns the answer a job acts on (and its tests, when they ran) into what the
+// job shows: the PR line (the check run's `output.title` and the job summary's headline), the
+// summary below it, the check run's conclusion and the step's outputs. A reason's words are in
+// REASON_LINES, a result's line in `headline`, its conclusion in `conclusion`.
 
 /** How the tests went when the step ran them through `exec`. */
 export interface TestsRan {

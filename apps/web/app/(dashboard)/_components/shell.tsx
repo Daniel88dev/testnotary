@@ -6,7 +6,7 @@ import { BookIcon, KeyIcon, Mark, ReposIcon } from "./icons.tsx";
 
 // The dashboard shell's server parts: the icon rail, the account menu, sign-in, the phone top bar.
 
-/** The line under every *Sign in with GitHub* (spec Legal). T-817 writes the pages it links. */
+/** The line under every *Sign in with GitHub*, linking the terms and the privacy policy. */
 export function LegalLine() {
   return (
     <p className="legal-line">

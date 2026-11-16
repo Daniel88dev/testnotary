@@ -1,6 +1,6 @@
 import { githubError, json, route } from "../router.ts";
 
-// Check runs the action makes with the job's `GITHUB_TOKEN` (NOTES/github-behaviours.md §9):
+// Check runs the action makes with the job's `GITHUB_TOKEN`:
 // `POST /repos/{owner}/{repo}/check-runs` needs `checks: write`; a fork pull request's token is
 // read-only, so it gets 403 "Resource not accessible by integration". The run is filed under the
 // `github-actions` App (id 15368). GitHub's display name (`<workflow> / … (<event>)`) is UI and

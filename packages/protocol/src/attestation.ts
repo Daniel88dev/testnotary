@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // The canonical attestation payload (open decision 4). The library builds it for a passed run and
 // uploads its exact bytes; the service stores those bytes as they came and serves them back; the
-// action and a signature (T-829) read the same bytes. Nobody ever rebuilds it from database
+// action and a signature read the same bytes. Nobody ever rebuilds it from database
 // columns, so a signature made over it stays valid as long as the row lives.
 //
 // Format `testnotary.attestation/v1`:

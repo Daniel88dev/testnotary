@@ -1,7 +1,7 @@
 import { githubError, json, route, type RouteContext } from "../router.ts";
 
 // The device flow and the browser sign-in (web application flow) on github.com, and `GET /user` on
-// the API (NOTES/github-behaviours.md §11).
+// the API.
 // The fake serves both hosts at one URL; the paths do not collide.
 
 /** GitHub takes these as a form or as JSON. */

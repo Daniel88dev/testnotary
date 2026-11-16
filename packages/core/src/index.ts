@@ -1,5 +1,5 @@
 // Core rules: tree match, guarded-file globbing, audit draw, token checks, config parsing and the
-// verification decision live here as later tickets add them. The library, the action and the web
+// verification decision. The library, the action and the web
 // app import this package; nothing in it does I/O.
 
 export {

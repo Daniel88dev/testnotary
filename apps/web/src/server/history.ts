@@ -16,8 +16,8 @@ import { currentNames } from "./tokens.ts";
 // at most and nothing is aggregated beyond that. Every account is named through `accountsAsOf`, as
 // of the record's own time, so a deleted account's records read *deleted account*.
 //
-// Overview (T-826), People (T-827) and Settings (T-828) read from here too: `verificationRows`
-// and `runRows` take any filter, `retainedSince()` is the window's start.
+// The Overview, People and Settings read from here too: `verificationRows` and `runRows` take any
+// filter, `retainedSince()` is the window's start.
 
 /** How far back every dashboard list looks: what retention keeps. */
 export const RETAINED_DAYS = 90;

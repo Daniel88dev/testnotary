@@ -19,8 +19,7 @@ export interface AttestationCandidate {
 
 /**
  * What a verification reads from outside, supplied by the service. Every source is asked for only
- * when a step needs it, so a verification that stops early makes no further GitHub calls. Later
- * steps add sources here (changed paths, the audit key, revocations).
+ * when a step needs it, so a verification that stops early makes no further GitHub calls.
  */
 export interface VerificationSources {
   /** The repo's default branch, as GitHub has it now; undefined when GitHub doesn't say. Asked for on a push only. */

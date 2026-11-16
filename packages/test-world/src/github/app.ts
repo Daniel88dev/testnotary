@@ -2,7 +2,7 @@ import { createHmac, generateKeyPairSync, randomBytes, randomUUID, type KeyObjec
 import type { FakeRepo } from "./state.ts";
 
 // The Testnotary GitHub App as the fake GitHub knows it: its client id (device flow), its webhook
-// secret and where its webhooks go. NOTES/github-behaviours.md §11 and §12.
+// secret and where its webhooks go.
 
 export interface FakeApp {
   id: number;
@@ -17,7 +17,7 @@ export interface FakeApp {
   webhookUrl: string | undefined;
   /** The App's private key (PKCS#8 PEM), made per world. The service signs its App JWTs with it. */
   privateKey: string;
-  /** Checks those JWTs (§10). */
+  /** Checks those JWTs. */
   publicKey: KeyObject;
 }
 
@@ -93,7 +93,7 @@ export function installationPayload(app: FakeApp, installation: FakeInstallation
   };
 }
 
-/** POSTs one signed delivery the way GitHub does (headers per the webhook docs, §12). */
+/** POSTs one signed delivery the way GitHub does (headers per the webhook docs). */
 export async function deliver(app: FakeApp, event: string, payload: Record<string, unknown>, options: DeliverOptions = {}): Promise<WebhookDelivery> {
   if (!app.webhookUrl) throw new Error("the fake App has no webhook URL; the world sets it to the service's");
   const id = options.deliveryId ?? randomUUID();

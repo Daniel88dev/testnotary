@@ -16,7 +16,7 @@ import { requireRepoAccess } from "../../../../_lib/viewer.ts";
 // may come from another commit, matched by tree) with the attester beside the commit author. For
 // an audit or a mismatch: both environments side by side (the only place environments are compared),
 // a base-moved flag, *runtime not pinned*, the CI log link and the *explain* slot, an admin-only link
-// to the Mismatches page, where T-828 adds the explanation itself.
+// to the Mismatches page, where the explanation itself is written.
 
 export const metadata: Metadata = { title: "Commit · Testnotary" };
 
