@@ -18,7 +18,7 @@ export interface RunReport {
   warnings: string[];
 }
 
-export const EXIT = { passed: 0, failed: 1, refused: 2, usage: 64 } as const;
+export const EXIT = { passed: 0, failed: 1, refused: 2, notAttested: 3, usage: 64, interrupted: 130 } as const;
 
 /** Writes one of Testnotary's own lines to stderr. */
 export function say(line: string): void {
@@ -52,9 +52,15 @@ export function jsonReport(report: RunReport): Record<string, unknown> {
   };
 }
 
-/** Ends a run: the summary line on stderr, the object on stdout with `--json`; returns the exit code. */
-export function finish(report: RunReport, options: { json: boolean }): number {
+/**
+ * Ends a run: the summary line on stderr, the object on stdout with `--json`; returns the exit
+ * code. An interrupted run exits 130, as a shell reports Ctrl-C. With `requireAttestation`, a pass
+ * that nothing attested exits 3 instead of 0.
+ */
+export function finish(report: RunReport, options: { json: boolean; requireAttestation?: boolean }): number {
   process.stderr.write(`${summaryLine(report)}\n`);
   if (options.json) process.stdout.write(`${JSON.stringify(jsonReport(report))}\n`);
+  if (report.refusal === "interrupted") return EXIT.interrupted;
+  if (report.outcome === "passed" && !report.attested && options.requireAttestation) return EXIT.notAttested;
   return EXIT[report.outcome];
 }

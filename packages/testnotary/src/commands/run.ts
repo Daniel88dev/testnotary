@@ -106,6 +106,14 @@ async function runSuite(ready: Ready, json: boolean): Promise<number> {
       0,
     );
   }
+  if (result.interrupted) {
+    return refuseAfterStart(
+      "interrupted",
+      [`interrupted (Ctrl-C was passed to the command, which exited with ${result.exitCode}), so nothing is attested`],
+      result.exitCode,
+      result.durationMs,
+    );
+  }
   for (const check of AFTER_RUN) {
     const found = await check.check(context);
     if (found) return refuseAfterStart(found.refusal, found.lines, result.exitCode, result.durationMs);

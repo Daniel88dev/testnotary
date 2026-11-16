@@ -19,7 +19,13 @@ export interface SuiteCommandOptions {
 
 export type SuiteCommandResult =
   | { kind: "command_not_found"; program: string }
-  | { kind: "exited"; exitCode: number; durationMs: number };
+  | {
+      kind: "exited";
+      exitCode: number;
+      durationMs: number;
+      /** Ctrl-C (SIGINT) reached Testnotary while the command ran, and was passed on to it. */
+      interrupted: boolean;
+    };
 
 const FORWARDED_SIGNALS: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
 
@@ -43,7 +49,11 @@ export async function runSuiteCommand(options: SuiteCommandOptions): Promise<Sui
       shell: false,
       stdio: ["inherit", options.stdoutToStderr ? 2 : "inherit", "inherit"],
     });
-    const forward = (signal: NodeJS.Signals) => child.kill(signal);
+    let interrupted = false;
+    const forward = (signal: NodeJS.Signals) => {
+      if (signal === "SIGINT") interrupted = true;
+      child.kill(signal);
+    };
     for (const signal of FORWARDED_SIGNALS) process.on(signal, forward);
     try {
       return await new Promise<SuiteCommandResult>((resolvePromise, reject) => {
@@ -53,7 +63,7 @@ export async function runSuiteCommand(options: SuiteCommandOptions): Promise<Sui
         });
         child.on("close", (code, signal) => {
           const exitCode = code ?? 128 + (signal ? (osConstants.signals[signal] ?? 0) : 0);
-          resolvePromise({ kind: "exited", exitCode, durationMs: Math.round(performance.now() - started) });
+          resolvePromise({ kind: "exited", exitCode, durationMs: Math.round(performance.now() - started), interrupted });
         });
       });
     } finally {
