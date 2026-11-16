@@ -46,7 +46,7 @@ A run with no usable key in signature mode still uploads an unsigned attestation
 
 `.testnotary/allowed_signers` is a guarded file: adding a key to it is a pull request your reviewers read, and it never skips its own tests.
 
-## Tokens and credentials
+## Tokens and GitHub access
 
 - Tokens are stored only as hashes. A laptop token starts with `tnl_`, a sandbox token with `tns_`, so a leaked one is easy to spot. The hash is cleared when a token is revoked or expires.
 - A laptop token lives in the system keychain (or a file only you can read), lasts <Fact name="laptopTokenLifetime" /> from its last use, and is refused inside an agent sandbox.

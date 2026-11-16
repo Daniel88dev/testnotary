@@ -2,7 +2,7 @@ import { expect, signIn, test } from "@testnotary/test-world/playwright";
 import type { FakeAccount, FakeRepo, FixtureRepo, Machine, World } from "@testnotary/test-world";
 import type { Page } from "@playwright/test";
 
-// A repo admin cuts off a credential they no longer trust and sees who and what attests: People
+// A repo admin cuts off a token they no longer trust and sees who and what attests: People
 // with each account's counts and tokens, blocking a laptop token there, revoking anyone's sandbox
 // token in Settings, and the owner revoking their own laptop token on the Tokens page. Each voids
 // the token's attestations at once: the next verification falls back with `attestation_revoked`.

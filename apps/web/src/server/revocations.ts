@@ -7,7 +7,7 @@ import { now } from "./config.ts";
 import type { Executor } from "./installations.ts";
 import { currentNames, hashToken, revokeToken, tokenExpiry } from "./tokens.ts";
 
-// Cutting off a credential: a repo admin revokes any of the repo's sandbox tokens, or blocks a
+// Cutting off a token: a repo admin revokes any of the repo's sandbox tokens, or blocks a
 // laptop token from attesting on the repo. Each is one append-only row that takes effect at once:
 // the token's attestations stop counting (`tokenVoided`), and a blocked token's runs on the repo are
 // refused. The callers (the dashboard's server actions) have checked, live with GitHub, that the
