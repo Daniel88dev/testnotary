@@ -4,9 +4,10 @@ import type { FallbackReason } from "@testnotary/core";
 import { database } from "../../../../src/db/client.ts";
 import { isAdmin } from "../../../../src/server/access.ts";
 import { now } from "../../../../src/server/config.ts";
-import { DEFAULT_PERIOD, PERIODS, hasVerifications, overviewOf, setupState, type Overview, type Period } from "../../../../src/server/overview.ts";
+import { DEFAULT_PERIOD, PERIODS, hasVerifications, liveLog, overviewOf, setupState, type Overview, type Period } from "../../../../src/server/overview.ts";
 import { settingsOf } from "../../../../src/server/settings.ts";
 import { NavSelect } from "../../_components/client.tsx";
+import { LiveLog } from "../../_components/live-log.tsx";
 import { one, Panel, query } from "../../_components/history.tsx";
 import { CHART_TITLES, METRICS, OverviewChart, type Metric } from "../../_components/overview-chart.tsx";
 import { Section } from "../../_components/section.tsx";
@@ -45,7 +46,7 @@ export default async function OverviewPage({ params, searchParams }: { params: P
   const metric = (METRICS as readonly string[]).includes(one(search.metric) ?? "") ? (one(search.metric) as Metric) : DEFAULT_METRIC;
   const period = (PERIODS as readonly number[]).includes(Number(one(search.period))) ? (Number(one(search.period)) as Period) : DEFAULT_PERIOD;
   const at = now();
-  const [overview, settings] = await Promise.all([overviewOf(db, repo.id, period, at), settingsOf(db, repo.id)]);
+  const [overview, settings, log] = await Promise.all([overviewOf(db, repo.id, period, at), settingsOf(db, repo.id), liveLog(db, repo.id)]);
   const base = repoHref(repo.fullName, "");
   const href = (values: { metric?: Metric; period?: Period }) => {
     const next = { metric, period, ...values };
@@ -101,6 +102,7 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         <Suites overview={overview} />
         <Reasons overview={overview} fullName={repo.fullName} period={period} />
       </div>
+      <LiveLog fullName={repo.fullName} initial={log} />
     </div>
   );
 }

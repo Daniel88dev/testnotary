@@ -1,7 +1,8 @@
 import { and, asc, eq, gte, sql } from "drizzle-orm";
 import type { RepoMode } from "@testnotary/core";
+import { DELETED_ACCOUNT, accountName } from "@testnotary/protocol";
 import { repoStates, runs, tokens, verifications } from "../db/schema.ts";
-import { retainedSince } from "./history.ts";
+import { retainedSince, verificationRows } from "./history.ts";
 import type { Executor, RepoView } from "./installations.ts";
 import { guardedFilesOf } from "./settings.ts";
 
@@ -53,6 +54,49 @@ export async function setupState(db: Executor, repo: RepoView): Promise<SetupSta
     else installedAt ??= state.at;
   }
   return { installedAt, config: guarded.source, laptopRun: laptop !== undefined, sandboxTokens: sandbox?.n ?? 0, mode: repo.mode };
+}
+
+/** One line of the live verification log: plain values, sent to the browser as JSON. */
+export interface LogLine {
+  id: string;
+  /** ISO time the verification was answered. */
+  at: string;
+  /** The result in the log's words; a recorded mismatch overrides it. */
+  kind: "skip" | "audit" | "run" | "would_skip" | "would_run" | "mismatch";
+  commit: string;
+  suite: string | null;
+  /** Who attested (skips, audits), or the fallback reason code. */
+  note: string;
+}
+
+export const LOG_LINES = 22;
+
+const LOG_KIND: Record<string, LogLine["kind"]> = { skip: "skip", audit: "audit", fallback: "run", would_skip: "would_skip", would_fall_back: "would_run" };
+
+/** The repo's newest retained verifications as log lines, newest first. */
+export async function liveLog(db: Executor, repoId: number, limit = LOG_LINES): Promise<LogLine[]> {
+  const rows = await verificationRows(db, and(eq(verifications.repoId, repoId), gte(verifications.createdAt, retainedSince())), { limit });
+  return rows.map((row) => {
+    const attester = row.attestation?.attester;
+    let note = row.reason && row.result !== "audit" ? row.reason : "";
+    if (attester && (row.result === "skip" || row.result === "would_skip" || row.result === "audit" || row.mismatch)) {
+      const who = accountName(attester.account);
+      note =
+        attester.account.id === DELETED_ACCOUNT.id
+          ? `${who}, ${attester.token.kind} token`
+          : attester.token.kind === "sandbox"
+            ? `${attester.token.name} (sandbox, ${who})`
+            : `${who} ${attester.token.kind}`;
+    }
+    return {
+      id: row.id,
+      at: row.createdAt.toISOString(),
+      kind: row.mismatch ? "mismatch" : (LOG_KIND[row.result] ?? "run"),
+      commit: row.commit,
+      suite: row.suite,
+      note,
+    };
+  });
 }
 
 /** The periods the Overview offers, in days ending today (UTC). The longest is what retention keeps. */

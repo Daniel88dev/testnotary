@@ -234,3 +234,54 @@ test("a repo with no verifications shows the setup checklist with the missing st
   await expect(item(checklist, "testnotary.json on the default branch")).toContainText("Missing");
   await expect(page.getByRole("region", { name: "Set up" })).toContainText("1 of 5 done");
 });
+
+test("the live log shows new verifications without a reload", async ({ page, world }) => {
+  const { user, fixture, repo } = await installedRepo(world, "pavel-live", "signal", PASSING);
+  const pullRequest = async (branch: string, files: Record<string, string>) => {
+    await fixture.checkout("main");
+    await fixture.branch(branch);
+    await fixture.commit(`Change on ${branch}`, files);
+    await fixture.push();
+  };
+  const verify = async (branch: string, number: number) => {
+    const merge = await fixture.testMerge({ base: "main", head: branch, number });
+    const token = await world.github.oidc.tokenFor({ repo, sha: merge.sha, ref: `refs/pull/${number}/merge`, eventName: "pull_request" }, "https://testnotary.dev");
+    const response = await page.request.post("/api/v1/verifications", {
+      headers: { authorization: `Bearer ${token}` },
+      data: { suite: "unit", environment: CI_ENVIRONMENT },
+    });
+    expect(response.status()).toBe(200);
+    return merge.sha;
+  };
+
+  // Shadow mode, no attestation: the job would have fallen back.
+  await pullRequest("first", { "src/a.js": "export const a = 1;\n" });
+  const first = await verify("first", 1);
+
+  await page.goto("/pavel-live/signal");
+  const log = page.getByRole("log", { name: "Live verifications" });
+  await expect(log.getByRole("listitem")).toHaveCount(1);
+  await expect(log.getByRole("listitem").nth(0)).toContainText(new RegExp(`would_run\\s*${first.slice(0, 7)} unit · no_attestation`));
+  await expect(log.getByRole("link", { name: first.slice(0, 7) })).toHaveAttribute("href", `/pavel-live/signal/commit/${first}`);
+  await page.evaluate(() => ((window as unknown as { stayed: boolean }).stayed = true));
+
+  // The developer attests the next pull request and CI asks: the row arrives on the open page.
+  const machine = await world.machine();
+  world.github.deviceFlow.approveNext(user);
+  expect((await world.runCli(["login"], { cwd: machine.home, machine })).exitCode).toBe(0);
+  await pullRequest("second", { "src/b.js": "export const b = 2;\n" });
+  expect((await world.runCli(["run"], { cwd: fixture.dir, machine })).stderr).toMatch(/attested=true/);
+  const second = await verify("second", 2);
+
+  await expect(log.getByRole("listitem")).toHaveCount(2, { timeout: 20_000 });
+  await expect(log.getByRole("listitem").nth(0)).toContainText(new RegExp(`would_skip\\s*${second.slice(0, 7)} unit · @pavel-live laptop`));
+  expect(await page.evaluate(() => (window as unknown as { stayed?: boolean }).stayed)).toBe(true);
+
+  // The log of a private repo is not found for someone GitHub does not let read it.
+  const owner = world.github.addUser({ login: "pavel-private" });
+  const hidden = await world.hostOnGitHub(await world.fixtureRepo({ config: PASSING }), { owner: owner.login, name: "vault", visibility: "private" });
+  await world.github.installApp({ account: { login: owner.login }, repos: [hidden] });
+  await pastHistory(world, hidden.id, [{ daysAgo: 0, suite: "unit", result: "would_fall_back", reason: "no_attestation" }]);
+  expect((await page.request.get("/api/live/pavel-private/vault")).status()).toBe(404);
+  expect((await page.request.get("/api/live/pavel-live/signal")).status()).toBe(200);
+});
