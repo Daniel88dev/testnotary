@@ -174,6 +174,7 @@ export const SNIPPETS: Record<string, (pm: PackageManagerName) => string> = {
       "          suite: unit",
     ].join("\n"),
   "kill-switch": () => workflowHeader({ suite: "unit" }).slice(-2).join("\n"),
+  step: () => ["      - id: testnotary", `        uses: ${ACTION_REF}`, "        with:", "          suite: unit"].join("\n"),
   login,
   "first-run": firstRun,
 };

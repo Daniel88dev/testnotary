@@ -1,4 +1,6 @@
-import { FALLBACK_REASONS, REFUSAL_CODES, WARNING_CODES } from "@testnotary/core";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { FALLBACK_REASONS, GUARDED_DEFAULTS, REFUSAL_CODES, VERIFICATION_RESULTS, WARNING_CODES, matchesGuardedGlob } from "@testnotary/core";
 import { expect, test } from "@testnotary/test-world/playwright";
 import type { Page } from "@playwright/test";
 import { EXIT } from "../packages/testnotary/src/report.ts";
@@ -106,6 +108,45 @@ test("/docs/config documents every key the published schema has, and no other", 
   // Every key has words, and the page links the schema it describes.
   for (const [key, , meaning = ""] of await tableRows(page, "testnotary.json keys")) expect(meaning.length, key).toBeGreaterThan(15);
   await expect(page.getByRole("main")).toContainText(`"$schema": "${schema.$id}"`);
+});
+
+/** The keys of a top-level section of action.yml (`inputs:` or `outputs:`), in its order. */
+async function actionKeys(section: "inputs" | "outputs"): Promise<string[]> {
+  const lines = (await readFile(join(process.cwd(), "action.yml"), "utf8")).split("\n");
+  const keys: string[] = [];
+  for (const line of lines.slice(lines.indexOf(`${section}:`) + 1)) {
+    if (/^\S/.test(line)) break;
+    const key = /^ {2}([\w-]+):/.exec(line);
+    if (key) keys.push(key[1]!);
+  }
+  return keys;
+}
+
+test("/docs/inputs documents exactly the inputs and outputs action.yml declares, and every result and reason", async ({ page }) => {
+  const inputs = await actionKeys("inputs");
+  const outputs = await actionKeys("outputs");
+  expect(inputs).toContain("suite");
+  expect(outputs).toContain("skip");
+
+  await page.goto("/docs/inputs");
+  expect(await firstColumns(page, "Input")).toEqual([inputs]);
+  expect(await firstColumns(page, "Output")).toEqual([outputs]);
+  const main = page.getByRole("main");
+  for (const result of VERIFICATION_RESULTS) await expect(main.locator("code", { hasText: new RegExp(`^${result}$`) }).first()).toBeVisible();
+  await expect(main.getByRole("link", { name: "Fallback reason codes" }).first()).toHaveAttribute("href", "/docs/reasons");
+});
+
+test("/docs/guarded lists exactly the product defaults the verification uses, and a repo's own globs match as it says", async ({ page }) => {
+  await page.goto("/docs/guarded");
+  const main = page.getByRole("main");
+  expect(await main.locator("ul.guarded-defaults code").allInnerTexts()).toEqual([...GUARDED_DEFAULTS]);
+
+  // The worked examples of a repo's own globs: each "matches" / "doesn't match" row agrees with the matcher.
+  const rows = await tableRows(page, "How guarded globs match");
+  expect(rows.length).toBeGreaterThanOrEqual(6);
+  for (const [glob = "", path = "", verdict = ""] of rows) {
+    expect(matchesGuardedGlob(glob, path), `${glob} ${verdict} ${path}`).toBe(verdict === "matches");
+  }
 });
 
 test("/docs/output lists the CLI's exit codes and the fields its --json objects really have", async ({ page, world }) => {
