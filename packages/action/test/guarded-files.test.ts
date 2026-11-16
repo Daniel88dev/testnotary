@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { installLibrary, type FakeRepo, type FixtureRepo } from "@testnotary/test-world";
+import { installLibrary, installedProject, type FakeRepo, type FixtureRepo } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
 
 // A change that could make CI behave differently from the run always runs the tests: a pull request
@@ -28,7 +28,7 @@ let repos = 0;
 /** An installed repo whose base carries `config` and `files`, and a developer with write access signed in on their laptop. */
 async function story(options: { config?: Record<string, unknown>; files?: Record<string, string>; mode?: "shadow" | "enforce" } = {}): Promise<Story> {
   const n = ++repos;
-  const fixture = await world.fixtureRepo({ config: options.config ?? PASSING, files: options.files });
+  const fixture = await world.fixtureRepo({ config: options.config ?? PASSING, files: { ".gitignore": "node_modules/\n", ...options.files } });
   const repo = await world.hostOnGitHub(fixture, { owner: `guard-${n}`, name: "widgets" });
   await world.github.installApp({ account: { login: `guard-${n}`, type: "Organization" }, repos: [repo] });
   const user = world.github.addUser({ login: `guard-dev-${n}` });
@@ -41,7 +41,8 @@ async function story(options: { config?: Record<string, unknown>; files?: Record
     fixture,
     repo,
     async attest() {
-      const result = await world.runCli(["run"], { cwd: fixture.dir, machine });
+      // The laptop runs Node 24, the Node the stories' .nvmrc and .node-version name.
+      const result = await world.runCli(["run"], { cwd: fixture.dir, machine, system: { node: "v24.11.0", lts: "Krypton" } });
       expect(result.stderr).toMatch(/attested=true/);
       expect(result.exitCode).toBe(0);
     },
@@ -61,14 +62,33 @@ async function enforce(repo: FakeRepo) {
  * test merge commit for it. The repo's audit key version is one under which the attested tree is
  * not drawn for an audit: these tests are about guarded files, and audits have their own.
  */
-async function attestedPullRequest(s: Story, files: Record<string, string | null>) {
+async function attestedPullRequest(s: Story, files: Record<string, string | null>, installed?: (dir: string) => Record<string, string | Uint8Array>) {
   await s.fixture.branch("feature");
   await s.fixture.commit("Change things", files);
   await s.fixture.push();
+  // A changed lockfile is installed on the laptop before the run, or the run is refused install_stale.
+  if (installed) await s.fixture.write(installed(s.fixture.dir));
   await s.attest();
   await world.audits.forbid(s.repo);
   return s.fixture.testMerge({ base: "main", head: "feature" });
 }
+
+const PNPM = installedProject("pnpm");
+const NPM = installedProject("npm");
+
+/**
+ * How a pull request changes a guarded file so that the laptop's run still passes the environment
+ * floor (anything else: "changed"): a lockfile it installed, a Node version file naming the
+ * laptop's Node, and a stray bun.lock in a repo whose package.json pins pnpm.
+ */
+const CHANGES: Record<string, { content: string; base?: Record<string, string>; installed?: (dir: string) => Record<string, string | Uint8Array> }> = {
+  "testnotary.json": { content: `${JSON.stringify({ ...PASSING, guarded: [] })}\n` },
+  "pnpm-lock.yaml": { content: PNPM.files["pnpm-lock.yaml"]!, installed: PNPM.installed },
+  "package-lock.json": { content: NPM.files["package-lock.json"]!, installed: NPM.installed },
+  "bun.lock": { content: "changed\n", base: { "package.json": '{ "name": "widgets", "private": true, "packageManager": "pnpm@10.34.9" }\n' } },
+  ".nvmrc": { content: "24\n" },
+  ".node-version": { content: "24\n" },
+};
 
 /** The PR line: the bold line of the job summary. */
 function line(summary: string): string {
@@ -91,9 +111,9 @@ describe("a pull request that changes a product-default guarded file falls back,
     ".node-version",
     ".tool-versions",
   ])("%s", async (path) => {
-    const s = await story();
-    const content = path === "testnotary.json" ? `${JSON.stringify({ ...PASSING, guarded: [] })}\n` : "changed\n";
-    const merge = await attestedPullRequest(s, { "src/a.js": "export const a = 1;\n", [path]: content });
+    const change = CHANGES[path] ?? { content: "changed\n" };
+    const s = await story({ files: change.base });
+    const merge = await attestedPullRequest(s, { "src/a.js": "export const a = 1;\n", [path]: change.content }, change.installed);
 
     const result = await s.gate(merge.sha);
 
@@ -125,7 +145,7 @@ describe("a pull request that changes a product-default guarded file falls back,
 
   test("in shadow mode it would have fallen back, naming the file", async () => {
     const s = await story({ mode: "shadow" });
-    const merge = await attestedPullRequest(s, { "pnpm-lock.yaml": "changed\n" });
+    const merge = await attestedPullRequest(s, { "pnpm-lock.yaml": PNPM.files["pnpm-lock.yaml"]! }, PNPM.installed);
 
     const result = await s.gate(merge.sha);
 
