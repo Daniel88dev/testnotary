@@ -77,7 +77,10 @@ connections above 70% for a day, or a security review that asks for it. The code
 5. **Everything else.** `terraform apply -var-file=production.tfvars`. App Runner's first
    deployment fails its health check until the database secret is filled; that is expected.
 6. **Database.** From a bastion session in the VPC, run `infra/database/bootstrap.sql` as the
-   instance's master user (passwords as psql variables, see the file's header).
+   instance's master user (passwords as psql variables, see the file's header). On the shared
+   instance it refuses to start while another database (flexi-day's) still grants `CONNECT` to
+   `PUBLIC`, naming it: that product's owner revokes it first (T-802), then run it again. Launch
+   condition 2's queries confirm the result.
 7. **Secrets.** Put each value into the entry named in the `secret_names` output, for example
    `aws secretsmanager put-secret-value --secret-id testnotary/production/database-url --secret-string file://-`
    (read from stdin, so the value never sits in shell history):
