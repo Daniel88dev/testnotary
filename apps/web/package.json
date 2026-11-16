@@ -14,6 +14,7 @@
     "./tokens": "./src/server/tokens.ts",
     "./revocations": "./src/server/revocations.ts",
     "./settings": "./src/server/settings.ts",
+    "./retention": "./src/server/retention.ts",
     "./migrate": "./src/db/migrate.ts",
     "./package.json": "./package.json"
   },

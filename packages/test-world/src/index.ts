@@ -22,6 +22,7 @@ import { closeDatabase, database } from "@testnotary/web/db";
 import { blockLaptopToken, revokeRepoSandboxToken, tokenIdOf } from "@testnotary/web/revocations";
 import { changeRepoSettings, explainMismatch, mismatchIdOfVerification, type SettingsChange, type SettingsRequest } from "@testnotary/web/settings";
 import { issueSandboxToken, rememberAccount } from "@testnotary/web/tokens";
+import { retentionDatabase, runRetention, type RetentionSummary } from "@testnotary/web/retention";
 import type { FakeAccount } from "./github/app.ts";
 import { WORLD_AUDIT_MASTER_KEY, worldAudits, type WorldAudits } from "./audits.ts";
 import { makeSshKey, type SshKeyPair, type SshKeyType } from "./ssh-keys.ts";
@@ -168,6 +169,12 @@ export interface World {
    * Stopped when the world closes.
    */
   compromisedService<V extends Record<string, unknown>>(forge: (verification: V) => V): Promise<string>;
+  /**
+   * One pass of the retention job, as its schedule runs it in production: the service's own job
+   * code, connected as the retention role, deciding by the world clock (or `at`, for a `next`
+   * world, whose service keeps real time). Answers how many rows of each kind it deleted.
+   */
+  runRetentionJob(options?: { at?: Date }): Promise<RetentionSummary>;
   /** Runs `testnotary <args>` as a process, pointed at this world's service. */
   runCli(args: string[], options: RunOptions): Promise<ProcessResult>;
   /** Runs the action's entry point as a process in a simulated runner. */
@@ -360,6 +367,9 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
         const proxy = await startCompromisedService(service.url, forge);
         cleanups.push(() => proxy.close());
         return proxy.url;
+      },
+      async runRetentionJob(jobOptions = {}) {
+        return runRetention(retentionDatabase(db.connect("retention")), jobOptions.at ?? clock.now());
       },
       async runCli(args, runOptions) {
         const machine = runOptions.machine ?? (await createMachine(tmp));

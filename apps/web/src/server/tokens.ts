@@ -143,7 +143,7 @@ export function tokenRejected(): Response {
 
 /** Ends a token for good. Revoking it twice is harmless. */
 export async function revokeToken(db: Executor, tokenId: string, reason: string, revokedBy: number | null = null): Promise<void> {
-  await db.insert(tokenRevocations).values({ tokenId, reason, revokedBy }).onConflictDoNothing();
+  await db.insert(tokenRevocations).values({ tokenId, reason, revokedBy, at: now() }).onConflictDoNothing();
 }
 
 /** When the token expires as of now: a sandbox token's fixed expiry, a laptop token's 90 days from its latest use. */

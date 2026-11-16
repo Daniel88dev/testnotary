@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { INITIAL_REPO_SETTINGS, type RepoMode } from "@testnotary/core";
 import type { Database } from "../db/client.ts";
+import { now } from "./config.ts";
 import { installationEvents, installations, repoSettingChanges, repoStates, repos, tokenRevocations, tokens } from "../db/schema.ts";
 
 // Installations and their repos, as the App's webhooks leave them. Every change is a new row (the
@@ -211,7 +212,7 @@ async function revokeSandboxTokens(db: Executor, repoId: number): Promise<void> 
   if (live.length === 0) return;
   await db
     .insert(tokenRevocations)
-    .values(live.map((token) => ({ tokenId: token.id, reason: "repo_removed", revokedBy: null })))
+    .values(live.map((token) => ({ tokenId: token.id, reason: "repo_removed", revokedBy: null, at: now() })))
     .onConflictDoNothing();
 }
 
