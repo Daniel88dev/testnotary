@@ -302,6 +302,10 @@ test("the docs use only real codes, the checks-list shape and none of the banned
     ...CLI_ERRORS,
     "pull_request",
     "merge_group",
+    "pull_request_target",
+    "workflow_run",
+    "issue_comment",
+    "workflow_dispatch",
     "node_modules",
     "npm_config_user_agent",
   ]);
