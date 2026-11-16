@@ -98,9 +98,12 @@ connections above 70% for a day, or a security review that asks for it. The code
 9. **First deploy.** Run the Deploy workflow on `main` (or push to `main`). It migrates, then moves
    App Runner to the new image; `https://<service_url>/api/v1/health` answers
    `{"status":"ok","database":"ok"}`.
-10. **Logs.** Set 30-day retention on App Runner's log groups once they exist:
-    `aws logs put-retention-policy --log-group-name /aws/apprunner/testnotary-production/<id>/application --retention-in-days 30`
-    (and `…/service`). The jobs' log group already keeps 30 days.
+10. **Logs.** Terraform manages App Runner's two log groups (`…/application` and `…/service`) with
+    30-day retention, as it does the jobs' group. If the apply in step 5 failed on one because App
+    Runner had already created it, import it and apply again:
+    `terraform import 'aws_cloudwatch_log_group.apprunner["application"]' /aws/apprunner/<service name>/<service id>/application`
+    (and `["service"]`). `aws logs describe-log-groups --log-group-name-prefix /aws/apprunner/` then
+    shows `retentionInDays: 30` for both.
 
 ## 3. Operating it
 

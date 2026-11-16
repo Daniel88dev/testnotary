@@ -148,3 +148,13 @@ resource "aws_apprunner_custom_domain_association" "web" {
   domain_name          = var.custom_domain
   enable_www_subdomain = false
 }
+
+# App Runner's own log groups, with the 30 days the privacy policy promises for request logs (which
+# carry IPs). App Runner names them after the service and writes to them from its first deployment;
+# Terraform creates them right after the service, so they keep 30 days from the start. If App Runner
+# got there first, import each one (docs/runbook/hosting.md, step 10).
+resource "aws_cloudwatch_log_group" "apprunner" {
+  for_each          = toset(["application", "service"])
+  name              = "/aws/apprunner/${aws_apprunner_service.web.service_name}/${aws_apprunner_service.web.service_id}/${each.key}"
+  retention_in_days = 30
+}
