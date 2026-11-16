@@ -38,6 +38,8 @@ export interface RunContext {
   root: string;
   /** `HEAD` when the run was prepared. */
   checkout: { commit: string; tree: string };
+  /** `git status` (`treeStatus()`) when the run was prepared, to compare with after the command. */
+  statusBefore: string | undefined;
   origin: {
     url: string;
     /** `owner/name` when `origin` is a github.com repo; the service knows repos by it. */

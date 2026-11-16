@@ -17,6 +17,7 @@ import { laptopTokenInSandbox } from "./laptop-token-in-sandbox.ts";
 import { extraArguments } from "./extra-arguments.ts";
 import { historyDependentCommand } from "./history-dependent-command.ts";
 import { submodules } from "./submodules.ts";
+import { treeChangedDuringRun } from "./tree-changed-during-run.ts";
 
 // Imports for the platform and environment floor checks (T-815).
 
@@ -40,11 +41,11 @@ export const BEFORE_START: readonly RunCheck[] = [
 
 /**
  * After the command exited, before the upload (T-816: `tree_changed_during_run`). A refusal here
- * ends the run *refused* although the command ran. `context.checkout` still holds `HEAD` as it was
- * before the start; a check that needs more of the before-state (such as `git status`) adds a
- * field to `RunContext` and fills it in `../locate.ts`.
+ * ends the run *refused* although the command ran. `context.checkout` and `context.statusBefore`
+ * hold `HEAD` and `git status` as they were before the start (filled in `../locate.ts`).
  */
 export const AFTER_RUN: readonly RunCheck[] = [
   // T-816: `tree_changed_during_run`.
+  treeChangedDuringRun,
 
 ];

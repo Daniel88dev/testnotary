@@ -511,6 +511,19 @@ describe("what isn't a dirty tree", () => {
   });
 });
 
+describe("what doesn't change the tree during a run", () => {
+  test("a command writing its output into an ignored directory attests", async () => {
+    const s = await suite({ after: `require("node:fs").mkdirSync("coverage", { recursive: true }); require("node:fs").writeFileSync("coverage/lcov.info", "TN:\\n");` });
+    const dev = await developer({ suite: s, files: { ".gitignore": "coverage/\n" } });
+
+    const result = await world.runCli(["run", "--json"], { cwd: dev.fixture.dir, machine: dev.machine });
+
+    expect(s.started()).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "passed", attested: true });
+  });
+});
+
 describe("what isn't a history-dependent command", () => {
   test("a turbo package filter without a git range, and words that only look alike, run as usual", async () => {
     const command = ["node", "-e", "process.exit(0)", "--", "--filter=@acme/web", "--changed-files-report", "affected"];
