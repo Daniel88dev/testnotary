@@ -228,6 +228,28 @@ export async function commitVerifications(db: Executor, repoId: number, commit: 
   return verificationRows(db, and(eq(verifications.repoId, repoId), eq(verifications.commit, commit)));
 }
 
+/**
+ * Which of these runs, and which of these commits' verifications, the repo still holds: retention
+ * deletes them at 90 days, while the mismatches that name them stay. Their pages exist only for these.
+ */
+export async function stillRetained(db: Executor, repoId: number, wanted: { runIds: string[]; commits: string[] }): Promise<{ runs: Set<string>; commits: Set<string> }> {
+  const [runRows, commitRows] = await Promise.all([
+    wanted.runIds.length === 0
+      ? []
+      : db
+          .select({ id: runs.id })
+          .from(runs)
+          .where(and(eq(runs.repoId, repoId), inArray(runs.id, wanted.runIds))),
+    wanted.commits.length === 0
+      ? []
+      : db
+          .selectDistinct({ commit: verifications.commit })
+          .from(verifications)
+          .where(and(eq(verifications.repoId, repoId), inArray(verifications.commit, wanted.commits))),
+  ]);
+  return { runs: new Set(runRows.map((row) => row.id)), commits: new Set(commitRows.map((row) => row.commit)) };
+}
+
 /** What the commit page asks GitHub: who wrote the commit, and for audits and mismatches whether the base moved. */
 export interface CommitFacts {
   /** The commit's author; for GitHub's test merge commit on a pull request, the pull request head's. Undefined when GitHub could not be asked. */

@@ -118,8 +118,16 @@ connections above 70% for a day, or a security review that asks for it. The code
   `node scripts/ops.ts rotate-audit-key <owner/repo> --reason "…"` or
   `node scripts/ops.ts rotate-audit-key --all --reason "…"`. Without `audit-master-key` the service
   draws no audit, and every verification that would skip answers 503 (CI runs its tests).
-- **Retention job**: the schedule `testnotary-retention` exists, disabled. When the retention job
-  ships, set `retention_job_enabled = true` (and `retention_command` if its path differs) and apply.
+- **Retention job**: the schedule `testnotary-retention` runs `node apps/web/dist/scripts/retention.mjs`
+  nightly (03:30 UTC) as the retention role, from the latest task-definition revision the deploy
+  registered. It deletes runs, attestations, verifications and job reports at 90 days; a repo's
+  data (mismatches included) 30 days after it left Testnotary; tokens 90 days after revocation or
+  expiry once nothing kept points at them, and their hashes at once; a deleted account's login at
+  once and its row once nothing names it. Each pass is one transaction and logs one JSON line to
+  the jobs' log group (`"retention":"done"` with counts per kind); a failed pass logs
+  `retention failed: …`, exits 1 and deletes nothing, and the next night catches up. To pause
+  deletions, set `retention_job_enabled = false` and apply. To run one pass by hand, start the
+  `testnotary-retention` task on the jobs cluster with the same network settings as the schedule.
 - **Custom domain**: set `custom_domain`, apply, and create the records from
   `custom_domain_validation_records`. Before `testnotary.dev` is bought, a subdomain of an existing
   domain works, with clients pointed at it through `TESTNOTARY_URL`.
