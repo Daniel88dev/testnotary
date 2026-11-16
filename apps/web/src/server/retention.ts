@@ -9,10 +9,15 @@ import {
   accountSuspensions,
   accounts,
   attestations,
+  auditKeyVersions,
+  installationEvents,
+  installations,
   jobReports,
   mismatchExplanations,
   mismatches,
   repoSettingChanges,
+  repoStates,
+  repos,
   runs,
   tokenBlocks,
   tokenRenames,
@@ -37,9 +42,17 @@ import { tokenExpiry } from "./tokens.ts";
 // - a deleted account loses its login at once and its row once nothing names it.
 
 const DAY_MS = 86_400_000;
+/** How long a repo's data outlives its leaving: a reinstall before then gets its history back. */
+export const DEPARTED_DAYS = 30;
 
 /** How many rows of each kind one pass deleted. */
 export interface RetentionSummary {
+  /** Repos deleted with all their data, 30 days after they left. */
+  repos: number;
+  /** Mismatches deleted with their repo (mismatches are otherwise kept while the repo is installed). */
+  mismatches: number;
+  /** Uninstalled installations no repo names any more. */
+  installations: number;
   runs: number;
   attestations: number;
   verifications: number;
@@ -63,12 +76,102 @@ export function retentionDatabase(connection: postgres.Sql): Database {
 export async function runRetention(retention: Database, at: Date): Promise<RetentionSummary> {
   return retention.transaction(async (tx) => {
     const cutoff = new Date(at.getTime() - RETAINED_DAYS * DAY_MS);
+    const departed = await deleteDepartedRepos(tx, new Date(at.getTime() - DEPARTED_DAYS * DAY_MS));
     const pruned = await pruneHistory(tx, cutoff);
     const tokenHashes = await clearSpentTokenHashes(tx, at);
     const spentTokens = await deleteSpentTokens(tx, cutoff);
     const deleted = await forgetDeletedAccounts(tx);
-    return { ...pruned, tokenHashes, tokens: spentTokens, ...deleted };
+    return { ...departed, ...pruned, tokenHashes, tokens: spentTokens, ...deleted };
   });
+}
+
+/**
+ * When the repo left Testnotary, if it is out now: the first of the rows since it was last in the
+ * installation, or its installation's uninstall when GitHub's uninstall named no repos. Undefined
+ * while it is installed, or only suspended (a suspension is not leaving).
+ */
+async function leftAt(tx: Tx, repoId: number, latest: { installed: boolean; installationId: number }): Promise<Date | undefined> {
+  if (!latest.installed) {
+    const [lastIn] = await tx
+      .select({ id: repoStates.id })
+      .from(repoStates)
+      .where(and(eq(repoStates.repoId, repoId), eq(repoStates.installed, true)))
+      .orderBy(desc(repoStates.id))
+      .limit(1);
+    const [left] = await tx
+      .select({ at: repoStates.at })
+      .from(repoStates)
+      .where(and(eq(repoStates.repoId, repoId), gt(repoStates.id, lastIn?.id ?? 0)))
+      .orderBy(repoStates.id)
+      .limit(1);
+    return left?.at;
+  }
+  const [event] = await tx
+    .select({ action: installationEvents.action, at: installationEvents.at })
+    .from(installationEvents)
+    .where(eq(installationEvents.installationId, latest.installationId))
+    .orderBy(desc(installationEvents.id))
+    .limit(1);
+  return event?.action === "deleted" ? event.at : undefined;
+}
+
+/**
+ * Every repo that left Testnotary (uninstalled, removed, deleted, transferred) before `cutoff` and
+ * has not come back: all of its data goes, from its mismatches to its own row, so a later install
+ * starts afresh. Its sandbox tokens go with it (they were revoked when it left); its people's
+ * laptop tokens are theirs and stay. Then the installations uninstalled before `cutoff` that no
+ * repo row names any more.
+ */
+async function deleteDepartedRepos(tx: Tx, cutoff: Date): Promise<{ repos: number; mismatches: number; installations: number }> {
+  const latest = await tx
+    .selectDistinctOn([repoStates.repoId], { repoId: repoStates.repoId, installed: repoStates.installed, installationId: repoStates.installationId })
+    .from(repoStates)
+    .orderBy(repoStates.repoId, desc(repoStates.id));
+  const departed: number[] = [];
+  for (const state of latest) {
+    const left = await leftAt(tx, state.repoId, state);
+    if (left && left < cutoff) departed.push(state.repoId);
+  }
+  let mismatchCount = 0;
+  if (departed.length > 0) {
+    const repoMismatches = tx.select({ id: mismatches.id }).from(mismatches).where(inArray(mismatches.repoId, departed));
+    await tx.delete(mismatchExplanations).where(inArray(mismatchExplanations.mismatchId, repoMismatches));
+    mismatchCount = (await tx.delete(mismatches).where(inArray(mismatches.repoId, departed)).returning({ id: mismatches.id })).length;
+    const repoVerifications = tx.select({ id: verifications.id }).from(verifications).where(inArray(verifications.repoId, departed));
+    await tx.delete(jobReports).where(inArray(jobReports.verificationId, repoVerifications));
+    await tx.delete(verifications).where(inArray(verifications.repoId, departed));
+    await tx.delete(attestations).where(inArray(attestations.repoId, departed));
+    await tx.delete(runs).where(inArray(runs.repoId, departed));
+    await tx.delete(tokenBlocks).where(inArray(tokenBlocks.repoId, departed));
+    const sandboxTokens = await tx.select({ id: tokens.id }).from(tokens).where(inArray(tokens.repoId, departed));
+    await deleteTokens(
+      tx,
+      sandboxTokens.map((token) => token.id),
+    );
+    await tx.delete(auditKeyVersions).where(inArray(auditKeyVersions.repoId, departed));
+    await tx.delete(repoSettingChanges).where(inArray(repoSettingChanges.repoId, departed));
+    await tx.delete(repoStates).where(inArray(repoStates.repoId, departed));
+    await tx.delete(repos).where(inArray(repos.githubId, departed));
+  }
+
+  const uninstalled = await tx
+    .selectDistinctOn([installationEvents.installationId], { installationId: installationEvents.installationId, action: installationEvents.action, at: installationEvents.at })
+    .from(installationEvents)
+    .orderBy(installationEvents.installationId, desc(installationEvents.id));
+  const gone = uninstalled.filter((event) => event.action === "deleted" && event.at < cutoff).map((event) => event.installationId);
+  let installationCount = 0;
+  if (gone.length > 0) {
+    const unnamed = await tx
+      .select({ id: installations.githubId })
+      .from(installations)
+      .where(and(inArray(installations.githubId, gone), notExists(tx.select({ one: sql`1` }).from(repoStates).where(eq(repoStates.installationId, installations.githubId)))));
+    const ids = unnamed.map((row) => row.id);
+    if (ids.length > 0) {
+      await tx.delete(installationEvents).where(inArray(installationEvents.installationId, ids));
+      installationCount = (await tx.delete(installations).where(inArray(installations.githubId, ids)).returning({ id: installations.githubId })).length;
+    }
+  }
+  return { repos: departed.length, mismatches: mismatchCount, installations: installationCount };
 }
 
 /**

@@ -158,7 +158,7 @@ export async function knownInstallation(db: Executor, installationId: number): P
 }
 
 export async function recordInstallationEvent(db: Executor, installationId: number, action: string, deliveryId: string): Promise<void> {
-  await db.insert(installationEvents).values({ installationId, action, deliveryId });
+  await db.insert(installationEvents).values({ installationId, action, deliveryId, at: now() });
 }
 
 /**
@@ -178,6 +178,7 @@ export async function recordRepoState(
     installed: input.installed,
     change: input.change,
     deliveryId: input.deliveryId,
+    at: now(),
   });
   if (!input.installed) await revokeSandboxTokens(db, input.repo.id);
   if (input.change !== "added") return;
@@ -195,6 +196,7 @@ export async function recordRepoState(
     sandboxAuditOneIn: current?.sandboxAuditOneIn ?? INITIAL_REPO_SETTINGS.sandboxAuditOneIn,
     changedBy: null,
     reason: current ? "reinstalled" : "installed",
+    at: now(),
   });
 }
 
