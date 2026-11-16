@@ -75,11 +75,15 @@ export function presentJob(env: RunnerEnv, verdict: Verdict, tests: TestsRan | n
 
 /**
  * A mismatch: CI's tests failed on a tree an attestation said passed, on an audit or on a shadow
- * *would skip*. A refused `exec` ran no tests, so it is none; nor is a cancelled job, which never
- * gets here.
+ * *would skip*, as the service answered it. A *would skip* the signature check turned into a
+ * fallback still is one (the attested tree failed); a job whose checkout was not the verified tree
+ * is none (it tested something else). A refused `exec` ran no tests, so it is none; nor is a
+ * cancelled job, which never gets here.
  */
 export function isMismatch(verdict: Verdict, tests: TestsRan | null): boolean {
-  return tests?.outcome === "failed" && (verdict.result === "audit" || verdict.result === "would_skip");
+  if (tests?.outcome !== "failed") return false;
+  if (verdict.result === "audit" || verdict.result === "would_skip") return true;
+  return verdict.result === "would_fall_back" && verdict.record?.result === "would_skip" && verdict.reason !== "no_attestation";
 }
 
 /**
@@ -112,7 +116,7 @@ function headline(verdict: Verdict, tests: TestsRan | null): string {
     case "fallback":
       return `Fell back: ${reason(verdict)}`;
     case "would_fall_back":
-      return `Would have fallen back: ${reason(verdict)}`;
+      return `${mismatch ? "Mismatch: would have fallen back" : "Would have fallen back"}: ${reason(verdict)}`;
     case "audit":
       return `${mismatch ? "Mismatch: the audit failed" : "Audit"} · ${age}`;
   }

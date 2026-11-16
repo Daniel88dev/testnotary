@@ -49,15 +49,18 @@ const GITHUB_TIMEOUT_MS = 10_000;
 /**
  * The verdict the job acts on: a `skip` in a repo whose base config requires signatures stands
  * only when the attestation's signature passes the check; otherwise the job falls back (keeping
- * the service's record, so the tests still report against it). Any other verdict is returned as
+ * the service's record, so the tests still report against it). Shadow mode previews the same
+ * check: a *would skip* whose signature would fail reads *would have fallen back* with the
+ * signature's reason, so it never counts as evidence for enforce. Any other verdict is returned as
  * it is: only a skip is ever trusted.
  */
 export async function checkSkip(env: RunnerEnv, verdict: Verdict, suiteInput: string | null): Promise<Verdict> {
-  if (verdict.result !== "skip") return verdict;
+  if (verdict.result !== "skip" && verdict.result !== "would_skip") return verdict;
   const workspace = env.GITHUB_WORKSPACE || process.cwd();
   const mode = await signatureRequirement(env, workspace);
   if (mode.kind === "off") return verdict;
-  const fallBack = (reason: FallbackReason, detail: string | null = null): Verdict => ({ result: "fallback", reason, detail, record: verdict.record });
+  const result = verdict.result === "skip" ? "fallback" : "would_fall_back";
+  const fallBack = (reason: FallbackReason, detail: string | null = null): Verdict => ({ result, reason, detail, record: verdict.record });
   if (mode.kind === "unchecked") return fallBack(mode.problem.reason, mode.problem.detail);
   const attestation = verdict.record?.attestation;
   if (!attestation?.signature || attestation.payload === null) return fallBack("signature_missing");
