@@ -1,7 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { COMPARE_FILE_LIMIT, CONFIG_FILE, decideVerification, type AttestationCandidate } from "@testnotary/core";
 import {
-  DELETED_ACCOUNT,
   VERIFY_REFUSALS,
   decodeAttestationPayload,
   type JobReport,
@@ -18,7 +17,7 @@ import { GitHubUnavailable, changedPaths, fileAt, gitCommit, installationToken }
 import { apiError } from "./http.ts";
 import { installedRepo, latestRepoState, type Executor, type RepoView } from "./installations.ts";
 import { acceptActionsToken, type ActionsClaims } from "./oidc.ts";
-import { accountAsOf } from "./accounts.ts";
+import { accountAsOf, shownPayload, withheld } from "./accounts.ts";
 import { auditKeyOf } from "./audits.ts";
 import { mismatchOfVerification, mismatchViews, recordMismatch } from "./mismatches.ts";
 import { tokenVoided } from "./revocations.ts";
@@ -164,7 +163,7 @@ export async function readVerification(db: Executor, id: string, repoId: number)
   if (!row) return undefined;
   const { verification, attestation, run, token } = row;
   const attester = attestation ? await accountAsOf(db, attestation.accountId, attestation.createdAt) : undefined;
-  const withheld = attester?.id === DELETED_ACCOUNT.id;
+  const hidden = attester !== undefined && withheld(attester);
   const [report] = await db
     .select()
     .from(jobReports)
@@ -188,13 +187,13 @@ export async function readVerification(db: Executor, id: string, repoId: number)
           id: attestation.id,
           run: { id: attestation.runId, environment: run?.environment ?? null, session: run?.session ?? null },
           format: attestation.format,
-          payload: withheld ? null : attestation.payload.toString("utf8"),
-          signature: withheld ? null : (attestation.signature ?? null),
+          payload: shownPayload(attester!, attestation.payload),
+          signature: hidden ? null : (attestation.signature ?? null),
           endedAt: attestation.endedAt.toISOString(),
           attester: {
             account: attester!,
             // A token's name is free text its owner picked, so it is withheld with the account.
-            token: { kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: token && !withheld ? ((await currentNames(db, [token])).get(token.id) ?? token.name) : "" },
+            token: { kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: token && !hidden ? ((await currentNames(db, [token])).get(token.id) ?? token.name) : "" },
           },
         }
       : null,

@@ -70,4 +70,12 @@ test("a deleted account's mismatch reads deleted account", async ({ page, world 
   await expect(open.getByRole("article")).toContainText("deleted account, laptop token");
   await expect(open.getByRole("article")).not.toContainText("mira-mismatch");
   await expect(page.locator("main")).not.toContainText(new RegExp(`"account":\\s*${mira.id}\\b`));
+
+  // The commit page shows the verification's attestation: neither it nor the HTML behind it (the
+  // data the browser's components start from) carries her id.
+  await page.goto(`/mira-mismatch/kiln/commit/${merge.sha}`);
+  await expect(page.getByLabel("Attestation payload").first()).toContainText("(deleted account)");
+  const html = await (await page.request.get(`/mira-mismatch/kiln/commit/${merge.sha}`)).text();
+  expect(html).toContain(merge.sha.slice(0, 7));
+  expect(html).not.toMatch(new RegExp(`account\\\\?"\\s*:\\s*${mira.id}\\b`));
 });

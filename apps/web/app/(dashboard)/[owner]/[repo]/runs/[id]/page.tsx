@@ -183,7 +183,7 @@ export default async function RunPage({ params }: { params: Promise<{ owner: str
         )}
       </Panel>
 
-      {run.attestation ? <AttestationPanel id="attestation" payload={run.attestation.payload} account={run.account} /> : null}
+      {run.attestation ? <AttestationPanel id="attestation" payload={run.attestation.payload} /> : null}
     </div>
   );
 }

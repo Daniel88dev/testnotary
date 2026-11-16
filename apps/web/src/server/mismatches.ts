@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
-import { DELETED_ACCOUNT, type Mismatch, type SkippedCommit } from "@testnotary/protocol";
+import type { Mismatch, SkippedCommit } from "@testnotary/protocol";
 import { attestations, jobReports, mismatches, repoSettingChanges, runs, tokens, verifications } from "../db/schema.ts";
-import { accountsAsOf } from "./accounts.ts";
+import { accountsAsOf, shownPayload, withheld } from "./accounts.ts";
 import { now } from "./config.ts";
 import type { Executor } from "./installations.ts";
 import { currentNames } from "./tokens.ts";
@@ -148,7 +148,7 @@ export async function mismatchViews(db: Executor, rows: MismatchRow[]): Promise<
     // A deleted account's mismatch keeps its copy of the payload, the signature and the token's
     // name (never removed on request), but no read hands them out: the payload names the account's
     // GitHub id, the signature its key, and the name is free text its owner picked.
-    const withheld = accounts[index]!.id === DELETED_ACCOUNT.id;
+    const hidden = withheld(accounts[index]!);
     return {
       id: row.id,
       result: row.result === "audit" ? "audit" : "would_skip",
@@ -157,15 +157,15 @@ export async function mismatchViews(db: Executor, rows: MismatchRow[]): Promise<
       tree: row.tree,
       event: row.event,
       account: accounts[index]!,
-      token: { id: row.tokenId, kind: row.tokenKind === "sandbox" ? "sandbox" : "laptop", name: withheld ? "" : row.tokenName },
+      token: { id: row.tokenId, kind: row.tokenKind === "sandbox" ? "sandbox" : "laptop", name: hidden ? "" : row.tokenName },
       attestation: {
         id: row.attestationId,
         runId: row.runId,
         commit: row.attestedCommit,
         endedAt: row.attestationEndedAt.toISOString(),
         format: row.attestationFormat,
-        payload: withheld ? null : row.attestationPayload.toString("utf8"),
-        signature: withheld ? null : (row.signature ?? null),
+        payload: shownPayload(accounts[index]!, row.attestationPayload),
+        signature: hidden ? null : (row.signature ?? null),
       },
       environments: { run: row.runEnvironment ?? null, ci: row.ciEnvironment },
       session: row.session ?? null,

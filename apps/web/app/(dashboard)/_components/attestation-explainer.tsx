@@ -18,7 +18,7 @@ const FIELDS: Record<string, [string, string]> = {
   endedAt: ["Ended", "When the run ended. An attestation counts for 24 hours from here, or from when the service received it if that was earlier."],
 };
 
-export function AttestationExplainer({ payload, accountWithheld }: { payload: Record<string, unknown>; accountWithheld: boolean }) {
+export function AttestationExplainer({ payload }: { payload: Record<string, unknown> }) {
   const [field, setField] = useState("tree");
   const key = (name: string) => (
     <button
@@ -36,12 +36,10 @@ export function AttestationExplainer({ payload, accountWithheld }: { payload: Re
   const entries = Object.entries(payload);
   entries.forEach(([name, value], index) => {
     const comma = index < entries.length - 1 ? "," : "";
-    let shown = value;
-    if (name === "attester" && accountWithheld && value && typeof value === "object") shown = { ...value, account: "(deleted account)" };
     lines.push(
       <span key={name}>
         {"  "}
-        {key(name)}: <Value value={shown} />
+        {key(name)}: <Value value={value} />
         {comma}
         {"\n"}
       </span>,

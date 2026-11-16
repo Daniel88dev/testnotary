@@ -234,7 +234,7 @@ export default async function CommitPage({ params }: { params: Promise<{ owner: 
         <VerificationBlock key={verification.id} verification={verification} fullName={fullName} facts={facts} admin={isAdmin(access)} at={at} />
       ))}
       {featured?.attestation ? (
-        <AttestationPanel id="attestation" title={`The attestation · ${featured.suite ?? ""}`} payload={featured.attestation.payload} account={featured.attestation.attester.account} />
+        <AttestationPanel id="attestation" title={`The attestation · ${featured.suite ?? ""}`} payload={featured.attestation.payload} />
       ) : null}
     </div>
   );

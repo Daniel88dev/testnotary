@@ -3,7 +3,7 @@ import { and, count, desc, eq, gte, inArray, sql, type SQL } from "drizzle-orm";
 import type { FallbackReason, VerificationResult } from "@testnotary/core";
 import type { CiEnvironment, RunEnvironment, SessionLabels } from "@testnotary/protocol";
 import { attestations, jobReports, mismatches, runs, tokens, verifications } from "../db/schema.ts";
-import { accountsAsOf, type ShownAccount } from "./accounts.ts";
+import { accountsAsOf, shownPayload, type ShownAccount } from "./accounts.ts";
 import { now } from "./config.ts";
 import type { Executor } from "./installations.ts";
 import { behindBy, commitAuthor, installationToken, type CommitAuthor } from "./github.ts";
@@ -58,8 +58,8 @@ export interface MatchedAttestation {
   endedAt: Date;
   createdAt: Date;
   format: string;
-  /** The canonical payload exactly as stored. */
-  payload: string;
+  /** The canonical payload exactly as stored; null when withheld (the attester reads *deleted account*). */
+  payload: string | null;
   attester: Attester;
   /** The run's environment, labels and flags, while the run is retained. */
   run: { environment: RunEnvironment | null; session: SessionLabels | null; notPinned: string[]; durationMs: number | null } | null;
@@ -139,6 +139,7 @@ export async function verificationRows(db: Executor, where: SQL | undefined, pag
   const mismatchOf = new Map(recorded.map((row) => [row.verificationId, row.id]));
   let named = 0;
   return rows.map(({ verification, attestation, run, token }) => {
+    const account = attestation ? accounts[named++]! : undefined;
     const report = reportOf.get(verification.id);
     const mismatchId = mismatchOf.get(verification.id);
     return {
@@ -163,9 +164,9 @@ export async function verificationRows(db: Executor, where: SQL | undefined, pag
             endedAt: attestation.endedAt,
             createdAt: attestation.createdAt,
             format: attestation.format,
-            payload: attestation.payload.toString("utf8"),
+            payload: shownPayload(account!, attestation.payload),
             attester: {
-              account: accounts[named++]!,
+              account: account!,
               token: { id: attestation.tokenId, kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: (token && names.get(token.id)) ?? "" },
             },
             run: run ? { environment: run.environment, session: run.session, notPinned: run.notPinned, durationMs: run.durationMs } : null,
@@ -420,7 +421,8 @@ export interface RunDetail extends RunShown {
   warnings: string[];
   notPinned: string[];
   baselineOverrides: string[];
-  attestation: { id: string; format: string; payload: string; sha256: string; endedAt: Date } | null;
+  /** Its payload exactly as stored; null when withheld (the account reads *deleted account*). */
+  attestation: { id: string; format: string; payload: string | null; sha256: string; endedAt: Date } | null;
   /** The verifications that matched its attestation, newest first. */
   verifications: VerificationShown[];
 }
@@ -453,7 +455,7 @@ export async function runDetail(db: Executor, repoId: number, runId: string): Pr
       ? {
           id: attestation.id,
           format: attestation.format,
-          payload: attestation.payload.toString("utf8"),
+          payload: shownPayload(shown!.account, attestation.payload),
           sha256: createHash("sha256").update(attestation.payload).digest("hex"),
           endedAt: attestation.endedAt,
         }

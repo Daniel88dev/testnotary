@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { DELETED_ACCOUNT, accountName, decodeAttestationPayload } from "@testnotary/protocol";
+import { accountName, decodeAttestationPayload } from "@testnotary/protocol";
 import { database } from "../../../../../src/db/client.ts";
 import { isAdmin } from "../../../../../src/server/access.ts";
 import { now } from "../../../../../src/server/config.ts";
@@ -189,7 +189,7 @@ function MismatchArticle({
       <div className="stack" style={{ gap: 8 }}>
         <h4>The attestation</h4>
         {payload ? (
-          <AttestationExplainer payload={payload as unknown as Record<string, unknown>} accountWithheld={mismatch.account.id === DELETED_ACCOUNT.id} />
+          <AttestationExplainer payload={payload as unknown as Record<string, unknown>} />
         ) : (
           <pre className="json" aria-label="Attestation payload">
             {mismatch.attestation.payload ?? "(withheld: deleted account)"}
