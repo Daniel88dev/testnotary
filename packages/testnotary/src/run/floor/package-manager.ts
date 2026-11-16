@@ -5,7 +5,7 @@ import { constants } from "node:fs";
 import { access, readFile, realpath, stat } from "node:fs/promises";
 import { basename, delimiter, dirname, join } from "node:path";
 import type { Env, RunContext } from "../context.ts";
-import { project, readText, type LockfileOwner } from "./project.ts";
+import { project, readText, type LockfileOwner, type Project } from "./project.ts";
 
 /** The package managers v1 supports. Bun and Deno are refused (`package_manager_unsupported`). */
 export const SUPPORTED = ["npm", "pnpm", "yarn"] as const;
@@ -35,7 +35,11 @@ const PACKAGE_MANAGER = /^(?<name>(?:@[^/@\s]+\/)?[^@\s]+)@(?<version>[^+\s]+)(?
 
 /** The repo's package manager and its pin, from `package.json` and the lockfiles. */
 export async function packageManagerUse(context: RunContext): Promise<PackageManagerUse> {
-  const { manifest, lockfiles } = await project(context);
+  return packageManagerOf(await project(context));
+}
+
+/** The same, for a project read with `readProject` (`init` has no run context). */
+export function packageManagerOf({ manifest, lockfiles }: Pick<Project, "manifest" | "lockfiles">): PackageManagerUse {
   let pin: PackageManagerPin | undefined;
   const declared = manifest?.packageManager;
   if (typeof declared === "string") {
