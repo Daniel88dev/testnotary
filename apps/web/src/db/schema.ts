@@ -381,6 +381,14 @@ export const jobReports = pgTable(
     durationMs: integer("duration_ms").notNull(),
     environment: jsonb("environment").$type<CiEnvironment>().notNull(),
     createdAt: at("created_at"),
+    /**
+     * What the job did in the end, when its action said (null from an older one): a result,
+     * reason and detail of its own when it fell back although the service answered otherwise
+     * (the signature check, a checkout of another tree). The dashboard counts the job by these.
+     */
+    result: text("result"),
+    reason: text("reason"),
+    detail: text("detail"),
     /** Arrival order, so the latest report is well defined even within one millisecond. */
     seq: bigint("seq", { mode: "number" }).notNull().generatedAlwaysAsIdentity(),
   },

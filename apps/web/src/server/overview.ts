@@ -183,12 +183,16 @@ const median = (values: number[]): number | null => {
 export async function overviewOf(db: Executor, repoId: number, period: Period, at: Date): Promise<Overview> {
   const { days, since } = periodWindow(period, at);
   const retained = retainedSince(at);
+  // The latest report's outcome and duration, and what the job did when the report says (see
+  // shown-results.ts): its own result and reason count instead of the service's answer.
   const latestReport = sql`left join lateral (
-      select r.outcome, r.duration_ms from job_reports r where r.verification_id = v.id order by r.seq desc limit 1
+      select r.outcome, r.duration_ms, r.result, r.reason from job_reports r where r.verification_id = v.id order by r.seq desc limit 1
     ) report on true`;
   const [grouped, durations, local, recorded] = await Promise.all([
     db.execute<{ day: string; suite: string | null; result: string; reason: string | null; outcome: string | null; n: number }>(sql`
-      select to_char(v.created_at at time zone 'UTC', 'YYYY-MM-DD') as day, v.suite, v.result, v.reason, report.outcome, count(*)::int as n
+      select to_char(v.created_at at time zone 'UTC', 'YYYY-MM-DD') as day, v.suite,
+             coalesce(report.result, v.result) as result, case when report.result is null then v.reason else report.reason end as reason,
+             report.outcome, count(*)::int as n
       from verifications v ${latestReport}
       where v.repo_id = ${repoId} and v.created_at >= ${since.toISOString()} and v.created_at <= ${at.toISOString()}
       group by 1, 2, 3, 4, 5`),

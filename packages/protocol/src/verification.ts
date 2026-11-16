@@ -51,25 +51,42 @@ export const verificationResult = z.enum(["skip", "audit", "fallback", "would_sk
 export const jobOutcome = z.enum(["passed", "failed", "refused"]);
 export type JobOutcome = z.infer<typeof jobOutcome>;
 
+/** A fallback reason code as it travels: stable snake_case. A newer one may be unknown to a reader. */
+const reasonCode = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
+
+/** What a reason's line names besides the code, as it travels. */
+const reasonDetail = z.string().max(1000);
+
 /**
  * `POST /api/v1/verifications/<id>/report`: one call after the tests ran, with a fresh Actions OIDC
  * token of the same commit. The wall-clock duration is the test command's; the environment is the
  * runner's. Stored as an append-only job report.
+ *
+ * `result`, `reason` and `detail` are what the job did in the end, which may differ from the
+ * service's answer: the action falls back on its own when the signature check fails or the
+ * checkout is not the verified tree. The dashboard counts the job by them. Optional, so a report
+ * from an older action (which never sends them) is still taken.
  */
 export const jobReportRequest = z
   .object({
     outcome: jobOutcome,
     durationMs: z.number().int().min(0).max(7 * 24 * 3_600_000),
     environment: ciEnvironment,
+    result: verificationResult.optional(),
+    reason: reasonCode.nullable().optional(),
+    detail: reasonDetail.nullable().optional(),
   })
   .strict();
 export type JobReportRequest = z.infer<typeof jobReportRequest>;
 
-/** A stored job report. */
+/** A stored job report, with what the job did in the end (null when its action did not say). */
 export const jobReport = z.object({
   id: z.string(),
   outcome: jobOutcome,
   durationMs: z.number(),
+  result: verificationResult.nullable().default(null),
+  reason: z.string().nullable().default(null),
+  detail: z.string().nullable().default(null),
   createdAt: z.string(),
 });
 export type JobReport = z.infer<typeof jobReport>;
@@ -197,8 +214,12 @@ export const verification = z.object({
 });
 export type Verification = z.infer<typeof verification>;
 
-/** 200 from `POST /api/v1/verifications` and from `GET /api/v1/verifications/<id>`. */
-export const verifyResponse = z.object({ verification });
+/**
+ * 200 from `POST /api/v1/verifications` and from `GET /api/v1/verifications/<id>`. `message` is
+ * GitHub's own words when GitHub refused the service (`github_denied`), for the job summary to
+ * quote when they name an IP allow list.
+ */
+export const verifyResponse = z.object({ verification, message: z.string().optional() });
 export type VerifyResponse = z.infer<typeof verifyResponse>;
 
 /**
@@ -210,3 +231,11 @@ export const VERIFY_REFUSALS = {
   repo_not_installed: 404,
 } as const;
 export type VerifyRefusal = keyof typeof VERIFY_REFUSALS;
+
+/** The `github_denied` detail when GitHub's message names an IP allow list: v1 has no fixed IP addresses. */
+export const IP_ALLOW_LIST_DETAIL = "an IP allow list blocks the service";
+
+/** Whether GitHub's message for a 403 says an IP allow list is why. */
+export function namesIpAllowList(message: string): boolean {
+  return /IP allow list/i.test(message);
+}

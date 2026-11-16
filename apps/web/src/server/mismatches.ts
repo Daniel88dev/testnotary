@@ -4,6 +4,7 @@ import { attestations, jobReports, mismatches, repoSettingChanges, runs, tokens,
 import { accountsAsOf, shownPayload, withheld } from "./accounts.ts";
 import { now } from "./config.ts";
 import type { Executor } from "./installations.ts";
+import { shownResult } from "./shown-results.ts";
 import { currentNames } from "./tokens.ts";
 
 // Mismatches: a CI job's report that fails on an audit, or on a shadow verification that would
@@ -100,7 +101,8 @@ async function skippedSinceLastAgreeingAudit(tx: Executor, repoId: number, accou
     .select({ id: verifications.id, commit: verifications.commit, tree: verifications.tree, suite: verifications.suite, event: verifications.event, createdAt: verifications.createdAt })
     .from(verifications)
     .innerJoin(attestations, eq(attestations.id, verifications.attestationId))
-    .where(and(eq(verifications.repoId, repoId), eq(attestations.accountId, accountId), eq(verifications.result, "skip"), gt(verifications.createdAt, since)))
+    // What the job did: a skip the action turned into a fallback ran the tests.
+    .where(and(eq(verifications.repoId, repoId), eq(attestations.accountId, accountId), eq(shownResult, "skip"), gt(verifications.createdAt, since)))
     .orderBy(desc(verifications.createdAt));
   const seen = new Set<string>();
   const commits: SkippedCommit[] = [];

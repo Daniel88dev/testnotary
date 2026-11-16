@@ -347,6 +347,8 @@ describe("identity and GitHub", () => {
     expect(check!.output.summary).toContain("[Limits in v1](https://testnotary.dev/docs/limits#github-enterprise)");
     expect(result.summary).toContain(check!.output.title);
     expect(result.summary).toContain("[Limits in v1](https://testnotary.dev/docs/limits#github-enterprise)");
+    // The service recorded it, so the dashboard counts it among the reasons jobs ran.
+    expect(result.summary).toMatch(/- Verification: `[0-9a-f-]{36}`/);
   });
 
   test("github_denied for another reason names no allow list and passes no message", async () => {
@@ -365,6 +367,7 @@ describe("identity and GitHub", () => {
     expect(result.outputs).toMatchObject({ result: "fallback", reason: "github_denied", ran: "true" });
     expect(line(result.summary)).toMatch(/^Fell back: github_denied, GitHub refused the service's request · /);
     expect(result.summary).not.toMatch(/Resource not accessible|Limits in v1/);
+    expect(result.summary).toMatch(/- Verification: `[0-9a-f-]{36}`/);
   });
 
   test("repo_not_installed: the App isn't on the repo, and the tests run", async () => {

@@ -23,6 +23,7 @@ export {
 } from "@testnotary/core";
 export {
   API_V1,
+  IP_ALLOW_LIST_DETAIL,
   LINKS,
   OIDC_AUDIENCE,
   accountName,
@@ -30,6 +31,7 @@ export {
   type AttestationPayload,
   jobReportResponse,
   mismatchesPageUrl,
+  namesIpAllowList,
   resolveServiceUrl,
   runPageUrl,
   verifyResponse,

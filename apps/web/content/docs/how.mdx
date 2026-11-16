@@ -30,7 +30,7 @@ The service checks the token’s signature against GitHub’s keys, its issuer, 
 | The attester, or a sandbox token’s creator, has `admin` or `write` on the repo, asked live. | `attester_no_write` |
 | The audit draw doesn’t pick this skip. | `audit` |
 
-When several attestations name the tree, each is tried, newest first, until one clears every check. A GitHub refusal while checking (an IP allow list, for example) is `github_denied`.
+When several attestations name the tree, each is tried, newest first, until one clears every check. A GitHub refusal while checking (an IP allow list, for example) is `github_denied`, and GitHub failing is `github_unavailable`; both are recorded like any other answer.
 
 Everything is read from the config at the built commit’s **first parent**, the base side of a pull request’s merge commit. So a pull request can’t loosen its own rules: a changed command or a new guarded glob counts from the next pull request on, and the config file is itself guarded.
 
@@ -48,6 +48,6 @@ A repo whose base-branch config sets `"signatures": "required"` adds one more ga
 
 ## After the tests
 
-When the tests ran, the action reports the outcome and how long the test command took, with a fresh OIDC token. A failed report only logs a warning. The step’s exit code is always the tests’ exit code, and a skip exits 0, so the job’s result means what it always meant. Only an audit can turn a skip into a failed build.
+When the tests ran, the action reports the outcome and how long the test command took, with a fresh OIDC token. The report also says what the job did in the end, which differs from the service’s answer when the action fell back on its own (the signature check, say): the dashboard counts the job by what it did, so such a job is a fallback with its own reason, never a skip. A failed report only logs a warning. The step’s exit code is always the tests’ exit code, and a skip exits 0, so the job’s result means what it always meant. Only an audit can turn a skip into a failed build.
 
 <Next pages="reasons shadow audits gate" />

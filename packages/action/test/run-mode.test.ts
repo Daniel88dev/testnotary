@@ -248,7 +248,14 @@ describe("the job report", () => {
     expect(reports).toHaveLength(1);
     expect(reports[0]!.headers.authorization).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
     const sent = JSON.parse(reports[0]!.text) as Record<string, unknown>;
-    expect(sent).toEqual({ outcome: "failed", durationMs: expect.any(Number) as number, environment: { os: "Linux", arch: "X64", image: null, imageVersion: null, node: process.version } });
+    expect(sent).toEqual({
+      outcome: "failed",
+      durationMs: expect.any(Number) as number,
+      environment: { os: "Linux", arch: "X64", image: null, imageVersion: null, node: process.version },
+      result: "would_fall_back",
+      reason: "no_attestation",
+      detail: null,
+    });
     const verificationId = /^\/api\/v1\/verifications\/([^/]+)\/report$/.exec(reports[0]!.path)![1]!;
     const read = await readBack(s.repo, merge.sha, verificationId);
     expect(read.verification).toMatchObject({ result: "would_fall_back", jobReport: { outcome: "failed", durationMs: sent.durationMs } });

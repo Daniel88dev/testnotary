@@ -233,7 +233,7 @@ describe("the tree a verification matches", () => {
     expect(merge.tree).not.toBe(attestedTree);
   });
 
-  test("can't be read when GitHub refuses the App: github_denied with GitHub's message, and no decision", async () => {
+  test("can't be read when GitHub refuses the App: a recorded github_denied with GitHub's message", async () => {
     const r = await installed();
     const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
     const message = `Although you appear to have the correct authorization credentials, the '${r.repo.owner}' organization has an IP allow list enabled, and your IP address is not permitted to access this resource.`;
@@ -241,7 +241,23 @@ describe("the tree a verification matches", () => {
     try {
       const answer = await verify(await r.token(merge.sha));
 
-      expect(answer).toEqual({ status: 502, body: { error: "github_denied", message } });
+      expect(answer.status).toBe(200);
+      expect(answer.body).toMatchObject({ message, verification: { commit: merge.sha, result: "would_fall_back", reason: "github_denied", detail: "an IP allow list blocks the service" } });
+    } finally {
+      restore();
+    }
+  });
+
+  test("can't be read when GitHub fails: a recorded github_unavailable, never a decision", async () => {
+    const r = await installed({ attest: true });
+    const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
+    const restore = world.github.override("GET", "/repos/:owner/:repo/git/commits/:sha", () => githubError(502, "Server Error"));
+    try {
+      const answer = await verify(await r.token(merge.sha));
+
+      expect(answer.status).toBe(200);
+      expect(answer.body.verification).toMatchObject({ commit: merge.sha, result: "would_fall_back", reason: "github_unavailable" });
+      expect(answer.body).not.toHaveProperty("message");
     } finally {
       restore();
     }
@@ -286,7 +302,7 @@ describe("the paths a verification checks against the guarded files", () => {
     expect(answer.body.verification).toMatchObject({ result: "would_fall_back", reason: "guarded_file_changed", detail: ".nvmrc" });
   });
 
-  test("can't be listed when GitHub refuses the compare: github_denied with GitHub's message, and no decision", async () => {
+  test("can't be listed when GitHub refuses the compare: a recorded github_denied with GitHub's message", async () => {
     const r = await installed();
     const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
     const message = `Although you appear to have the correct authorization credentials, the '${r.repo.owner}' organization has an IP allow list enabled, and your IP address is not permitted to access this resource.`;
@@ -294,7 +310,8 @@ describe("the paths a verification checks against the guarded files", () => {
     try {
       const answer = await verify(await r.token(merge.sha));
 
-      expect(answer).toEqual({ status: 502, body: { error: "github_denied", message } });
+      expect(answer.status).toBe(200);
+      expect(answer.body).toMatchObject({ message, verification: { commit: merge.sha, tree: merge.tree, result: "would_fall_back", reason: "github_denied", detail: "an IP allow list blocks the service" } });
     } finally {
       restore();
     }

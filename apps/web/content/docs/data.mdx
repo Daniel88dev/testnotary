@@ -27,7 +27,7 @@ A laptop token’s name defaults to the OS and the date, such as “macOS machin
 
 ## What the action sends
 
-In CI, the action sends the GitHub Actions OIDC token (which names the repo, workflow, commit and the person or bot that triggered it), the suite, and the runner’s environment: OS, architecture, Node and package manager. It never sends a tree, a commit hash or file paths; the service reads the tree from GitHub itself. After the tests it sends the outcome and how long the test command took.
+In CI, the action sends the GitHub Actions OIDC token (which names the repo, workflow, commit and the person or bot that triggered it), the suite, and the runner’s environment: OS, architecture, Node and package manager. It never sends a tree, a commit hash or file paths to verify by; the service reads the tree from GitHub itself. After the tests it sends the outcome, how long the test command took, and what the job did in the end: its result and reason code, with the detail its line shows (which can name a guarded file or a tree, for display only: the service never decides by it).
 
 ## What the service reads from GitHub
 

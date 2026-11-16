@@ -1,5 +1,14 @@
 import { readFileSync } from "node:fs";
-import { FALLBACK_REASONS, verifyResponse, type CiEnvironment, type FallbackReason, type Verification, type VerificationResult } from "./shared.ts";
+import {
+  FALLBACK_REASONS,
+  IP_ALLOW_LIST_DETAIL,
+  namesIpAllowList,
+  verifyResponse,
+  type CiEnvironment,
+  type FallbackReason,
+  type Verification,
+  type VerificationResult,
+} from "./shared.ts";
 
 /** Whether the code is one this action knows the words for. */
 export function isFallbackReason(code: string): code is FallbackReason {
@@ -121,7 +130,7 @@ function verdictFrom(answer: ServiceAnswer): Verdict {
   if (answer.status === 200) {
     const parsed = verifyResponse.safeParse(answer.body);
     if (!parsed.success) return fallback("service_error");
-    const { verification } = parsed.data;
+    const { verification, message } = parsed.data;
     const { reason } = verification;
     // Adding a reason code is a minor version: a code this action doesn't know is a fallback,
     // whatever result came with it, so the tests run.
@@ -129,7 +138,9 @@ function verdictFrom(answer: ServiceAnswer): Verdict {
       const shadow = verification.result === "would_skip" || verification.result === "would_fall_back";
       return { result: shadow ? "would_fall_back" : "fallback", reason, detail: verification.detail, record: verification };
     }
-    return { result: verification.result, reason, detail: verification.detail, record: verification };
+    const verdict: Verdict = { result: verification.result, reason, detail: verification.detail, record: verification };
+    // GitHub refused the service, and the service recorded it: the summary quotes an IP allow list.
+    return reason === "github_denied" && message && namesIpAllowList(message) ? { ...verdict, githubMessage: message } : verdict;
   }
   const { error, message } = (answer.body ?? {}) as { error?: unknown; message?: unknown };
   if (error === "github_denied") return githubDenied(typeof message === "string" ? message : "");
@@ -137,15 +148,12 @@ function verdictFrom(answer: ServiceAnswer): Verdict {
   return fallback("service_error");
 }
 
-/** What the line names when an IP allow list is why GitHub refused the service. */
-export const IP_ALLOW_LIST_DETAIL = "an IP allow list blocks the service";
-
 /**
- * GitHub refused the service's installation-token call (403). When GitHub's message names an IP
- * allow list, the line says so and the summary quotes the message: v1 has no fixed IP addresses.
- * Any other message stays out of the PR.
+ * GitHub refused the service (a 403 from an older service, which did not record it). When GitHub's
+ * message names an IP allow list, the line says so and the summary quotes the message: v1 has no
+ * fixed IP addresses. Any other message stays out of the PR.
  */
 function githubDenied(message: string): Verdict {
-  if (!/IP allow list/i.test(message)) return fallback("github_denied");
+  if (!namesIpAllowList(message)) return fallback("github_denied");
   return { ...fallback("github_denied", IP_ALLOW_LIST_DETAIL), githubMessage: message };
 }

@@ -64,7 +64,7 @@ async function run(env: RunnerEnv): Promise<number> {
     );
   }
   const ran = { outcome: result.outcome, exitCode: result.exitCode, durationMs: result.durationMs };
-  const report = verdict.record ? await sendJobReport(env, verdict.record.id, ran) : undefined;
+  const report = verdict.record ? await sendJobReport(env, { ...verdict, record: verdict.record }, ran) : undefined;
   const tests: TestsRan = { ...ran, mismatch: report?.mismatch ?? false };
   const presentation = presentJob(env, verdict, tests);
   setOutputs(env, presentation.outputs);

@@ -145,7 +145,8 @@ export const REASON_HELP: Record<FallbackReason, CodeHelp> = {
     fix: "Usually nothing: the next job gets a fresh token. A repeated rejection is worth a report.",
   },
   github_denied: {
-    cause: "GitHub refused one of the service’s requests. When an IP allow list is the cause, the line says so, quotes GitHub and links the limits page.",
+    cause:
+      "GitHub refused one of the service’s requests. The service records it like any other answer, so it counts on the dashboard. When an IP allow list is the cause, the line says so, quotes GitHub and links the limits page.",
     fix: "None for an IP allow list in v1: Testnotary has no fixed IP addresses. See [Limits in v1](/docs/limits#github-enterprise).",
   },
   unknown_suite: {
@@ -189,7 +190,8 @@ export const REASON_HELP: Record<FallbackReason, CodeHelp> = {
     fix: "Follow the detail. For `checkout:`, give `actions/checkout` `fetch-depth: 2`. For an untrusted key, add it to GitHub as a signing key or to `.testnotary/allowed_signers` on the base branch.",
   },
   github_unavailable: {
-    cause: "In signature mode, a GitHub call the action makes with the job’s token failed, took over 10 seconds, or hit the rate limit.",
+    cause:
+      "GitHub couldn’t be asked: in signature mode, a call the action makes with the job’s token failed, took over 10 seconds, or hit the rate limit; or one of the service’s own calls to GitHub failed while it verified the job.",
     fix: "Nothing to fix in the repo; the tests ran. Re-run the job if you want the skip.",
   },
   audit: {

@@ -19,6 +19,7 @@ import { fileAt, installationToken } from "./github.ts";
 import { retainedSince } from "./history.ts";
 import type { Executor, RepoView } from "./installations.ts";
 import { mismatchViews } from "./mismatches.ts";
+import { shownResult } from "./shown-results.ts";
 
 // A repo admin's settings and mismatch explanations (the Settings and Mismatches sections). Every
 // change is a new row: a setting change carries the mode and both rates after it, an explanation
@@ -41,7 +42,10 @@ export const NOTE_MAX = 2000;
 
 export const OPEN_MISMATCH_PROBLEM = "Explain the open mismatch before switching to enforce.";
 
-/** Verifications CI compares with the attestation when its tests run: an audit, and a shadow *would skip*. */
+/**
+ * Verifications CI compares with the attestation when its tests run: an audit, and a shadow *would
+ * skip*, by what the job did (a would-skip whose signature would fail is no comparison).
+ */
 const COMPARED = ["audit", "would_skip"];
 
 export interface Comparisons {
@@ -107,7 +111,7 @@ async function comparisons(db: Executor, repoId: number, since: Date): Promise<C
   const compared = await db
     .select({ id: verifications.id })
     .from(verifications)
-    .where(and(eq(verifications.repoId, repoId), inArray(verifications.result, COMPARED), gte(verifications.createdAt, since)));
+    .where(and(eq(verifications.repoId, repoId), inArray(shownResult, COMPARED), gte(verifications.createdAt, since)));
   if (compared.length === 0) return { compared: 0, agreed: 0 };
   const reports = await db
     .selectDistinctOn([jobReports.verificationId], { outcome: jobReports.outcome })

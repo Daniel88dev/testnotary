@@ -163,6 +163,13 @@ describe("a run with no usable signing key in signature mode", () => {
 
     expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_missing", ran: "true" });
     expect(line(result.summary)).toMatch(/^Fell back: signature_missing, the repo requires signatures and the attestation has none · the tests passed in /);
+    // The service answered skip; the job report says what the job did instead, so the dashboard
+    // counts a fallback, not a skip.
+    const verificationId = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    const [report] = world.service.requests.filter((request) => request.path === `/api/v1/verifications/${verificationId}/report`);
+    expect(JSON.parse(report!.text)).toMatchObject({ outcome: "passed", result: "fallback", reason: "signature_missing", detail: null });
+    const verification = await readBack(s.repo, result.sha, verificationId);
+    expect(verification).toMatchObject({ result: "skip", jobReport: { outcome: "passed", result: "fallback", reason: "signature_missing" } });
   });
 
   test("a key ssh-keygen can't use also uploads unsigned with the warning", async () => {

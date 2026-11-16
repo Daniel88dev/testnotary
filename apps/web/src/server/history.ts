@@ -7,6 +7,7 @@ import { accountsAsOf, shownPayload, type ShownAccount } from "./accounts.ts";
 import { now } from "./config.ts";
 import type { Executor } from "./installations.ts";
 import { behindBy, commitAuthor, installationToken, type CommitAuthor } from "./github.ts";
+import { shownOutcome, shownReason, shownResult } from "./shown-results.ts";
 import { currentNames } from "./tokens.ts";
 
 // What the dashboard reads about a repo's runs and verifications: the Verifications and Runs
@@ -65,7 +66,7 @@ export interface MatchedAttestation {
   run: { environment: RunEnvironment | null; session: SessionLabels | null; notPinned: string[]; durationMs: number | null } | null;
 }
 
-/** One verification as the dashboard shows it. */
+/** One verification as the dashboard shows it: its result, reason and detail are what the job did (see shown-results.ts). */
 export interface VerificationShown {
   id: string;
   createdAt: Date;
@@ -93,13 +94,13 @@ export type ResultFilter = (typeof RESULT_FILTERS)[number];
 function resultCondition(filter: ResultFilter): SQL {
   switch (filter) {
     case "skip":
-      return eq(verifications.result, "skip");
+      return eq(shownResult, "skip");
     case "audit":
-      return eq(verifications.result, "audit");
+      return eq(shownResult, "audit");
     case "ran":
-      return eq(verifications.result, "fallback");
+      return eq(shownResult, "fallback");
     case "shadow":
-      return inArray(verifications.result, ["would_skip", "would_fall_back"]);
+      return inArray(shownResult, ["would_skip", "would_fall_back"]);
   }
 }
 
@@ -150,9 +151,7 @@ export async function verificationRows(db: Executor, where: SQL | undefined, pag
       suite: verification.suite,
       event: verification.event,
       mode: verification.mode === "enforce" ? "enforce" : "shadow",
-      result: verification.result as VerificationResult,
-      reason: verification.reason as FallbackReason | null,
-      detail: verification.detail,
+      ...shownOutcome(verification, report),
       environment: verification.environment,
       ci: verification.ciRunId ? { runId: verification.ciRunId, attempt: verification.ciRunAttempt, jobId: verification.ciJobId } : null,
       attestation: attestation
@@ -198,15 +197,15 @@ export async function listVerifications(
   limit: number,
 ): Promise<{ rows: VerificationShown[]; total: number; segments: Record<ResultFilter | "all", number>; suites: string[] }> {
   const base = [eq(verifications.repoId, repoId), gte(verifications.createdAt, retainedSince())];
-  const narrowed = [...base, ...(filter.reason ? [eq(verifications.reason, filter.reason)] : []), ...(filter.suite ? [eq(verifications.suite, filter.suite)] : [])];
+  const narrowed = [...base, ...(filter.reason ? [eq(shownReason, filter.reason)] : []), ...(filter.suite ? [eq(verifications.suite, filter.suite)] : [])];
   const where = and(...narrowed, ...(filter.result ? [resultCondition(filter.result)] : []));
   const [rows, byResult, suites] = await Promise.all([
     verificationRows(db, where, { limit }),
     db
-      .select({ result: verifications.result, n: count() })
+      .select({ result: shownResult, n: count() })
       .from(verifications)
       .where(and(...narrowed))
-      .groupBy(verifications.result),
+      .groupBy(shownResult),
     db
       .selectDistinct({ suite: verifications.suite })
       .from(verifications)
@@ -300,7 +299,7 @@ export async function commitFacts(repo: { installationId: number; fullName: stri
 /** Each suite's latest verification in the window, by suite name: the repo column's Suites. */
 export async function suitesLastResult(db: Executor, repoId: number): Promise<{ suite: string; result: VerificationResult; at: Date }[]> {
   const rows = await db
-    .selectDistinctOn([verifications.suite], { suite: verifications.suite, result: verifications.result, at: verifications.createdAt })
+    .selectDistinctOn([verifications.suite], { suite: verifications.suite, result: shownResult, at: verifications.createdAt })
     .from(verifications)
     .where(and(eq(verifications.repoId, repoId), gte(verifications.createdAt, retainedSince())))
     .orderBy(verifications.suite, desc(verifications.createdAt));

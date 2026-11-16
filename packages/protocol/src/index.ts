@@ -58,6 +58,8 @@ export {
   skippedCommit,
   verification,
   verificationResult,
+  IP_ALLOW_LIST_DETAIL,
+  namesIpAllowList,
   verifyRequest,
   verifyResponse,
   type CiEnvironment,
