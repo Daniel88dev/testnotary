@@ -147,7 +147,6 @@ Prints `testnotary <version>`. `testnotary --help` lists the commands.
 | `TESTNOTARY_SANDBOX` | Set to `1` to mark a sandbox the library can’t detect on its own. See [Sandbox markers](/docs/agents#sandbox-markers). |
 | `TESTNOTARY_SIGNING_KEY` | A sandbox’s signing key from `sandbox-key`, in a signature-mode repo. |
 | `TESTNOTARY_SESSION_VENDOR`, `TESTNOTARY_SESSION_ID`, `TESTNOTARY_SESSION_URL` | Override the agent session labels a run uploads. See [Session labels](/docs/agents#session-labels). |
-| `TESTNOTARY_URL` | Another service URL than `https://testnotary.dev`, for development. |
 
 No `TESTNOTARY_*` variable ever reaches the tests, and `testnotary.json` can’t pass one.
 

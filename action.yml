@@ -26,6 +26,10 @@ outputs:
     description: The fallback reason code, when there is one.
   ran:
     description: "`true` when the tests ran in this step."
+  skip:
+    description: "`mode: verify` only: `true` for a skip, so the test job can be skipped; `false` otherwise."
+  verification:
+    description: "`mode: verify` only: the verification's id, for the test job's `verification` input. Empty when the job fell back before asking the service."
 runs:
   using: node24
   # Built from packages/action by the release job onto the tagged commit; never committed to main.

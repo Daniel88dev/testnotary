@@ -83,7 +83,7 @@ The library parses the base branch’s copy before anything runs, and refuses `c
 
 ```sh terminal
 testnotary: testnotary.json on origin/main is not valid:
-testnotary:   env.set.TESTNOTARY_URL: "TESTNOTARY_URL" is reserved: TESTNOTARY_* variables never reach the tests
+testnotary:   env.set.TESTNOTARY_SANDBOX: "TESTNOTARY_SANDBOX" is reserved: TESTNOTARY_* variables never reach the tests
 testnotary:   suites.unit.command[0]: the program can't be empty
 testnotary:   testnotary.json: unknown key "sutes"
 ```
