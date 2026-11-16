@@ -40,8 +40,8 @@ export const SESSION_AGENTS: readonly SessionAgent[] = [
   },
   {
     vendor: "Codex",
-    readFrom: "`CODEX_CI` set; the session from `CODEX_THREAD_ID`, else `CODEX_SESSION_ID`",
-    detect: (env) => !!set(env.CODEX_CI),
+    readFrom: "`CODEX_CI`, `CODEX_THREAD_ID` or `CODEX_SESSION_ID` set; the session from `CODEX_THREAD_ID`, else `CODEX_SESSION_ID`",
+    detect: (env) => !!(set(env.CODEX_CI) ?? set(env.CODEX_THREAD_ID) ?? set(env.CODEX_SESSION_ID)),
     id: (env) => set(env.CODEX_THREAD_ID) ?? set(env.CODEX_SESSION_ID),
     url: () => undefined,
   },
