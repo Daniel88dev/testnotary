@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { FALLBACK_REASONS, REFUSAL_CODES, VERIFICATION_RESULTS, WARNING_CODES, parseConfig } from "@testnotary/core";
 import { LINKS, githubDeniedCause, loginError } from "@testnotary/protocol";
 import { expect, test } from "@testnotary/test-world/playwright";
@@ -58,7 +60,7 @@ test("the package-manager tabs switch every code panel on the page and the choic
   await expect(article).toContainText("npm install -D testnotary");
   await expect(article).toContainText("- run: npm ci");
   await expect(article).toContainText('"command": ["npm", "test"]');
-  await expect(article).toContainText("npx testnotary run unit");
+  await expect(article).toContainText("npx testnotary run test");
   await expect(article).not.toContainText("pnpm/action-setup");
   await expect(article).not.toContainText("pnpm exec");
 
@@ -196,6 +198,27 @@ test("every testnotary.json the docs show is one the library accepts", async ({ 
     }
   }
   expect(seen).toBeGreaterThanOrEqual(10);
+});
+
+test("the setup guide shows the testnotary.json init writes, and the suite it names runs through the guide", async ({ page, world }) => {
+  const repo = await world.fixtureRepo({ config: null, files: { "package.json": '{ "packageManager": "pnpm@10.34.9", "scripts": { "test": "vitest run" } }\n' } });
+  const init = await world.runCli(["init", "--yes"], { cwd: repo.dir });
+  expect(init.exitCode).toBe(0);
+  const written = parseConfig(await readFile(join(repo.dir, "testnotary.json"), "utf8"));
+  if (!written.ok) throw new Error(written.problems.join("\n"));
+  const [suite] = Object.keys(written.config.suites);
+
+  await page.goto("/docs/setup");
+  const article = page.getByRole("main");
+  const panel = article.locator("li#library figure.code").filter({ hasText: /^testnotary\.json/ });
+  const shown = parseConfig(await panel.locator("pre").innerText());
+  if (!shown.ok) throw new Error(shown.problems.join("\n"));
+  expect(shown.config).toEqual(written.config);
+
+  // init asks about the two files only, and the rest of the guide runs the suite it wrote.
+  await expect(article.locator("li#library")).not.toContainText("asks for your suites");
+  await expect(article).toContainText(`pnpm exec testnotary run ${suite}`);
+  for (const label of await article.locator("figure.code.check figcaption").allInnerTexts()) expect(label).toContain(`/ Testnotary / ${suite} (`);
 });
 
 // The spec's "Accepted limits the docs must state", each as words a page must carry.

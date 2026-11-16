@@ -31,7 +31,7 @@ import { VendorSteps } from "./vendors.tsx";
  * block's text, with {{tokens}} filled per package manager. `lang="check"` draws a pull request's
  * check line; its info string is `<suite> <event>`.
  */
-function Code({ text = "", lang = "", file, snippet: name }: { text?: string; lang?: string; file?: string; snippet?: string }) {
+function Code({ text = "", lang = "", file, snippet: name, suite }: { text?: string; lang?: string; file?: string; snippet?: string; suite?: string }) {
   if (lang === "check") {
     const [suite = "unit", event = "pull_request"] = (file ?? "").split(/\s+/).filter(Boolean);
     const label = checkLabel(suite, event);
@@ -39,7 +39,7 @@ function Code({ text = "", lang = "", file, snippet: name }: { text?: string; la
     return <CodePanel variants={{ pnpm: same, npm: same, yarn: same }} lang={lang} check />;
   }
   const variants = Object.fromEntries(
-    PMS.map((pm) => [pm, { text: name ? snippet(name, pm) : substitute(text, pm), label: substitute(file ?? lang, pm) }]),
+    PMS.map((pm) => [pm, { text: name ? snippet(name, pm, suite) : substitute(text, pm), label: substitute(file ?? lang, pm) }]),
   ) as Variants;
   return <CodePanel variants={variants} lang={lang} />;
 }
