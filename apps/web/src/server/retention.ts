@@ -1,4 +1,5 @@
-import { and, desc, eq, gt, inArray, lt, lte, max, ne, notExists, sql } from "drizzle-orm";
+import { and, desc, eq, exists, gt, inArray, lt, lte, max, ne, notExists, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type postgres from "postgres";
 import type { Database } from "../db/client.ts";
@@ -15,6 +16,7 @@ import {
   jobReports,
   mismatchExplanations,
   mismatches,
+  oidcTokenUses,
   repoSettingChanges,
   repoStates,
   repos,
@@ -39,7 +41,11 @@ import { tokenExpiry } from "./tokens.ts";
 //   hash goes as soon as it is revoked or expired;
 // - a repo that left Testnotary (uninstalled, removed, deleted, transferred) loses all its data
 //   30 days after it left, unless it came back first;
-// - a deleted account loses its login at once and its row once nothing names it.
+// - a deleted account loses its login at once and its row once nothing names it;
+// - and, so storage stays bounded, a token's superseded uses from before the window and spent
+//   Actions OIDC token ids a day after they expired.
+// Repos go first, so that what only they named (blocks, setting changes, mismatches) no longer
+// holds back a token or an account later in the same pass.
 
 const DAY_MS = 86_400_000;
 /** How long a repo's data outlives its leaving: a reinstall before then gets its history back. */
@@ -61,6 +67,10 @@ export interface RetentionSummary {
   tokenHashes: number;
   /** Tokens deleted 90 days after their revocation or expiry. */
   tokens: number;
+  /** Token uses from before the window that a later use superseded. */
+  tokenUses: number;
+  /** Spent Actions OIDC tokens (kept against replay) a day past their expiry. */
+  oidcTokens: number;
   /** Cached logins of deleted accounts. */
   logins: number;
   /** Rows of deleted accounts that nothing names any more. */
@@ -80,9 +90,37 @@ export async function runRetention(retention: Database, at: Date): Promise<Reten
     const pruned = await pruneHistory(tx, cutoff);
     const tokenHashes = await clearSpentTokenHashes(tx, at);
     const spentTokens = await deleteSpentTokens(tx, cutoff);
+    const tokenUseRows = await pruneTokenUses(tx, cutoff);
+    const oidcTokens = await tx
+      .delete(oidcTokenUses)
+      .where(lt(oidcTokenUses.expiresAt, new Date(at.getTime() - DAY_MS)))
+      .returning({ jti: oidcTokenUses.jti });
     const deleted = await forgetDeletedAccounts(tx);
-    return { ...departed, ...pruned, tokenHashes, tokens: spentTokens, ...deleted };
+    return { ...departed, ...pruned, tokenHashes, tokens: spentTokens, tokenUses: tokenUseRows, oidcTokens: oidcTokens.length, ...deleted };
   });
+}
+
+/**
+ * A token's uses from before `cutoff`, except its latest: only the latest use renews a laptop token
+ * and shows as its last use, and a token in daily use would otherwise add a row an hour forever.
+ */
+async function pruneTokenUses(tx: Tx, cutoff: Date): Promise<number> {
+  const later = alias(tokenUses, "later");
+  const deleted = await tx
+    .delete(tokenUses)
+    .where(
+      and(
+        lt(tokenUses.at, cutoff),
+        exists(
+          tx
+            .select({ one: sql`1` })
+            .from(later)
+            .where(and(eq(later.tokenId, tokenUses.tokenId), gt(later.id, tokenUses.id))),
+        ),
+      ),
+    )
+    .returning({ id: tokenUses.id });
+  return deleted.length;
 }
 
 /**

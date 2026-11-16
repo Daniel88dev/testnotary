@@ -140,6 +140,39 @@ describe("tokens", () => {
     expect(await table("mismatches")).toContain(mismatch!.id);
     expect(await table("tokens")).toContain(h.tokenId);
   });
+
+  test("a laptop token in use loses its uses from before 90 days that a later one superseded, and stays live", async () => {
+    const h = await history();
+    for (const day of [30, 60, 100]) {
+      await at(daysOn(day), async () => expect((await api("GET", "/whoami", h.token)).status).toBe(200));
+    }
+    const usesBefore = JSON.parse(await table("token_uses")) as { token_id: string }[];
+    expect(usesBefore.filter((use) => use.token_id === h.tokenId)).toHaveLength(4);
+
+    await world.runRetentionJob({ at: daysOn(155) });
+
+    const usesAfter = JSON.parse(await table("token_uses")) as { token_id: string }[];
+    // Day 100's use is inside the window; days 0, 30 and 60 are before it, each followed by a later use.
+    expect(usesAfter.filter((use) => use.token_id === h.tokenId)).toHaveLength(1);
+    await at(daysOn(155), async () => expect((await api("GET", "/whoami", h.token)).status).toBe(200));
+  });
+});
+
+describe("spent Actions OIDC tokens", () => {
+  test("are forgotten once expired, and replaying one is still refused", async () => {
+    const h = await history();
+    const pull = await h.pull();
+    const oidc = await world.github.oidc.tokenFor({ repo: h.repo, sha: pull.sha, ref: "refs/pull/1/merge", eventName: "pull_request" }, "https://testnotary.dev");
+    const environment = { os: "Linux", arch: "X64", image: "ubuntu24", imageVersion: "20261110.1", node: "v24.11.0" };
+    expect((await api("POST", "/verifications", oidc, { suite: "test", environment })).status).toBe(200);
+    const jti = (JSON.parse(Buffer.from(oidc.split(".")[1]!, "base64url").toString("utf8")) as { jti: string }).jti;
+    expect(await table("oidc_token_uses")).toContain(jti);
+
+    await world.runRetentionJob({ at: daysOn(2) });
+
+    expect(await table("oidc_token_uses")).not.toContain(jti);
+    await at(daysOn(2), async () => expect((await api("POST", "/verifications", oidc, { suite: "test", environment })).status).toBe(401));
+  });
 });
 
 describe("the scheduled job's entry point", () => {
