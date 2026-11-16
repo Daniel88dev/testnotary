@@ -1,6 +1,6 @@
 import { LINKS, accountName, mismatchesPageUrl, runPageUrl, resolveServiceUrl, type FallbackReason, type JobOutcome, type VerificationResult } from "./shared.ts";
 import type { RunnerEnv } from "./runner.ts";
-import type { Verdict } from "./verify.ts";
+import { isFallbackReason, type Verdict } from "./verify.ts";
 
 // The one place that turns a job's verdict (and its tests, when they ran) into what the job shows:
 // the PR line (the check run's `output.title` and the job summary's headline), the summary below
@@ -118,9 +118,11 @@ function headline(verdict: Verdict, tests: TestsRan | null): string {
   }
 }
 
+/** The code, what it names in brackets, then its words; a code this action has no words for (a newer one) stands alone. */
 function reason(verdict: Verdict): string {
   const code = verdict.reason ?? "service_error";
-  return `${code}${verdict.detail ? ` (${verdict.detail})` : ""}, ${REASON_LINES[code]}`;
+  const words = isFallbackReason(code) ? `, ${REASON_LINES[code]}` : "";
+  return `${code}${verdict.detail ? ` (${verdict.detail})` : ""}${words}`;
 }
 
 /** For a skip, an audit or *would skip*: who attested, with which token, on what platform and Node. */

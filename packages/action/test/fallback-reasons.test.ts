@@ -496,6 +496,30 @@ describe("every fallback reason code runs the tests and names the code", () => {
   });
 });
 
+describe("a reason code this action doesn't know", () => {
+  // Adding a code is a minor version, so an action pinned to an older release meets codes from the
+  // always-current service that it has no words for. A service answering with one stands in here.
+  test.each([
+    { answered: "fallback", reason: "future_code", detail: null },
+    { answered: "fallback", reason: "future_code", detail: "what it names" },
+    { answered: "skip", reason: "future_code", detail: null },
+  ] as const)("$reason on a $answered (detail $detail) falls back with the code itself and runs the tests", async ({ answered, reason, detail }) => {
+    const s = await scene();
+    await s.attest();
+    const service = await world.compromisedService<Record<string, unknown>>((honest) => ({ ...honest, result: answered, reason, detail }));
+
+    const result = await s.ci({ env: { TESTNOTARY_URL: service } });
+
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(result.workspace, "ran.txt"))).toBe(true);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason, ran: "true" });
+    const title = line(result.summary);
+    expect(title).toMatch(new RegExp(`^Fell back: ${reason}${detail ? ` \\(${detail}\\)` : ""} · the tests passed in `));
+    expect(title).not.toContain("undefined");
+    expect(world.github.checkRuns(result.repo).at(-1)).toMatchObject({ conclusion: "neutral", output: { title } });
+  });
+});
+
 test("the table has a case for each of the 20 codes, which core exports as one list", () => {
   expect(FALLBACK_REASONS).toHaveLength(20);
   expect(new Set(FALLBACK_REASONS).size).toBe(20);

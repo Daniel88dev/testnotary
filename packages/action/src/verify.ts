@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
-import { verifyResponse, type CiEnvironment, type FallbackReason, type Verification, type VerificationResult } from "./shared.ts";
+import { FALLBACK_REASONS, verifyResponse, type CiEnvironment, type FallbackReason, type Verification, type VerificationResult } from "./shared.ts";
+
+/** Whether the code is one this action knows the words for. */
+export function isFallbackReason(code: string): code is FallbackReason {
+  return (FALLBACK_REASONS as readonly string[]).includes(code);
+}
 import { command, type RunnerEnv } from "./runner.ts";
 import { callService, type ServiceAnswer } from "./service.ts";
 
@@ -10,8 +15,11 @@ import { callService, type ServiceAnswer } from "./service.ts";
 /** What the job decided about its tests, before running or skipping them. */
 export interface Verdict {
   result: VerificationResult;
-  /** The fallback reason; null for a skip or *would skip*. */
-  reason: FallbackReason | null;
+  /**
+   * The fallback reason; null for a skip or *would skip*. A code from the service this action
+   * doesn't know (a newer one) stays as the service sent it, and is always a fallback.
+   */
+  reason: string | null;
   /**
    * What the reason's line names besides the code, e.g. the guarded file for
    * `guarded_file_changed` or the failed condition of a signature check. Null when nothing.
@@ -114,7 +122,14 @@ function verdictFrom(answer: ServiceAnswer): Verdict {
     const parsed = verifyResponse.safeParse(answer.body);
     if (!parsed.success) return fallback("service_error");
     const { verification } = parsed.data;
-    return { result: verification.result, reason: (verification.reason as FallbackReason | null) ?? null, detail: verification.detail, record: verification };
+    const { reason } = verification;
+    // Adding a reason code is a minor version: a code this action doesn't know is a fallback,
+    // whatever result came with it, so the tests run.
+    if (reason !== null && !isFallbackReason(reason)) {
+      const shadow = verification.result === "would_skip" || verification.result === "would_fall_back";
+      return { result: shadow ? "would_fall_back" : "fallback", reason, detail: verification.detail, record: verification };
+    }
+    return { result: verification.result, reason, detail: verification.detail, record: verification };
   }
   const { error, message } = (answer.body ?? {}) as { error?: unknown; message?: unknown };
   if (error === "github_denied") return githubDenied(typeof message === "string" ? message : "");
