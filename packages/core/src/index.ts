@@ -110,6 +110,18 @@ export interface RepoSettings {
 export const INITIAL_REPO_SETTINGS: RepoSettings = { mode: "shadow", auditOneIn: 10, sandboxAuditOneIn: 5 };
 
 export { SANDBOX_MARKERS, type SandboxMarker } from "./sandbox.ts";
+export { compareVersions, isOpenRange, isValidRange, parseVersion, satisfies, type Version } from "./semver.ts";
+export {
+  PACKAGE_JSON_NODE_FIELDS,
+  nodeMatches,
+  nodePinned,
+  nodeVersionFromFile,
+  packageJsonNodeVersion,
+  readNodeSpec,
+  type NodeRuntime,
+  type NodeSpec,
+  type PackageJsonNodeField,
+} from "./node-version.ts";
 export {
   ACTION_REF,
   KILL_SWITCH_VARIABLE,

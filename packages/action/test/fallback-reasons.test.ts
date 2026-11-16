@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { fromJob, githubError, installLibrary, type ActionResult, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine, type RunActionOptions, type SshKeyPair } from "@testnotary/test-world";
+import { fromJob, githubError, installLibrary, type ActionResult, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine, type RunActionOptions, type SshKeyPair, type SystemOptions } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
 import { FALLBACK_REASONS, type FallbackReason } from "@testnotary/core";
 
@@ -23,8 +23,8 @@ interface Scene {
   repo: FakeRepo;
   user: FakeAccount;
   machine: Machine;
-  /** `testnotary run` on the developer's laptop, on the feature branch; must attest. */
-  attest(env?: Record<string, string | undefined>): Promise<void>;
+  /** `testnotary run` on the developer's laptop, on the feature branch; must attest. `system`: the laptop's Node (faked). */
+  attest(env?: Record<string, string | undefined>, system?: SystemOptions): Promise<void>;
   /** The action in run mode on the pull request's test merge commit, with the library installed. */
   ci(options?: Partial<RunActionOptions> & { fetchDepth?: number; audit?: boolean }): Promise<CiResult>;
 }
@@ -59,8 +59,8 @@ async function scene(options: { config?: Record<string, unknown>; install?: bool
     repo,
     user,
     machine,
-    async attest(env) {
-      const result = await world.runCli(["run"], { cwd: fixture.dir, machine, env });
+    async attest(env, system) {
+      const result = await world.runCli(["run"], { cwd: fixture.dir, machine, env, system });
       expect(result.stderr).toMatch(/attested=true/);
     },
     async ci({ fetchDepth, audit = false, ...options } = {}) {
@@ -216,7 +216,8 @@ const CASES: Record<FallbackReason, Case> = {
       const s = await scene();
       await s.fixture.commit("Pin Node", { ".nvmrc": "24\n" });
       await s.fixture.push();
-      await s.attest();
+      // The laptop runs the Node the new .nvmrc names, so the run itself passes the environment floor.
+      await s.attest(undefined, { node: "v24.11.0", lts: "Krypton" });
       return s.ci();
     },
     detail: /\.nvmrc/,
