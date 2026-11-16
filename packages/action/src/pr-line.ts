@@ -1,8 +1,8 @@
 import { LINKS, accountName, mismatchesPageUrl, runPageUrl, resolveServiceUrl, type FallbackReason, type JobOutcome, type VerificationResult } from "./shared.ts";
 import type { RunnerEnv } from "./runner.ts";
-import { isFallbackReason, type Verdict } from "./verify.ts";
+import { isFallbackReason, type JobAnswer } from "./verify.ts";
 
-// The one place that turns a job's verdict (and its tests, when they ran) into what the job shows:
+// The one place that turns the answer a job acts on (and its tests, when they ran) into what the job shows:
 // the PR line (the check run's `output.title` and the job summary's headline), the summary below
 // it, the check run's conclusion and the step's outputs. Later tickets add their lines here:
 // a reason's explanation in REASON_LINES, a new result in `headline`, a new conclusion in
@@ -62,14 +62,14 @@ export const REASON_LINES: Record<FallbackReason, string> = {
   audit: "drawn for an audit",
 };
 
-/** Turns the verdict and the tests (null: they did not run) into the line, details, conclusion and outputs. */
-export function presentJob(env: RunnerEnv, verdict: Verdict, tests: TestsRan | null): JobPresentation {
-  const parts = [headline(verdict, tests), ...attestedBy(verdict), ...testsPart(verdict, tests)];
+/** Turns the answer the job acts on and the tests (null: they did not run) into the line, details, conclusion and outputs. */
+export function presentJob(env: RunnerEnv, jobAnswer: JobAnswer, tests: TestsRan | null): JobPresentation {
+  const parts = [headline(jobAnswer, tests), ...attestedBy(jobAnswer), ...testsPart(jobAnswer, tests)];
   return {
     line: oneLine(parts.join(" · ")),
-    details: details(env, verdict, tests),
-    conclusion: conclusion(verdict, tests),
-    outputs: { result: verdict.result, reason: verdict.reason ?? "", ran: String(tests !== null) },
+    details: details(env, jobAnswer, tests),
+    conclusion: conclusion(jobAnswer, tests),
+    outputs: { result: jobAnswer.result, reason: jobAnswer.reason ?? "", ran: String(tests !== null) },
   };
 }
 
@@ -80,19 +80,19 @@ export function presentJob(env: RunnerEnv, verdict: Verdict, tests: TestsRan | n
  * is none (it tested something else). A refused `exec` ran no tests, so it is none; nor is a
  * cancelled job, which never gets here.
  */
-export function isMismatch(verdict: Verdict, tests: TestsRan | null): boolean {
+export function isMismatch(jobAnswer: JobAnswer, tests: TestsRan | null): boolean {
   if (tests?.outcome !== "failed") return false;
-  if (verdict.result === "audit" || verdict.result === "would_skip") return true;
-  return verdict.result === "would_fall_back" && verdict.record?.result === "would_skip" && verdict.reason !== "no_attestation";
+  if (jobAnswer.result === "audit" || jobAnswer.result === "would_skip") return true;
+  return jobAnswer.result === "would_fall_back" && jobAnswer.record?.result === "would_skip" && jobAnswer.reason !== "no_attestation";
 }
 
 /**
  * `failure` for a mismatch, the only thing Testnotary fails; `success` for a skip, an audit whose
  * tests passed, or a run the attestation would have skipped; `neutral` for a fallback.
  */
-function conclusion(verdict: Verdict, tests: TestsRan | null): Conclusion {
-  if (isMismatch(verdict, tests)) return "failure";
-  switch (verdict.result) {
+function conclusion(jobAnswer: JobAnswer, tests: TestsRan | null): Conclusion {
+  if (isMismatch(jobAnswer, tests)) return "failure";
+  switch (jobAnswer.result) {
     case "skip":
     case "would_skip":
       return "success";
@@ -104,35 +104,35 @@ function conclusion(verdict: Verdict, tests: TestsRan | null): Conclusion {
   }
 }
 
-function headline(verdict: Verdict, tests: TestsRan | null): string {
-  const attestation = verdict.record?.attestation;
-  const age = attestation && verdict.record ? `${verdict.record.suite ?? "the suite"} passed ${ago(attestation.endedAt, verdict.record.createdAt)}` : "";
-  const mismatch = isMismatch(verdict, tests);
-  switch (verdict.result) {
+function headline(jobAnswer: JobAnswer, tests: TestsRan | null): string {
+  const attestation = jobAnswer.record?.attestation;
+  const age = attestation && jobAnswer.record ? `${jobAnswer.record.suite ?? "the suite"} passed ${ago(attestation.endedAt, jobAnswer.record.createdAt)}` : "";
+  const mismatch = isMismatch(jobAnswer, tests);
+  switch (jobAnswer.result) {
     case "skip":
       return `Skipped · ${age}`;
     case "would_skip":
       return `${mismatch ? "Mismatch: would have skipped" : "Would have skipped"} · ${age}`;
     case "fallback":
-      return `Fell back: ${reason(verdict)}`;
+      return `Fell back: ${reason(jobAnswer)}`;
     case "would_fall_back":
-      return `${mismatch ? "Mismatch: would have fallen back" : "Would have fallen back"}: ${reason(verdict)}`;
+      return `${mismatch ? "Mismatch: would have fallen back" : "Would have fallen back"}: ${reason(jobAnswer)}`;
     case "audit":
       return `${mismatch ? "Mismatch: the audit failed" : "Audit"} · ${age}`;
   }
 }
 
 /** The code, what it names in brackets, then its words; a code this action has no words for (a newer one) stands alone. */
-function reason(verdict: Verdict): string {
-  const code = verdict.reason ?? "service_error";
+function reason(jobAnswer: JobAnswer): string {
+  const code = jobAnswer.reason ?? "service_error";
   const words = isFallbackReason(code) ? `, ${REASON_LINES[code]}` : "";
-  return `${code}${verdict.detail ? ` (${verdict.detail})` : ""}${words}`;
+  return `${code}${jobAnswer.detail ? ` (${jobAnswer.detail})` : ""}${words}`;
 }
 
 /** For a skip, an audit or *would skip*: who attested, with which token, on what platform and Node. */
-function attestedBy(verdict: Verdict): string[] {
-  const attestation = verdict.record?.attestation;
-  if (!attestation || (verdict.result !== "skip" && verdict.result !== "would_skip" && verdict.result !== "audit")) return [];
+function attestedBy(jobAnswer: JobAnswer): string[] {
+  const attestation = jobAnswer.record?.attestation;
+  if (!attestation || (jobAnswer.result !== "skip" && jobAnswer.result !== "would_skip" && jobAnswer.result !== "audit")) return [];
   const { account, token } = attestation.attester;
   const who = accountName(account);
   const parts = !token.name
@@ -148,11 +148,11 @@ function attestedBy(verdict: Verdict): string[] {
   return parts;
 }
 
-function testsPart(verdict: Verdict, tests: TestsRan | null): string[] {
+function testsPart(jobAnswer: JobAnswer, tests: TestsRan | null): string[] {
   if (!tests) return [];
-  const shadow = verdict.result === "would_skip" || verdict.result === "would_fall_back" ? "shadow mode: " : "";
+  const shadow = jobAnswer.result === "would_skip" || jobAnswer.result === "would_fall_back" ? "shadow mode: " : "";
   const parts = [`${shadow}${testsPhrase(tests)}`];
-  if (verdict.result === "audit" && tests.mismatch) parts.push("the repo is back in shadow mode");
+  if (jobAnswer.result === "audit" && tests.mismatch) parts.push("the repo is back in shadow mode");
   return parts;
 }
 
@@ -163,15 +163,15 @@ function testsPhrase(tests: TestsRan): string {
   return `the tests failed in ${took} (exit code ${tests.exitCode})`;
 }
 
-function details(env: RunnerEnv, verdict: Verdict, tests: TestsRan | null): string {
-  const lines = [`- Result: \`${verdict.result}\``];
-  if (verdict.reason) lines.push(`- Reason: \`${verdict.reason}\``);
-  if (verdict.githubMessage) {
-    lines.push(`- GitHub said: ${escape(oneLine(verdict.githubMessage))}`);
+function details(env: RunnerEnv, jobAnswer: JobAnswer, tests: TestsRan | null): string {
+  const lines = [`- Result: \`${jobAnswer.result}\``];
+  if (jobAnswer.reason) lines.push(`- Reason: \`${jobAnswer.reason}\``);
+  if (jobAnswer.githubMessage) {
+    lines.push(`- GitHub said: ${escape(oneLine(jobAnswer.githubMessage))}`);
     lines.push(`- Testnotary has no fixed IP addresses, so GitHub IP allow lists are not supported in v1. See [Limits in v1](${LINKS.githubEnterpriseLimits}).`);
   }
   lines.push(`- Tests: ${tests ? escape(testsPhrase(tests)) : "not run in this step"}`);
-  const record = verdict.record;
+  const record = jobAnswer.record;
   if (record?.attestation) {
     const url = runPageUrl(resolveServiceUrl(env), record.repository.fullName, record.attestation.run.id);
     lines.push(`- Attested run: [${escape(record.attestation.run.id)}](${url})`);
@@ -179,18 +179,18 @@ function details(env: RunnerEnv, verdict: Verdict, tests: TestsRan | null): stri
     if (session) lines.push(`- Agent session (unverified): ${sessionLabels(session)}`);
   }
   if (record) lines.push(`- Verification: \`${record.id}\``);
-  if (record && isMismatch(verdict, tests)) lines.push(`- Mismatch: ${mismatchDetail(env, verdict, tests!)}`);
+  if (record && isMismatch(jobAnswer, tests)) lines.push(`- Mismatch: ${mismatchDetail(env, jobAnswer, tests!)}`);
   return lines.join("\n");
 }
 
 /** What happened about a mismatch, and where an admin explains it. Nothing is revoked and no other repo changes. */
-function mismatchDetail(env: RunnerEnv, verdict: Verdict, tests: TestsRan): string {
-  const record = verdict.record!;
+function mismatchDetail(env: RunnerEnv, jobAnswer: JobAnswer, tests: TestsRan): string {
+  const record = jobAnswer.record!;
   if (!tests.mismatch) return "the job report did not reach the service, so no mismatch was recorded.";
   const attester = record.attestation?.attester;
   const token = attester?.token.name ? `${attester.token.kind} token "${escape(oneLine(attester.token.name))}"` : `${attester?.token.kind} token`;
   const against = attester ? ` against ${escape(accountName(attester.account))}${attester.token.name ? " and " : ", "}${token}` : "";
-  const mode = verdict.result === "audit" ? " The repo is back in shadow mode until an admin switches enforce on again." : "";
+  const mode = jobAnswer.result === "audit" ? " The repo is back in shadow mode until an admin switches enforce on again." : "";
   const url = mismatchesPageUrl(resolveServiceUrl(env), record.repository.fullName);
   return `recorded${against}.${mode} Nothing was revoked. Explain it on the [Mismatches](${url}) page.`;
 }

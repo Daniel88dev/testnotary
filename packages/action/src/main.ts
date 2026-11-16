@@ -6,7 +6,7 @@ import { createCheckRun, writeSummary } from "./publish.ts";
 import { sendJobReport } from "./report.ts";
 import { checkSkip } from "./signature.ts";
 import { appendSummary, command, input, setOutputs, type RunnerEnv } from "./runner.ts";
-import { beforeTheService, onTheVerifiedTree, readVerification, verifyJob, type Verdict } from "./verify.ts";
+import { beforeTheService, onTheVerifiedTree, readVerification, verifyJob, type JobAnswer } from "./verify.ts";
 
 const env = process.env;
 const mode = input(env, "mode") || "run";
@@ -25,10 +25,10 @@ else {
  * skip: otherwise the test job runs and makes it, with the tests' outcome.
  */
 async function gate(env: RunnerEnv): Promise<number> {
-  const verdict = await checkSkip(env, beforeTheService(env) ?? (await verifyJob(env, suite)), suite);
-  const presentation = presentJob(env, verdict, null);
-  setOutputs(env, { ...presentation.outputs, skip: String(verdict.result === "skip"), verification: verdict.record?.id ?? "" });
-  await publish(env, verdict, presentation, { checkRun: verdict.result === "skip" });
+  const jobAnswer = await checkSkip(env, beforeTheService(env) ?? (await verifyJob(env, suite)), suite);
+  const presentation = presentJob(env, jobAnswer, null);
+  setOutputs(env, { ...presentation.outputs, skip: String(jobAnswer.result === "skip"), verification: jobAnswer.record?.id ?? "" });
+  await publish(env, jobAnswer, presentation, { checkRun: jobAnswer.result === "skip" });
   return 0;
 }
 
@@ -42,33 +42,33 @@ async function run(env: RunnerEnv): Promise<number> {
     return setupError(env, "run mode does not support Windows runners. Run the tests on Linux or macOS, or use a gate job (mode: verify), which works on any runner.");
   }
   const workspace = env.GITHUB_WORKSPACE || process.cwd();
-  const verdict = await checkSkip(env, await onTheVerifiedTree(workspace, await verdictForJob(env)), suite);
-  if (verdict.result === "skip") {
-    const presentation = presentJob(env, verdict, null);
+  const jobAnswer = await checkSkip(env, await onTheVerifiedTree(workspace, await answerForJob(env)), suite);
+  if (jobAnswer.result === "skip") {
+    const presentation = presentJob(env, jobAnswer, null);
     setOutputs(env, presentation.outputs);
-    await publish(env, verdict, presentation, { checkRun: true });
+    await publish(env, jobAnswer, presentation, { checkRun: true });
     return 0;
   }
 
-  const suiteName = suiteToRun(workspace, suite, verdict.record?.suite);
+  const suiteName = suiteToRun(workspace, suite, jobAnswer.record?.suite);
   if (!suiteName) {
-    setOutputs(env, { ...presentJob(env, verdict, null).outputs });
+    setOutputs(env, { ...presentJob(env, jobAnswer, null).outputs });
     return setupError(env, "name the suite with the `suite` input: the checked-out testnotary.json does not declare exactly one.");
   }
   const result = await execSuite(env, workspace, suiteName);
   if (result.kind === "library_not_found") {
-    setOutputs(env, { ...presentJob(env, verdict, null).outputs });
+    setOutputs(env, { ...presentJob(env, jobAnswer, null).outputs });
     return setupError(
       env,
       `the testnotary library was not found with \`${result.command}\`. Add testnotary to devDependencies and install dependencies before this step. The tests did not run: the action never runs the suite's command outside the library's stripped environment.`,
     );
   }
   const ran = { outcome: result.outcome, exitCode: result.exitCode, durationMs: result.durationMs };
-  const report = verdict.record ? await sendJobReport(env, { ...verdict, record: verdict.record }, ran) : undefined;
+  const report = jobAnswer.record ? await sendJobReport(env, { ...jobAnswer, record: jobAnswer.record }, ran) : undefined;
   const tests: TestsRan = { ...ran, mismatch: report?.mismatch ?? false };
-  const presentation = presentJob(env, verdict, tests);
+  const presentation = presentJob(env, jobAnswer, tests);
   setOutputs(env, presentation.outputs);
-  await publish(env, verdict, presentation, { checkRun: true });
+  await publish(env, jobAnswer, presentation, { checkRun: true });
   return tests.exitCode;
 }
 
@@ -76,7 +76,7 @@ async function run(env: RunnerEnv): Promise<number> {
  * A fallback decided before the service; else a gate job's verification when the step is given one
  * it can read back; otherwise its own.
  */
-async function verdictForJob(env: RunnerEnv): Promise<Verdict> {
+async function answerForJob(env: RunnerEnv): Promise<JobAnswer> {
   const early = beforeTheService(env);
   if (early) return early;
   const id = input(env, "verification");
@@ -88,8 +88,8 @@ async function verdictForJob(env: RunnerEnv): Promise<Verdict> {
   return verifyJob(env, suite);
 }
 
-async function publish(env: RunnerEnv, verdict: Verdict, presentation: JobPresentation, options: { checkRun: boolean }): Promise<void> {
-  const name = verdict.record?.suite ?? suite;
+async function publish(env: RunnerEnv, jobAnswer: JobAnswer, presentation: JobPresentation, options: { checkRun: boolean }): Promise<void> {
+  const name = jobAnswer.record?.suite ?? suite;
   process.stdout.write(`Testnotary: ${presentation.line}\n`);
   writeSummary(env, name, presentation);
   if (options.checkRun) await createCheckRun(env, name, presentation);

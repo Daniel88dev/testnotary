@@ -37,7 +37,7 @@ import {
   type TestnotaryConfig,
 } from "./shared.ts";
 import { input, type RunnerEnv } from "./runner.ts";
-import type { Verdict } from "./verify.ts";
+import type { JobAnswer } from "./verify.ts";
 
 /** How old a signature may be, counted from its signing time (the run's end). */
 export const SIGNATURE_MAX_AGE_MS = 24 * 3_600_000;
@@ -47,25 +47,25 @@ export const SIGNATURE_CLOCK_SKEW_MS = 5 * 60_000;
 const GITHUB_TIMEOUT_MS = 10_000;
 
 /**
- * The verdict the job acts on: a `skip` in a repo whose base config requires signatures stands
+ * The answer the job acts on: a `skip` in a repo whose base config requires signatures stands
  * only when the attestation's signature passes the check; otherwise the job falls back (keeping
  * the service's record, so the tests still report against it). Shadow mode previews the same
  * check: a *would skip* whose signature would fail reads *would have fallen back* with the
- * signature's reason, so it never counts as evidence for enforce. Any other verdict is returned as
+ * signature's reason, so it never counts as evidence for enforce. Any other answer is returned as
  * it is: only a skip is ever trusted.
  */
-export async function checkSkip(env: RunnerEnv, verdict: Verdict, suiteInput: string | null): Promise<Verdict> {
-  if (verdict.result !== "skip" && verdict.result !== "would_skip") return verdict;
+export async function checkSkip(env: RunnerEnv, jobAnswer: JobAnswer, suiteInput: string | null): Promise<JobAnswer> {
+  if (jobAnswer.result !== "skip" && jobAnswer.result !== "would_skip") return jobAnswer;
   const workspace = env.GITHUB_WORKSPACE || process.cwd();
   const mode = await signatureRequirement(env, workspace);
-  if (mode.kind === "off") return verdict;
-  const result = verdict.result === "skip" ? "fallback" : "would_fall_back";
-  const fallBack = (reason: FallbackReason, detail: string | null = null): Verdict => ({ result, reason, detail, record: verdict.record });
+  if (mode.kind === "off") return jobAnswer;
+  const result = jobAnswer.result === "skip" ? "fallback" : "would_fall_back";
+  const fallBack = (reason: FallbackReason, detail: string | null = null): JobAnswer => ({ result, reason, detail, record: jobAnswer.record });
   if (mode.kind === "unchecked") return fallBack(mode.problem.reason, mode.problem.detail);
-  const attestation = verdict.record?.attestation;
+  const attestation = jobAnswer.record?.attestation;
   if (!attestation?.signature || attestation.payload === null) return fallBack("signature_missing");
   const failed = await signatureProblem(env, workspace, mode.config, suiteInput, attestation.payload, attestation.signature.sshsig);
-  return failed ? fallBack(failed.reason, failed.detail) : verdict;
+  return failed ? fallBack(failed.reason, failed.detail) : jobAnswer;
 }
 
 /**
