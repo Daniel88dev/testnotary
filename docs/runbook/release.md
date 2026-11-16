@@ -67,7 +67,8 @@ node scripts/release/tag.ts     # tags on your clone only; delete with git tag -
 ## Maintainer checklist (settings no file can hold)
 
 - [ ] Branch protection on `main`: pull requests only, no force pushes, the CI checks required
-      (`lint`, `typecheck`, `licenses`, `terraform`, `image`, `test`), signed commits required.
+      (`lint`, `typecheck`, `licenses`, `library-node-floor`, `terraform`, `image`, `test`),
+      signed commits required.
 - [ ] A hardware second factor (security key or passkey) on the GitHub account.
 - [ ] A hardware second factor on the npm account, required for publishing and settings.
 - [ ] Dependabot alerts and security updates on (version updates come from `.github/dependabot.yml`,
