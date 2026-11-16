@@ -105,6 +105,26 @@ describe("the gate job", () => {
     expect(result.outputs.verification).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  test("a deleted attester reads deleted account in the line, with the token's kind and no name", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    // As the service answers once the account is deleted: deleted account, the token's name withheld.
+    const service = await world.compromisedService<{ attestation: { attester: unknown } | null }>((honest) => ({
+      ...honest,
+      attestation: honest.attestation && { ...honest.attestation, attester: { account: { id: 0, login: null }, token: { kind: "laptop", name: "" } } },
+    }));
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { suite: "test", mode: "verify" }, env: { TESTNOTARY_URL: service } });
+
+    expect(result.outputs).toMatchObject({ result: "skip" });
+    const title = world.github.checkRuns(s.repo).at(-1)!.output.title;
+    expect(title).toMatch(/ · attested by deleted account, laptop token(?: · |$)/);
+    expect(title).not.toContain('laptop token ""');
+  });
+
   test("the same pull request in shadow mode would skip, and does not skip", async () => {
     const s = await story();
     await featureBranch(s);

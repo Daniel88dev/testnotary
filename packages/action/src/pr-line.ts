@@ -131,8 +131,12 @@ function attestedBy(verdict: Verdict): string[] {
   if (!attestation || (verdict.result !== "skip" && verdict.result !== "would_skip" && verdict.result !== "audit")) return [];
   const { account, token } = attestation.attester;
   const who = accountName(account);
-  const parts =
-    token.kind === "sandbox" ? [`sandbox token "${token.name}", created by ${who}`] : [`attested by ${who}`, `laptop token "${token.name}"`];
+  const parts = !token.name
+    ? // A deleted account's token name is withheld: its kind alone.
+      [token.kind === "sandbox" ? `sandbox token, created by ${who}` : `attested by ${who}, laptop token`]
+    : token.kind === "sandbox"
+      ? [`sandbox token "${token.name}", created by ${who}`]
+      : [`attested by ${who}`, `laptop token "${token.name}"`];
   const environment = attestation.run.environment;
   if (environment) parts.push(`${environment.os}/${environment.arch}`, `Node ${environment.node.replace(/^v/, "")}`);
   const session = attestation.run.session;
@@ -180,7 +184,8 @@ function mismatchDetail(env: RunnerEnv, verdict: Verdict, tests: TestsRan): stri
   const record = verdict.record!;
   if (!tests.mismatch) return "the job report did not reach the service, so no mismatch was recorded.";
   const attester = record.attestation?.attester;
-  const against = attester ? ` against ${escape(accountName(attester.account))} and ${attester.token.kind} token "${escape(oneLine(attester.token.name))}"` : "";
+  const token = attester?.token.name ? `${attester.token.kind} token "${escape(oneLine(attester.token.name))}"` : `${attester?.token.kind} token`;
+  const against = attester ? ` against ${escape(accountName(attester.account))}${attester.token.name ? " and " : ", "}${token}` : "";
   const mode = verdict.result === "audit" ? " The repo is back in shadow mode until an admin switches enforce on again." : "";
   const url = mismatchesPageUrl(resolveServiceUrl(env), record.repository.fullName);
   return `recorded${against}.${mode} Nothing was revoked. Explain it on the [Mismatches](${url}) page.`;

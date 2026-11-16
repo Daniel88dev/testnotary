@@ -145,9 +145,9 @@ export async function mismatchViews(db: Executor, rows: MismatchRow[]): Promise<
     rows.map((row) => ({ accountId: row.accountId, at: row.attestedAt })),
   );
   return rows.map((row, index) => {
-    // A deleted account's mismatch keeps its copy of the payload and the signature (never removed
-    // on request), but no read hands them out: the payload names the account's GitHub id, the
-    // signature its key.
+    // A deleted account's mismatch keeps its copy of the payload, the signature and the token's
+    // name (never removed on request), but no read hands them out: the payload names the account's
+    // GitHub id, the signature its key, and the name is free text its owner picked.
     const withheld = accounts[index]!.id === DELETED_ACCOUNT.id;
     return {
       id: row.id,
@@ -157,7 +157,7 @@ export async function mismatchViews(db: Executor, rows: MismatchRow[]): Promise<
       tree: row.tree,
       event: row.event,
       account: accounts[index]!,
-      token: { id: row.tokenId, kind: row.tokenKind === "sandbox" ? "sandbox" : "laptop", name: row.tokenName },
+      token: { id: row.tokenId, kind: row.tokenKind === "sandbox" ? "sandbox" : "laptop", name: withheld ? "" : row.tokenName },
       attestation: {
         id: row.attestationId,
         runId: row.runId,

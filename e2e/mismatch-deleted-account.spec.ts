@@ -50,10 +50,14 @@ test("a deleted account's mismatch reads deleted account", async ({ page, world 
   const read = await page.request.get(`/api/v1/verifications/${verification.id}`, { headers: { authorization: `Bearer ${await job()}` } });
   expect(read.status()).toBe(200);
   const after = (await read.json()) as {
-    verification: { attestation: { payload: string | null; signature: unknown } | null; mismatch: { account: unknown; token: { kind: string }; attestation: { payload: string | null; signature: unknown } } | null };
+    verification: {
+      attestation: { payload: string | null; signature: unknown; attester: unknown } | null;
+      mismatch: { account: unknown; token: { kind: string; name: string }; attestation: { payload: string | null; signature: unknown } } | null;
+    };
   };
-  expect(after.verification.mismatch).toMatchObject({ account: { id: 0, login: null }, token: { kind: "laptop" }, attestation: { payload: null, signature: null } });
-  expect(after.verification.attestation).toMatchObject({ payload: null, signature: null });
+  // Token names are free text a person picks, so they are withheld too: the kind stays.
+  expect(after.verification.mismatch).toMatchObject({ account: { id: 0, login: null }, token: { kind: "laptop", name: "" }, attestation: { payload: null, signature: null } });
+  expect(after.verification.attestation).toMatchObject({ payload: null, signature: null, attester: { account: { id: 0, login: null }, token: { kind: "laptop", name: "" } } });
   for (const part of [after.verification.mismatch, after.verification.attestation]) {
     expect(JSON.stringify(part)).not.toContain("mira-mismatch");
     expect(JSON.stringify(part)).not.toMatch(new RegExp(`\\b${mira.id}\\b`));

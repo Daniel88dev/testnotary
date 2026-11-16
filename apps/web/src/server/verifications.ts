@@ -193,7 +193,8 @@ export async function readVerification(db: Executor, id: string, repoId: number)
           endedAt: attestation.endedAt.toISOString(),
           attester: {
             account: attester!,
-            token: { kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: token ? ((await currentNames(db, [token])).get(token.id) ?? token.name) : "" },
+            // A token's name is free text its owner picked, so it is withheld with the account.
+            token: { kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: token && !withheld ? ((await currentNames(db, [token])).get(token.id) ?? token.name) : "" },
           },
         }
       : null,
