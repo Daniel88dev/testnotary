@@ -79,8 +79,13 @@ export function displayArgv(argv: string[]): string {
   return argv.map((arg) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`)).join(" ");
 }
 
+/** What `command_not_found` says about the program. */
+export function commandNotFoundLine(program: string): string {
+  return `${program} was not found${program.includes("/") ? "" : " on PATH"}; install it, or point the command at a package.json script`;
+}
+
 /** Whether `program` resolves to an executable file: as a path when it has a slash, else on `PATH`. */
-async function findProgram(program: string, cwd: string, path: string | undefined): Promise<boolean> {
+export async function findProgram(program: string, cwd: string, path: string | undefined): Promise<boolean> {
   if (program.includes("/")) return isExecutableFile(isAbsolute(program) ? program : resolve(cwd, program));
   for (const dir of (path ?? "").split(delimiter)) {
     if (dir === "") continue;

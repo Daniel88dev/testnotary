@@ -19,7 +19,7 @@ import {
   type RefusalCode,
 } from "../shared.ts";
 import { signAttestation } from "../run/sign.ts";
-import { displayArgv, runSuiteCommand } from "../suite-command.ts";
+import { commandNotFoundLine, displayArgv, runSuiteCommand } from "../suite-command.ts";
 
 export const run: Command = {
   name: "run",
@@ -40,6 +40,10 @@ export const run: Command = {
       extraArguments: afterTerminator,
     });
     if (prepared.kind === "refused") return refuseBeforeStart(prepared, serviceUrl, output);
+    if (prepared.preflight.kind === "ok") {
+      const { account, token } = prepared.preflight.answer;
+      say(`attesting as @${account.login} with ${token.kind} token "${token.name}"`);
+    }
     return runSuite(prepared, output);
   },
 };
@@ -107,7 +111,7 @@ async function runSuite(ready: Ready, output: Output): Promise<number> {
   if (result.kind === "command_not_found") {
     return refuseAfterStart(
       "command_not_found",
-      [`${result.program} was not found${result.program.includes("/") ? "" : " on PATH"}; install it, or point the command at a package.json script`],
+      [commandNotFoundLine(result.program)],
       null,
       0,
     );
