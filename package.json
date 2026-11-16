@@ -31,7 +31,7 @@
     "@testnotary/core": "workspace:*",
     "@testnotary/protocol": "workspace:*",
     "@testnotary/test-world": "workspace:*",
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.6",
     "acorn": "^8.19.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
