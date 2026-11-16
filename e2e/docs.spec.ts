@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { FALLBACK_REASONS, REFUSAL_CODES, VERIFICATION_RESULTS, WARNING_CODES, parseConfig } from "@testnotary/core";
+import { FALLBACK_REASONS, REFUSAL_CODES, SESSION_AGENTS, VERIFICATION_RESULTS, WARNING_CODES, parseConfig } from "@testnotary/core";
 import { LINKS, githubDeniedCause, loginError } from "@testnotary/protocol";
 import { expect, test } from "@testnotary/test-world/playwright";
 
@@ -257,6 +257,15 @@ test("“How a skip is decided” lists the product-default guarded files the ve
   for (const glob of [".github/workflows/**", ".github/actions/**", "testnotary.json", ".testnotary/allowed_signers", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "package.json", ".nvmrc", ".node-version", ".tool-versions"]) {
     expect(listed, glob).toContain(glob);
   }
+});
+
+test("“Agents and sandbox tokens” lists the agents the library detects, from the library’s own table", async ({ page }) => {
+  await page.goto("/docs/agents");
+  const table = page.getByRole("main").getByRole("table", { name: "Agent detection" });
+  const agents = (await table.locator("tbody tr td:first-child").allInnerTexts()).map((text) => text.trim());
+  expect(agents).toEqual([...SESSION_AGENTS.map((agent) => agent.vendor), "Any other"]);
+  // Each row names the variables the library reads, in code.
+  for (const row of await table.locator("tbody tr").all()) expect(await row.locator("td:nth-child(2) code").count()).toBeGreaterThan(0);
 });
 
 test("“What leaves your machine” links the privacy policy, and the docs footer links the terms and the privacy policy", async ({ page }) => {

@@ -14,6 +14,7 @@ import {
   LAPTOP_TOKEN_LIFETIME_DAYS,
   PASSED_THROUGH,
   SANDBOX_MARKERS,
+  SESSION_AGENTS,
   WARNING_CODES,
 } from "@testnotary/core";
 import Link from "next/link";
@@ -339,6 +340,38 @@ function SandboxMarkers() {
   );
 }
 
+/** The agents the library names in a run's session labels, from its own table. */
+function SessionAgents() {
+  return (
+    <div className="table-wrap">
+      <table className="codes" aria-label="Agent detection">
+        <thead>
+          <tr>
+            <th scope="col">Agent</th>
+            <th scope="col">Read from</th>
+          </tr>
+        </thead>
+        <tbody>
+          {SESSION_AGENTS.map((agent) => (
+            <tr key={agent.vendor}>
+              <td>{agent.vendor}</td>
+              <td>
+                <Rich text={agent.readFrom} />
+              </td>
+            </tr>
+          ))}
+          <tr>
+            <td>Any other</td>
+            <td>
+              <Rich text="`AI_AGENT=<name>`, checked after the agents above" />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** The stripped environment: what the tests see before `env.pass` and `env.set`. */
 function BaselineEnvironment() {
   return (
@@ -399,6 +432,7 @@ export const MDX_COMPONENTS = {
   ConfigKeys,
   GuardedDefaults,
   SandboxMarkers,
+  SessionAgents,
   BaselineEnvironment,
   a: A,
   table: Table,

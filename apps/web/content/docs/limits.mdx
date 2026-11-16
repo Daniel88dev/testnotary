@@ -12,7 +12,7 @@ A repo can restrict which platforms may attest, such as `linux/x64`, with `platf
 
 **npm, pnpm and Yarn** (classic and Berry, Plug’n’Play included) on **Node**. Bun and Deno are refused with `package_manager_unsupported`. The library supports Node 20 and later.
 
-The library checks your Node and package manager against the versions the repo pins, and your install against the lockfile, using each package manager’s own install-state file. It never runs an install itself. **Hand edits inside `node_modules` go unnoticed:** the check compares the install state with the lockfile, not every installed file.
+The library checks your Node and package manager against the versions the repo pins, and your install against the lockfile, using each package manager’s own install-state file. It never runs your package manager, not even to ask its version: it reads the version from `npm_config_user_agent` when you start Testnotary through the package manager (`npx testnotary`, `pnpm exec testnotary`, `yarn testnotary`), else from the installed tool’s own files. A version manager’s shim, such as Volta’s or mise’s, hides the version, so run Testnotary through the package manager there. **Hand edits inside `node_modules` go unnoticed:** the check compares the install state with the lockfile, not every installed file. See [`package_manager_mismatch` and `install_stale`](/docs/refusals#package_manager_mismatch) for what to do when a check fails.
 
 ## Tests and commands
 
