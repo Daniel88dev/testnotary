@@ -1,7 +1,8 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { parseConfig } from "@testnotary/core";
+import { parseConfig, workflowSnippet } from "@testnotary/core";
 import { useWorld } from "@testnotary/test-world/vitest";
 
 const world = useWorld();
@@ -87,5 +88,183 @@ describe("testnotary init --yes", () => {
     expect(result.exitCode).toBe(0);
     expect(await read(repo.dir, "testnotary.json")).toBe(existing);
     expect(result.stderr).toContain("testnotary.json already exists");
+  });
+});
+
+// The block as the docs show it for pnpm and the suite `test` (apps/web: the setup guide's AGENTS.md panel).
+const PNPM_BLOCK = [
+  "## Tests",
+  "",
+  "Before you open or update a pull request, commit your work and run:",
+  "",
+  "    pnpm exec testnotary run test",
+  "",
+  "Run it exactly like that, with no extra arguments. If the last line",
+  "says outcome=refused, run `pnpm exec testnotary check test` and fix",
+  "what it names. If it says outcome=failed, fix the tests.",
+].join("\n");
+
+const PNPM_PACKAGE = manifest({ packageManager: "pnpm@10.34.9", scripts: { test: "vitest run" } });
+
+describe("the agent block", () => {
+  test("goes into a new AGENTS.md when the repo has no CLAUDE.md", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE } });
+
+    const result = await world.runCli(["init", "--yes"], { cwd: repo.dir });
+
+    expect(result.exitCode).toBe(0);
+    expect(await read(repo.dir, "AGENTS.md")).toBe(`${PNPM_BLOCK}\n`);
+  });
+
+  test("is appended to CLAUDE.md when the repo has one, keeping what is there, and AGENTS.md is not created", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE, "CLAUDE.md": "# Shop\n\nUse pnpm." } });
+
+    const result = await world.runCli(["init", "--yes"], { cwd: repo.dir });
+
+    expect(result.exitCode).toBe(0);
+    expect(await read(repo.dir, "CLAUDE.md")).toBe(`# Shop\n\nUse pnpm.\n\n${PNPM_BLOCK}\n`);
+    expect(existsSync(join(repo.dir, "AGENTS.md"))).toBe(false);
+  });
+
+  test("is appended to an existing AGENTS.md, and a second init adds nothing twice", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE, "AGENTS.md": "# Shop\n" } });
+
+    await world.runCli(["init", "--yes"], { cwd: repo.dir });
+    const again = await world.runCli(["init", "--yes"], { cwd: repo.dir });
+
+    expect(again.exitCode).toBe(0);
+    expect(await read(repo.dir, "AGENTS.md")).toBe(`# Shop\n\n${PNPM_BLOCK}\n`);
+  });
+
+  test("names the suite an existing testnotary.json declares", async () => {
+    const repo = await world.fixtureRepo({ config: { suites: { unit: { command: ["pnpm", "run", "test:unit"] } } }, files: { "package.json": PNPM_PACKAGE } });
+
+    const result = await world.runCli(["init", "--yes"], { cwd: repo.dir });
+
+    expect(result.exitCode).toBe(0);
+    expect(await read(repo.dir, "AGENTS.md")).toContain("    pnpm exec testnotary run unit\n");
+    expect(result.stdout).toContain("          suite: unit");
+  });
+});
+
+describe("testnotary init, interactive", () => {
+  const CONFIG_QUESTION = 'Write testnotary.json with suite "test" (pnpm run test)? [Y/n]';
+  const BLOCK_QUESTION = "Add the Testnotary block to AGENTS.md? [Y/n]";
+
+  test("asks before writing each file, and writes only what was agreed to", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE } });
+
+    const result = await world.runCli(["init"], { cwd: repo.dir, input: "y\nn\n" });
+
+    expect(result.exitCode).toBe(0);
+    const err = result.stderr;
+    expect(err.indexOf(CONFIG_QUESTION)).toBeGreaterThan(-1);
+    expect(err.indexOf(CONFIG_QUESTION)).toBeLessThan(err.indexOf("testnotary: wrote testnotary.json"));
+    expect(err.indexOf("testnotary: wrote testnotary.json")).toBeLessThan(err.indexOf(BLOCK_QUESTION));
+    expect(err).toContain("testnotary: AGENTS.md not changed");
+    expect(parseConfig(await read(repo.dir, "testnotary.json")).ok).toBe(true);
+    expect(existsSync(join(repo.dir, "AGENTS.md"))).toBe(false);
+    // Declined, the block is printed to paste by hand, before the workflow snippet.
+    expect(result.stdout).toContain(`add this to AGENTS.md:\n\n${PNPM_BLOCK}\n`);
+    expect(result.stdout).toContain("Next steps:");
+  });
+
+  test("a no to the config still offers the agent block, and asks about CLAUDE.md when the repo has one", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE, "CLAUDE.md": "# Shop\n" } });
+
+    const result = await world.runCli(["init"], { cwd: repo.dir, input: "n\nyes\n" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("Add the Testnotary block to CLAUDE.md? [Y/n]");
+    expect(existsSync(join(repo.dir, "testnotary.json"))).toBe(false);
+    expect(await read(repo.dir, "CLAUDE.md")).toBe(`# Shop\n\n${PNPM_BLOCK}\n`);
+  });
+
+  test("an empty answer takes the default, and an unclear one is asked again", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE } });
+
+    const result = await world.runCli(["init"], { cwd: repo.dir, input: "\nmaybe\nY\n" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr.split(BLOCK_QUESTION)).toHaveLength(3);
+    expect(parseConfig(await read(repo.dir, "testnotary.json")).ok).toBe(true);
+    expect(await read(repo.dir, "AGENTS.md")).toBe(`${PNPM_BLOCK}\n`);
+  });
+
+  test("with no answers at all it writes nothing", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE } });
+
+    const result = await world.runCli(["init"], { cwd: repo.dir, input: "" });
+
+    expect(result.stderr).toContain(CONFIG_QUESTION);
+    expect(await repo.git("status", "--porcelain", "--untracked-files=all")).toBe("");
+  });
+});
+
+describe("what init prints", () => {
+  test("it never touches .github/workflows and prints the snippet and the next steps", async () => {
+    const workflow = "name: CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pnpm test\n";
+    const repo = await world.fixtureRepo({
+      config: null,
+      defaultBranch: "trunk",
+      files: { "package.json": PNPM_PACKAGE, ".nvmrc": "24\n", ".github/workflows/ci.yml": workflow },
+    });
+
+    const result = await world.runCli(["init", "--yes"], { cwd: repo.dir });
+
+    expect(result.exitCode).toBe(0);
+    expect(await read(repo.dir, ".github/workflows/ci.yml")).toBe(workflow);
+    const changed = (await repo.git("status", "--porcelain", "--untracked-files=all")).split("\n").filter(Boolean).sort();
+    expect(changed).toEqual(["?? AGENTS.md", "?? testnotary.json"]);
+
+    const out = result.stdout;
+    // The triggers, the three permissions (open decision 1) and the kill switch.
+    expect(out).toContain("on:\n  pull_request:\n  push:\n    branches: [trunk]\n  merge_group:");
+    expect(out).toMatch(/^permissions:\n {2}contents: read\n {2}id-token: write +#.*\n {2}checks: write +#.*$/m);
+    expect(out).toContain("env:\n  TESTNOTARY_DISABLED: ${{ vars.TESTNOTARY_DISABLED }}");
+    expect(out).toContain("node-version-file: .nvmrc");
+    expect(out).toContain("- run: pnpm install --frozen-lockfile");
+    expect(out).toContain("uses: Daniel88dev/testnotary@v1\n        with:\n          suite: test");
+    // The snippet is the docs' own text, from the one definition in core.
+    expect(out).toContain(workflowSnippet({ packageManager: "pnpm", suite: "test", nodeVersionFile: ".nvmrc", defaultBranch: "trunk" }));
+
+    expect(out).toContain("Next steps:");
+    expect(out).toContain("Install the Testnotary GitHub App");
+    expect(out).toContain("pnpm exec testnotary login");
+    expect(out).toContain("pnpm exec testnotary run test");
+    expect(out).toContain("https://testnotary.dev/docs/agents");
+    expect(out).toContain("https://testnotary.dev/docs/setup");
+    expect(out).not.toContain("Pin ");
+  });
+
+  test("an unpinned repo is told to pin Node and the package manager", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": manifest({ scripts: { test: "node --test" } }), "package-lock.json": "" } });
+
+    const result = await world.runCli(["init", "--yes"], { cwd: repo.dir });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/Pin Node in \.nvmrc and the package manager .*"npm@/);
+    expect(result.stdout).toContain("- run: npm ci");
+  });
+
+  test("it starts no package manager", async () => {
+    const machine = await world.machine();
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE, "pnpm-lock.yaml": "" } });
+
+    const result = await world.runCli(["init", "--yes"], { cwd: repo.dir, machine });
+
+    expect(result.exitCode).toBe(0);
+    expect(await machine.packageManagerCalls()).toEqual([]);
+  });
+
+  test("anything but --yes is a usage error", async () => {
+    const repo = await world.fixtureRepo({ config: null, files: { "package.json": PNPM_PACKAGE } });
+
+    for (const args of [["init", "unit"], ["init", "--json"], ["init", "--force"]]) {
+      const result = await world.runCli(args, { cwd: repo.dir });
+      expect(result.exitCode).toBe(64);
+      expect(result.stderr).toContain("usage: testnotary init [--yes]");
+    }
+    expect(existsSync(join(repo.dir, "testnotary.json"))).toBe(false);
   });
 });

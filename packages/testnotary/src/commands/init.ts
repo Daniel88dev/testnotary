@@ -192,13 +192,18 @@ function nextSteps(options: NextSteps): string {
   }
   steps.push(
     "Install the Testnotary GitHub App on this repo.",
-    `Open one pull request with ${[...options.written, "the workflow change"].join(", ")}, and merge it.`,
+    `Open one pull request with ${listed([...options.written, "the workflow change"])}, and merge it.`,
     `On each laptop, sign in once: ${x} testnotary login`,
     `Give each agent a sandbox token: ${LINKS.sandboxTokens}`,
     `Before you push: ${x} testnotary run ${options.suite}`,
   );
   lines.push(...steps.map((step, index) => `  ${index + 1}. ${step}`), "", `The setup guide: ${LINKS.setupGuide}`, "");
   return lines.join("\n");
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+function listed(items: string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)!}`;
 }
 
 async function readText(path: string): Promise<string | undefined> {
@@ -228,10 +233,9 @@ class Questions {
     for (;;) {
       process.stderr.write(`${question} [Y/n] `);
       const answer = await this.nextLine();
-      if (answer === undefined) {
-        process.stderr.write("\n");
-        return false;
-      }
+      // A terminal echoes the answer and its newline; piped answers are echoed here instead.
+      if (!process.stdin.isTTY) process.stderr.write(`${answer ?? ""}\n`);
+      if (answer === undefined) return false;
       const word = answer.trim().toLowerCase();
       if (word === "" || word === "y" || word === "yes") return true;
       if (word === "n" || word === "no") return false;
