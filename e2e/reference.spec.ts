@@ -1,6 +1,7 @@
 import { FALLBACK_REASONS, REFUSAL_CODES, WARNING_CODES } from "@testnotary/core";
 import { expect, test } from "@testnotary/test-world/playwright";
 import type { Page } from "@playwright/test";
+import { EXIT } from "../packages/testnotary/src/report.ts";
 
 // The Reference group of the docs, checked against what the product does: every list on these
 // pages is the code's list, read here from the packages (or from the CLI and action.yml), never
@@ -35,3 +36,26 @@ for (const { path, table, codes } of CODE_PAGES) {
     for (const code of codes) await expect(page.locator(`tr#${code}`)).toHaveCount(1);
   });
 }
+
+/** The first cell of every row of each docs table whose first header is `header`, one list per table. */
+async function firstColumns(page: Page, header: string): Promise<string[][]> {
+  const lists: string[][] = [];
+  for (const table of await page.getByRole("main").locator("table").all()) {
+    if ((await table.locator("thead th").first().innerText()).trim() !== header) continue;
+    lists.push((await table.locator("tbody tr td:first-child").allInnerTexts()).map((text) => text.trim()));
+  }
+  return lists;
+}
+
+test("/docs/output lists the CLI's exit codes and the fields its --json objects really have", async ({ page, world }) => {
+  await page.goto("/docs/output");
+  expect(await firstColumns(page, "Exit code")).toEqual([Object.values(EXIT).sort((a, b) => a - b).map(String)]);
+
+  // The objects, from the CLI as a process: `exec --json` prints the run object, `check --json` its own.
+  const repo = await world.fixtureRepo({ config: { suites: { unit: { command: ["node", "-e", ""] } } } });
+  const exec = await world.runCli(["exec", "unit", "--json"], { cwd: repo.dir });
+  const check = await world.runCli(["check", "unit", "--json"], { cwd: repo.dir });
+  const [runFields, checkFields] = await firstColumns(page, "Field");
+  expect(runFields).toEqual(Object.keys(JSON.parse(exec.stdout) as object));
+  expect(checkFields).toEqual(Object.keys(JSON.parse(check.stdout) as object));
+});
