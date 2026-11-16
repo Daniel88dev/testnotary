@@ -13,7 +13,7 @@ inputs:
     required: false
     default: run
   verification:
-    description: A verification id from a gate job. When it is empty (the gate failed), the step verifies on its own.
+    description: A verification id from a gate job. When it is empty (the gate failed), or is not of this commit and suite, the step verifies on its own.
     required: false
   github-token:
     description: The token the `Testnotary / <suite>` check run is made with. It needs `checks: write`; without it the step writes only the job summary.

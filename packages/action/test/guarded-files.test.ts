@@ -50,11 +50,9 @@ async function story(options: { config?: Record<string, unknown>; files?: Record
   };
 }
 
-/** Switches the repo to enforce mode, as an admin's setting change would. */
+/** Switches the repo to enforce mode, as an admin's setting change does. */
 async function enforce(repo: FakeRepo) {
-  const sql = world.db.connect("app");
-  await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  await world.enforce(repo);
 }
 
 /**
@@ -222,10 +220,13 @@ describe("a repo's own guarded globs", () => {
 describe("the attestation's command", () => {
   test("differs from the suite's command in the config at the first parent: command_changed", async () => {
     const s = await story();
-    // The feature branch starts from the first main; then main changes the suite's command, and
-    // the developer, whose run reads the command from the fetched main, attests the branch with it.
+    // The feature branch starts from the first main, as does a release branch; then main changes
+    // the suite's command, and the developer, whose run reads the command from the fetched main,
+    // attests the branch with it.
+    await s.fixture.git("branch", "release", "main");
+    await s.fixture.push("release");
     await s.fixture.branch("feature");
-    const head = await s.fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
+    await s.fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
     await s.fixture.push();
     await s.fixture.checkout("main");
     await s.fixture.commit("Change the test command", { "testnotary.json": `${JSON.stringify({ suites: { test: { command: ["node", "-e", "process.exit(0)", "changed"] } } })}\n` });
@@ -233,8 +234,10 @@ describe("the attestation's command", () => {
     await s.fixture.checkout("feature");
     await s.attest();
 
-    // CI on the push of the branch builds its head, whose first parent has the old command.
-    const result = await s.gate(head, { event: "push", ref: "refs/heads/feature" });
+    // CI on the pull request into the release branch builds the attested tree, whose first parent
+    // (the release branch) has the old command.
+    const merge = await s.fixture.testMerge({ base: "release", head: "feature" });
+    const result = await s.gate(merge.sha);
 
     expect(result.outputs).toMatchObject({ result: "fallback", reason: "command_changed", skip: "false" });
     expect(line(result.summary)).toBe("Fell back: command_changed, the attested command differs from testnotary.json on the base branch");

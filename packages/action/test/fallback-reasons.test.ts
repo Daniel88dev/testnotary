@@ -46,11 +46,7 @@ async function scene(options: { config?: Record<string, unknown>; install?: bool
   const machine = await world.machine();
   world.github.deviceFlow.approveNext(user);
   expect((await world.runCli(["login"], { cwd: machine.home, machine })).exitCode).toBe(0);
-  if (installed) {
-    const sql = world.db.connect("app");
-    await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-              values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
-  }
+  if (installed) await world.enforce(repo);
   await fixture.branch("feature");
   await fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
   await fixture.push();
@@ -195,20 +191,22 @@ const CASES: Record<FallbackReason, Case> = {
   command_changed: {
     async run() {
       // main changes the suite's command after the branch left it; the developer's run reads the
-      // command from the fetched main, and CI on the push of the branch builds its head, whose
-      // first parent has the old one.
+      // command from the fetched main, and CI on a pull request of the branch into a release
+      // branch (cut from the first main) builds the attested tree, whose first parent has the old one.
       const s = await scene();
-      const head = (await s.fixture.git("rev-parse", "feature")).trim();
+      await s.fixture.git("branch", "release", "main");
+      await s.fixture.push("release");
       await s.fixture.checkout("main");
       await s.fixture.commit("Change the test command", { "testnotary.json": `${JSON.stringify({ suites: { test: { command: [...MARKED.suites.test.command, "changed"] } } })}\n` });
       await s.fixture.push();
       await s.fixture.checkout("feature");
       await s.attest();
       await world.audits.forbid(s.repo);
-      const workspace = await s.fixture.ciCheckout(head);
+      const merge = await s.fixture.testMerge({ base: "release", head: "feature" });
+      const workspace = await s.fixture.ciCheckout(merge.sha);
       await installLibrary(workspace);
-      const result = await world.runAction({ repo: s.repo, sha: head, workspace, event: "push", ref: "refs/heads/feature", inputs: { suite: "test" } });
-      return { ...result, workspace, sha: head, repo: s.repo };
+      const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+      return { ...result, workspace, sha: merge.sha, repo: s.repo };
     },
   },
   guarded_file_changed: {
@@ -347,6 +345,8 @@ describe("identity and GitHub", () => {
     expect(check!.output.summary).toContain("[Limits in v1](https://testnotary.dev/docs/limits#github-enterprise)");
     expect(result.summary).toContain(check!.output.title);
     expect(result.summary).toContain("[Limits in v1](https://testnotary.dev/docs/limits#github-enterprise)");
+    // The service recorded it, so the dashboard counts it among the reasons jobs ran.
+    expect(result.summary).toMatch(/- Verification: `[0-9a-f-]{36}`/);
   });
 
   test("github_denied for another reason names no allow list and passes no message", async () => {
@@ -365,6 +365,7 @@ describe("identity and GitHub", () => {
     expect(result.outputs).toMatchObject({ result: "fallback", reason: "github_denied", ran: "true" });
     expect(line(result.summary)).toMatch(/^Fell back: github_denied, GitHub refused the service's request · /);
     expect(result.summary).not.toMatch(/Resource not accessible|Limits in v1/);
+    expect(result.summary).toMatch(/- Verification: `[0-9a-f-]{36}`/);
   });
 
   test("repo_not_installed: the App isn't on the repo, and the tests run", async () => {
@@ -493,6 +494,30 @@ describe("every fallback reason code runs the tests and names the code", () => {
     // The code, its detail in brackets (the case's when it names one), then the words for the code.
     else expect(title).toMatch(new RegExp(`^Fell back: ${code}${detail ? ` \\(.*${detail.source}.*\\)` : "(?: \\(.+\\))?"}, [^·]+ · the tests passed in `));
     expect(world.github.checkRuns(result.repo).at(-1)).toMatchObject({ conclusion: audit ? "success" : "neutral", output: { title } });
+  });
+});
+
+describe("a reason code this action doesn't know", () => {
+  // Adding a code is a minor version, so an action pinned to an older release meets codes from the
+  // always-current service that it has no words for. A service answering with one stands in here.
+  test.each([
+    { answered: "fallback", reason: "future_code", detail: null },
+    { answered: "fallback", reason: "future_code", detail: "what it names" },
+    { answered: "skip", reason: "future_code", detail: null },
+  ] as const)("$reason on a $answered (detail $detail) falls back with the code itself and runs the tests", async ({ answered, reason, detail }) => {
+    const s = await scene();
+    await s.attest();
+    const service = await world.compromisedService<Record<string, unknown>>((honest) => ({ ...honest, result: answered, reason, detail }));
+
+    const result = await s.ci({ env: { TESTNOTARY_URL: service } });
+
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(result.workspace, "ran.txt"))).toBe(true);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason, ran: "true" });
+    const title = line(result.summary);
+    expect(title).toMatch(new RegExp(`^Fell back: ${reason}${detail ? ` \\(${detail}\\)` : ""} · the tests passed in `));
+    expect(title).not.toContain("undefined");
+    expect(world.github.checkRuns(result.repo).at(-1)).toMatchObject({ conclusion: "neutral", output: { title } });
   });
 });
 

@@ -35,7 +35,7 @@ export async function createSandboxToken(_previous: CreateSandboxTokenState, for
   return { kind: "created", value: issued.value, name, repository: access.repo.fullName, expiresAt: issued.info.expiresAt };
 }
 
-/** The creator revokes their own sandbox token (an admin revoking any of a repo's comes later). */
+/** The creator revokes their own sandbox token (a repo admin revokes any of the repo's in revocation-actions.ts). */
 export async function revokeSandboxToken(form: FormData): Promise<void> {
   const viewer = await getViewer();
   if (!viewer) return;

@@ -6,7 +6,7 @@ import { GitHubUnavailable } from "./github.ts";
 import { logEvent } from "./log.ts";
 import { oidcTokenUses } from "../db/schema.ts";
 
-// The Actions OIDC token a CI job sends with each verification (NOTES/github-behaviours.md §2).
+// The Actions OIDC token a CI job sends with each verification.
 
 /** Tokens live 300 s from `iat`; the service allows 60 s of clock skew on every time claim. */
 const TOKEN_LIFETIME_S = 300;
@@ -20,6 +20,8 @@ export interface ActionsClaims {
   sha: string;
   repositoryId: number;
   eventName: string;
+  /** The ref the workflow ran for, e.g. `refs/heads/main` on a push; empty when the token has none. */
+  ref: string;
   exp: number;
   /**
    * Where the job's log is: `run_id`, `run_attempt` and `check_run_id` (the job's id), when the
@@ -122,5 +124,6 @@ export async function acceptActionsToken(db: Executor, token: string | undefined
   if (spent.length === 0) return rejected("replayed_jti");
   const runId = numericClaim(payload.run_id);
   const ciRun = runId === null ? null : { runId, attempt: numericClaim(payload.run_attempt), jobId: numericClaim(payload.check_run_id) };
-  return { iss, jti, sha, repositoryId: Number(repositoryId), eventName, exp, ciRun };
+  const ref = typeof payload.ref === "string" ? payload.ref : "";
+  return { iss, jti, sha, repositoryId: Number(repositoryId), eventName, ref, exp, ciRun };
 }

@@ -70,14 +70,12 @@ async function ciWorkspace(s: Story, sha: string, options: { library?: boolean }
 }
 
 /**
- * Switches the repo to enforce mode, as an admin's setting change would (the toggle comes later),
+ * Switches the repo to enforce mode, as an admin's setting change does,
  * with a key version under which no tree attested so far is drawn for an audit: the skip tests
  * here are about skipping, and audits have their own (audit.test.ts).
  */
 async function enforce(repo: FakeRepo) {
-  const sql = world.db.connect("app");
-  await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  await world.enforce(repo);
   await world.audits.forbid(repo);
 }
 
@@ -206,6 +204,27 @@ describe("the gate recipe", () => {
     expect(callsSince(from).slice(0, 2)).toEqual([`GET /api/v1/verifications/${gate.outputs.verification}`, "POST /api/v1/verifications"]);
   });
 
+  test("a verification id of another suite is not reused: the step verifies its own suite", async () => {
+    const both = { suites: { test: MARKED().suites.test, e2e: MARKED().suites.test } };
+    const s = await story({ config: both });
+    await pullRequest(s);
+    // Only `test` is attested; the gate for it skips in enforce mode.
+    expect((await world.runCli(["run", "test"], { cwd: s.fixture.dir, machine: s.machine })).stderr).toMatch(/attested=true/);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    const gate = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { suite: "test", mode: "verify" } });
+    expect(gate.outputs).toMatchObject({ result: "skip", skip: "true" });
+    const workspace = await ciWorkspace(s, merge.sha);
+    const from = world.service.requests.length;
+
+    // A hand-written workflow hands the `test` gate's id to the e2e job.
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "e2e", verification: gate.outputs.verification! } });
+
+    expect(callsSince(from).slice(0, 2)).toEqual([`GET /api/v1/verifications/${gate.outputs.verification}`, "POST /api/v1/verifications"]);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(existsSync(join(workspace, "ran.txt"))).toBe(true);
+  });
+
   test("a gate job that skips writes the PR line itself, since the test job won't run", async () => {
     const s = await story();
     await pullRequest(s);
@@ -248,7 +267,14 @@ describe("the job report", () => {
     expect(reports).toHaveLength(1);
     expect(reports[0]!.headers.authorization).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
     const sent = JSON.parse(reports[0]!.text) as Record<string, unknown>;
-    expect(sent).toEqual({ outcome: "failed", durationMs: expect.any(Number) as number, environment: { os: "Linux", arch: "X64", image: null, imageVersion: null, node: process.version } });
+    expect(sent).toEqual({
+      outcome: "failed",
+      durationMs: expect.any(Number) as number,
+      environment: { os: "Linux", arch: "X64", image: null, imageVersion: null, node: process.version },
+      result: "would_fall_back",
+      reason: "no_attestation",
+      detail: null,
+    });
     const verificationId = /^\/api\/v1\/verifications\/([^/]+)\/report$/.exec(reports[0]!.path)![1]!;
     const read = await readBack(s.repo, merge.sha, verificationId);
     expect(read.verification).toMatchObject({ result: "would_fall_back", jobReport: { outcome: "failed", durationMs: sent.durationMs } });
@@ -296,6 +322,70 @@ describe("the job report", () => {
     const report = world.service.requests.slice(from).find((r) => r.path.endsWith("/report"))!;
     const verificationId = /^\/api\/v1\/verifications\/([^/]+)\/report$/.exec(report.path)![1]!;
     expect((await readBack(s.repo, merge.sha, verificationId)).verification).toMatchObject({ jobReport: null });
+  });
+});
+
+describe("the job tests the verified tree, or falls back", () => {
+  /** Passes where `src/a.js` exists (the attested pull request), fails where it doesn't. */
+  const NEEDS_A = { suites: { test: { command: ["node", "-e", "require('fs').writeFileSync('ran.txt', 'x'); process.exit(require('fs').existsSync('src/a.js') ? 0 : 1)"] } } };
+
+  test("a checkout of another ref than the commit verified (`actions/checkout` with `ref:`) falls back and runs the tests", async () => {
+    const s = await story();
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    // The job checks out the base branch, not GITHUB_SHA.
+    const workspace = await ciWorkspace(s, await s.fixture.revParse("main"));
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(workspace, "ran.txt"))).toBe(true);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(world.github.checkRuns(s.repo)[0]!.output.title).toMatch(/^Fell back: no_attestation \(the checked-out tree is not the verified tree\), no passing run attested this tree · the tests passed in /);
+    // The service answered skip; the report says the job fell back, so the dashboard counts a fallback.
+    const id = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    expect((await readBack(s.repo, merge.sha, id)).verification).toMatchObject({ result: "skip", jobReport: { result: "fallback", reason: "no_attestation" } });
+  });
+
+  test("an audit on another tree records no mismatch when its tests fail: they tested something else", async () => {
+    const s = await story({ config: NEEDS_A });
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    await world.audits.force(s.repo);
+    const workspace = await ciWorkspace(s, await s.fixture.revParse("main"));
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(world.github.checkRuns(s.repo)[0]).toMatchObject({ conclusion: "neutral" });
+    const id = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    expect((await readBack(s.repo, merge.sha, id)).verification).toMatchObject({ result: "audit", mismatch: null, jobReport: { outcome: "failed", result: "fallback" } });
+  });
+
+  test("pull_request_target, whose GITHUB_SHA is the base's head while the job tests a fork's code, falls back", async () => {
+    const s = await story({ config: NEEDS_A });
+    await pullRequest(s);
+    await s.attest();
+    // The maintainer's attested work is on the base branch; a fork's pull request deletes src/a.js.
+    await s.fixture.git("push", "--quiet", "origin", "feature:main");
+    const base = await s.fixture.revParse("feature");
+    await enforce(s.repo);
+    await s.fixture.branch("fork-change");
+    await s.fixture.git("rm", "--quiet", "src/a.js");
+    await s.fixture.commit("Drop a");
+    await s.fixture.push("fork-change");
+    const workspace = await ciWorkspace(s, await s.fixture.revParse("fork-change"));
+
+    const result = await world.runAction({ repo: s.repo, sha: base, event: "pull_request_target", workspace, inputs: { suite: "test" } });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(world.github.checkRuns(s.repo)[0]!.output.title).toMatch(/^Fell back: no_attestation \(event pull_request_target is not verified\), /);
   });
 });
 

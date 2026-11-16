@@ -1,5 +1,5 @@
 import { and, asc, eq, gte, sql } from "drizzle-orm";
-import type { RepoMode } from "@testnotary/core";
+import { VERIFICATION_RESULTS, type RepoMode, type VerificationResult } from "@testnotary/core";
 import { DELETED_ACCOUNT, accountName } from "@testnotary/protocol";
 import { repoStates, runs, tokens, verifications } from "../db/schema.ts";
 import { retainedSince, verificationRows } from "./history.ts";
@@ -107,8 +107,8 @@ export const DEFAULT_PERIOD: Period = 14;
 const DAY_MS = 86_400_000;
 
 /** The results a verification can have, in the order the jobs chart stacks them. */
-export const JOB_RESULTS = ["skip", "audit", "fallback", "would_skip", "would_fall_back"] as const;
-export type JobResult = (typeof JOB_RESULTS)[number];
+export const JOB_RESULTS = VERIFICATION_RESULTS;
+export type JobResult = VerificationResult;
 type ByResult = Record<JobResult, number>;
 
 const noJobs = (): ByResult => ({ skip: 0, audit: 0, fallback: 0, would_skip: 0, would_fall_back: 0 });
@@ -183,12 +183,16 @@ const median = (values: number[]): number | null => {
 export async function overviewOf(db: Executor, repoId: number, period: Period, at: Date): Promise<Overview> {
   const { days, since } = periodWindow(period, at);
   const retained = retainedSince(at);
+  // The latest report's outcome and duration, and what the job did when the report says (see
+  // shown-results.ts): its own result and reason count instead of the service's answer.
   const latestReport = sql`left join lateral (
-      select r.outcome, r.duration_ms from job_reports r where r.verification_id = v.id order by r.seq desc limit 1
+      select r.outcome, r.duration_ms, r.result, r.reason from job_reports r where r.verification_id = v.id order by r.seq desc limit 1
     ) report on true`;
   const [grouped, durations, local, recorded] = await Promise.all([
     db.execute<{ day: string; suite: string | null; result: string; reason: string | null; outcome: string | null; n: number }>(sql`
-      select to_char(v.created_at at time zone 'UTC', 'YYYY-MM-DD') as day, v.suite, v.result, v.reason, report.outcome, count(*)::int as n
+      select to_char(v.created_at at time zone 'UTC', 'YYYY-MM-DD') as day, v.suite,
+             coalesce(report.result, v.result) as result, case when report.result is null then v.reason else report.reason end as reason,
+             report.outcome, count(*)::int as n
       from verifications v ${latestReport}
       where v.repo_id = ${repoId} and v.created_at >= ${since.toISOString()} and v.created_at <= ${at.toISOString()}
       group by 1, 2, 3, 4, 5`),

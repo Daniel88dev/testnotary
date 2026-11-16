@@ -21,16 +21,17 @@ The service checks the token’s signature against GitHub’s keys, its issuer, 
 | Check | Reason when it fails |
 |---|---|
 | The GitHub App is installed on the repo. | `repo_not_installed` |
+| The event is one whose commit is the code the job tests: `pull_request`, `merge_group`, or a `push` to the default branch. Anything else (`pull_request_target`, `workflow_run`, `issue_comment`, `schedule`, a push to another branch) never skips; the detail names the event. | `no_attestation` |
 | The suite exists in `testnotary.json` at the built commit’s first parent. | `unknown_suite` |
 | No changed path matches a guarded file: the product defaults plus the repo’s own globs. | `guarded_file_changed` |
 | Some attestation for the repo and suite names the same tree. | `no_attestation` |
 | Its command equals the suite’s command in that same config. | `command_changed` |
-| It is under <Fact name="attestationAge" /> old, counted from the end of the run. | `attestation_expired` |
+| It is under <Fact name="attestationAge" /> old, counted from the end of the run (or from when the service received it, if the uploader's clock ran ahead). | `attestation_expired` |
 | No revocation, block or token expiry has voided it. | `attestation_revoked` |
 | The attester, or a sandbox token’s creator, has `admin` or `write` on the repo, asked live. | `attester_no_write` |
 | The audit draw doesn’t pick this skip. | `audit` |
 
-When several attestations name the tree, each is tried, newest first, until one clears every check. A GitHub refusal while checking (an IP allow list, for example) is `github_denied`.
+When several attestations name the tree, each is tried, newest first, until one clears every check. A GitHub refusal while checking (an IP allow list, for example) is `github_denied`, and GitHub failing is `github_unavailable`; both are recorded like any other answer.
 
 Everything is read from the config at the built commit’s **first parent**, the base side of a pull request’s merge commit. So a pull request can’t loosen its own rules: a changed command or a new guarded glob counts from the next pull request on, and the config file is itself guarded.
 
@@ -46,8 +47,12 @@ In enforce mode a clean answer skips the test step and the action outputs `resul
 
 A repo whose base-branch config sets `"signatures": "required"` adds one more gate before a skip: the action itself checks the attester’s signature, with keys from GitHub or from the repo, without trusting the service. No signature is `signature_missing`; one that fails any of the seven conditions is `signature_invalid`; a GitHub call that fails or is rate-limited is `github_unavailable`. See [Security](/docs/security).
 
+## The checkout
+
+In run mode the action then compares its own checkout with the tree the service verified. A job that checked out something else (`actions/checkout` with `ref:`, say) doesn’t skip, isn’t audited and isn’t a shadow comparison: it falls back with `no_attestation`, detail `the checked-out tree is not the verified tree`, and runs its tests. A gate job has no checkout to compare, so give the test job no `ref:` of its own.
+
 ## After the tests
 
-When the tests ran, the action reports the outcome and how long the test command took, with a fresh OIDC token. A failed report only logs a warning. The step’s exit code is always the tests’ exit code, and a skip exits 0, so the job’s result means what it always meant. Only an audit can turn a skip into a failed build.
+When the tests ran, the action reports the outcome and how long the test command took, with a fresh OIDC token. The report also says what the job did in the end, which differs from the service’s answer when the action fell back on its own (the signature check, say): the dashboard counts the job by what it did, so such a job is a fallback with its own reason, never a skip. A failed report only logs a warning. The step’s exit code is always the tests’ exit code, and a skip exits 0, so the job’s result means what it always meant. Only an audit can turn a skip into a failed build.
 
 <Next pages="reasons shadow audits gate" />

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { FakeAccount } from "./app.ts";
 
-// GitHub's OAuth device flow for the App (NOTES/github-behaviours.md §11): a device code, then
+// GitHub's OAuth device flow for the App: a device code, then
 // polling for the user token. Nobody types the code into a browser in tests; instead a test plans
 // what happens to the next device code: who approves it, after how many pending polls and
 // slow_downs, or that the person denies it.

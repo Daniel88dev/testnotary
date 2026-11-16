@@ -34,7 +34,7 @@ interface Scene {
 let repos = 0;
 
 /** An installed repo in enforce mode whose base requires signatures, and a writer signed in on their laptop. */
-async function scene(options: { config?: Record<string, unknown>; files?: Record<string, string> } = {}): Promise<Scene> {
+async function scene(options: { config?: Record<string, unknown>; files?: Record<string, string>; shadow?: boolean } = {}): Promise<Scene> {
   const n = ++repos;
   const fixture = await world.fixtureRepo({
     config: options.config ?? SIGNED,
@@ -47,9 +47,7 @@ async function scene(options: { config?: Record<string, unknown>; files?: Record
   const machine = await world.machine();
   world.github.deviceFlow.approveNext(user);
   expect((await world.runCli(["login"], { cwd: machine.home, machine })).exitCode).toBe(0);
-  const sql = world.db.connect("app");
-  await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  if (!options.shadow) await world.enforce(repo);
   await fixture.branch("feature");
   await fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
   await fixture.push();
@@ -163,6 +161,13 @@ describe("a run with no usable signing key in signature mode", () => {
 
     expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_missing", ran: "true" });
     expect(line(result.summary)).toMatch(/^Fell back: signature_missing, the repo requires signatures and the attestation has none · the tests passed in /);
+    // The service answered skip; the job report says what the job did instead, so the dashboard
+    // counts a fallback, not a skip.
+    const verificationId = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    const [report] = world.service.requests.filter((request) => request.path === `/api/v1/verifications/${verificationId}/report`);
+    expect(JSON.parse(report!.text)).toMatchObject({ outcome: "passed", result: "fallback", reason: "signature_missing", detail: null });
+    const verification = await readBack(s.repo, result.sha, verificationId);
+    expect(verification).toMatchObject({ result: "skip", jobReport: { outcome: "passed", result: "fallback", reason: "signature_missing" } });
   });
 
   test("a key ssh-keygen can't use also uploads unsigned with the warning", async () => {
@@ -175,6 +180,63 @@ describe("a run with no usable signing key in signature mode", () => {
     expect(JSON.parse(run.stdout)).toMatchObject({ outcome: "passed", attested: true, warnings: ["no_signing_key"] });
     expect(run.stderr).toMatch(/testnotary: the repo requires signatures, but ssh-keygen could not sign with \/nonexistent\/key/);
     expect(uploads(s.repo)[0]!.attestation).toEqual({ payload: expect.any(String) });
+  });
+});
+
+describe("shadow mode in a signature-mode repo", () => {
+  // Shadow mode is the evidence for switching enforce on, so it previews the signature check: a
+  // would-skip whose signature would fail reads would-have-fallen-back, and is no comparison.
+  test("a would-skip without a signature reads would_fall_back with signature_missing, and is no agreeing comparison", async () => {
+    const s = await scene({ shadow: true });
+    expect((await world.runCli(["run"], { cwd: s.fixture.dir, machine: s.machine })).stderr).toMatch(/attested=true/);
+
+    const result = await s.ci();
+
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs).toMatchObject({ result: "would_fall_back", reason: "signature_missing", ran: "true" });
+    expect(line(result.summary)).toMatch(/^Would have fallen back: signature_missing, the repo requires signatures and the attestation has none · shadow mode: the tests passed in /);
+    const id = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    expect(await readBack(s.repo, result.sha, id)).toMatchObject({ result: "would_skip", jobReport: { outcome: "passed", result: "would_fall_back", reason: "signature_missing" } });
+    // The shadow record beside the toggle counts no agreement from it.
+    const admin = world.github.addUser({ login: `sigmode-admin-${s.repo.id}` });
+    world.github.setPermission(s.repo, admin, "admin");
+    const change = await world.changeRepoSettings({ admin, repo: s.repo, mode: "enforce" });
+    expect(change.ok && change.warnings).toEqual(["Fewer than 20 agreeing comparisons: 0 so far."]);
+  });
+
+  test("a would-skip with a valid signature is still an agreeing comparison", async () => {
+    const s = await scene({ shadow: true });
+    const key = await world.sshKey();
+    world.github.addSigningKey(s.user, key.publicKey);
+    await useSigningKey(s.fixture, key);
+    expect((await s.attest()).stderr).toMatch(/attested=true/);
+
+    const result = await s.ci();
+
+    expect(result.outputs).toMatchObject({ result: "would_skip", ran: "true" });
+    const admin = world.github.addUser({ login: `sigmode-admin-${s.repo.id}` });
+    world.github.setPermission(s.repo, admin, "admin");
+    const change = await world.changeRepoSettings({ admin, repo: s.repo, mode: "enforce" });
+    expect(change.ok && change.warnings).toEqual(["Fewer than 20 agreeing comparisons: 1 so far."]);
+  });
+
+  test("a would-skip whose signature would fail and whose tests fail in CI is still a mismatch", async () => {
+    // Passes on the laptop, fails in CI (where `local-only` is absent: it is ignored by git).
+    const s = await scene({
+      shadow: true,
+      config: { signatures: "required", suites: { test: { command: ["node", "-e", "process.exit(require('fs').existsSync('local-only') ? 0 : 1)"] } } },
+      files: { ".gitignore": "node_modules\nlocal-only\n" },
+    });
+    await s.fixture.write({ "local-only": "x" });
+    expect((await world.runCli(["run"], { cwd: s.fixture.dir, machine: s.machine })).stderr).toMatch(/attested=true/);
+
+    const result = await s.ci();
+
+    expect(result.exitCode).toBe(1);
+    expect(result.outputs).toMatchObject({ result: "would_fall_back", reason: "signature_missing", ran: "true" });
+    expect(world.github.checkRuns(s.repo)[0]).toMatchObject({ conclusion: "failure" });
+    const id = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    expect((await readBack(s.repo, result.sha, id)).mismatch).toMatchObject({ result: "would_skip" });
   });
 });
 

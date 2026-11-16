@@ -16,9 +16,10 @@ export type {
   VerificationState,
   VerificationStep,
 } from "./context.ts";
-export { FALLBACK_REASONS, VERIFICATION_RESULTS, type FallbackReason, type VerificationResult } from "./reasons.ts";
+export { COMPARED_RESULTS, FALLBACK_REASONS, SHADOW_RESULTS, VERIFICATION_RESULTS, type FallbackReason, type VerificationResult } from "./reasons.ts";
 export { ATTESTATION_MAX_AGE_MS } from "./steps/age.ts";
 export { COMPARE_FILE_LIMIT } from "./steps/guarded-files.ts";
+export { VERIFIED_EVENTS } from "./steps/event.ts";
 export { VERIFICATION_STEPS } from "./steps/index.ts";
 
 export interface VerificationDecision {

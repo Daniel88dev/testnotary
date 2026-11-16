@@ -59,6 +59,12 @@ Mismatch: the audit failed · unit passed 9 min ago · attested by @maria-k · l
 Mismatch: would have skipped · unit passed 14 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0 · shadow mode: the tests failed in 51 s (exit code 1)
 ```
 
+In a repo that requires signatures, a *would have skipped* whose signature would fail reads *would have fallen back*; when its tests then fail, it is still a mismatch, since the attested tree failed:
+
+```check unit pull_request
+Mismatch: would have fallen back: signature_missing, the repo requires signatures and the attestation has none · shadow mode: the tests failed in 51 s (exit code 1)
+```
+
 The age reads `under a minute ago`, `9 min ago` or `3 h ago`. Durations read `1.2 s` under ten seconds, `48 s` under two minutes, then `4 min`. When `exec` refused to start the tests, the line says `exec refused to start the tests (exit code 2)`.
 
 ## The check run’s conclusion

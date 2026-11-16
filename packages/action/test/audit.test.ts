@@ -106,11 +106,9 @@ async function readBack(repo: FakeRepo, sha: string, id: string): Promise<Verifi
   return ((await response.json()) as { verification: Verification }).verification;
 }
 
-/** A setting change, as an admin's would be (the Settings page comes with T-828). */
-async function setMode(repo: FakeRepo, mode: "shadow" | "enforce", rates: { auditOneIn?: number; sandboxAuditOneIn?: number } = {}) {
-  const sql = world.db.connect("app");
-  await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, ${mode}, ${rates.auditOneIn ?? 10}, ${rates.sandboxAuditOneIn ?? 5}, null, 'test')`;
+/** Enforce mode, with these rates, as a repo admin's Settings change does. */
+async function setMode(repo: FakeRepo, mode: "enforce", rates: { auditOneIn?: number; sandboxAuditOneIn?: number } = {}) {
+  await world.enforce(repo, rates);
 }
 
 /**
@@ -300,18 +298,20 @@ describe("a mismatch is self-contained", () => {
     expect(mismatch.skippedCommits.map((skipped) => skipped.commit)).toEqual([later.sha]);
     expect(mismatch.skippedCommits[0]).toMatchObject({ tree: later.tree, suite: SUITE, event: "pull_request" });
 
-    // Retention prunes the rows the mismatch came from (at 90 days); nothing in the mismatch row
+    // The retention job prunes the rows the mismatch came from at 90 days; nothing in the mismatch
     // points at them, so it stays, with its copies.
-    const retention = world.db.connect("retention");
-    await retention`delete from job_reports where verification_id in (select id from verifications where repo_id = ${s.repo.id})`;
-    await retention`delete from verifications where repo_id = ${s.repo.id}`;
-    await retention`delete from attestations where repo_id = ${s.repo.id}`;
-    await retention`delete from runs where repo_id = ${s.repo.id}`;
-    const [kept] = await retention<{ payload: Buffer; ciEnvironment: unknown; skippedCommits: unknown[]; accountId: number; tokenKind: string }[]>`
-      select attestation_payload as payload, ci_environment as "ciEnvironment", skipped_commits as "skippedCommits", account_id::int as "accountId", token_kind as "tokenKind"
-      from mismatches where id = ${mismatch.id}`;
-    expect(kept!.payload.toString("utf8")).toBe(mismatch.attestation.payload);
-    expect(kept).toMatchObject({ ciEnvironment: mismatch.environments.ci, skippedCommits: mismatch.skippedCommits, accountId: s.user.id, tokenKind: "laptop" });
+    await world.runRetentionJob({ at: new Date(Date.now() + 91 * 86_400_000) });
+    const gone = await fetch(`${world.service.url}/api/v1/verifications/${verificationId}`, {
+      headers: { authorization: `Bearer ${await world.github.oidc.tokenFor({ repo: s.repo, sha: failing.sha, ref: "refs/pull/1/merge", eventName: "pull_request" }, "https://testnotary.dev")}` },
+    });
+    expect(gone.status).toBe(404);
+    const dump = await world.db.dump();
+    // The mismatch's own copies, wherever they are kept: the exact payload bytes, CI's environment
+    // and the skipped commits.
+    expect(dump).toContain(mismatch.id);
+    expect(dump).toContain(JSON.stringify(Buffer.from(mismatch.attestation.payload!, "utf8")));
+    expect(dump).toContain(JSON.stringify(mismatch.environments.ci));
+    expect(dump).toContain(JSON.stringify(mismatch.skippedCommits));
   });
 });
 
@@ -460,6 +460,13 @@ describe("audit rates", () => {
   ])("a setting below the defaults is refused: 1 in $auditOneIn, sandbox 1 in $sandboxAuditOneIn", async (rates) => {
     const s = await story();
 
-    await expect(setMode(s.repo, "enforce", rates)).rejects.toThrow(/repo_setting_changes_(sandbox_)?audit_rate/);
+    const admin = world.github.addUser({ login: `rates-admin-${s.repo.id}` });
+    world.github.setPermission(s.repo, admin, "admin");
+
+    const change = await world.changeRepoSettings({ admin, repo: s.repo, mode: "enforce", ...rates });
+
+    expect(change).toMatchObject({ ok: false, problem: expect.stringMatching(/1 in (10|5)/) as string });
+    // Nothing changed: the rates are still the defaults.
+    expect(await world.changeRepoSettings({ admin, repo: s.repo })).toMatchObject({ ok: true, settings: { auditOneIn: 10, sandboxAuditOneIn: 5 } });
   });
 });

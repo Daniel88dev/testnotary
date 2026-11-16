@@ -16,7 +16,7 @@ import {
   type RepoView,
 } from "./installations.ts";
 
-// The App's webhooks (NOTES/github-behaviours.md §12): `installation`, `installation_repositories`
+// The App's webhooks: `installation`, `installation_repositories`
 // and `repository`. Handled inline, with no queue. Each delivery is applied once, by its
 // `X-GitHub-Delivery` id, and the reply describes the installation afterwards, which GitHub shows
 // under the App's "Recent deliveries".

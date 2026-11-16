@@ -36,6 +36,8 @@ interface PastVerification {
   reason?: string;
   /** The job's reports, in arrival order: outcome and the test command's duration in seconds. */
   reports?: ["passed" | "failed" | "refused", number][];
+  /** What the job did in the end, as its reports say, when it fell back on its own (a newer action's reports). */
+  local?: { result: "fallback" | "would_fall_back"; reason: string; detail?: string };
 }
 
 /**
@@ -54,8 +56,9 @@ async function pastHistory(world: World, repoId: number, rows: PastVerification[
                 ${row.result.startsWith("would") ? "shadow" : "enforce"}, ${row.result}, ${row.reason ?? null}, ${sql.json(CI_ENVIRONMENT)}, ${at})
         returning id`;
       for (const [index, [outcome, seconds]] of (row.reports ?? []).entries()) {
-        await sql`insert into job_reports (verification_id, outcome, duration_ms, environment, created_at)
-                  values (${inserted!.id}, ${outcome}, ${seconds * 1000}, ${sql.json(CI_ENVIRONMENT)}, ${new Date(at.getTime() + 60_000 * (index + 1))})`;
+        await sql`insert into job_reports (verification_id, outcome, duration_ms, environment, created_at, result, reason, detail)
+                  values (${inserted!.id}, ${outcome}, ${seconds * 1000}, ${sql.json(CI_ENVIRONMENT)}, ${new Date(at.getTime() + 60_000 * (index + 1))},
+                          ${row.local?.result ?? null}, ${row.local?.reason ?? null}, ${row.local?.detail ?? null})`;
       }
     }
   } finally {
@@ -197,6 +200,38 @@ test("the KPIs, the daily chart, the suites and the fallback reasons count the r
   await reasons.nth(0).getByRole("link").click();
   await expect(page).toHaveURL(/\/olek-overview\/tally\/verifications\?reason=no_attestation$/);
   await expect(page.getByRole("heading", { level: 1, name: "Verifications" })).toBeVisible();
+});
+
+test("a job that fell back on its own counts as a fallback with its own reason, wherever the service answered skip", async ({ page, world }) => {
+  const { repo } = await installedRepo(world, "lina-local", "ledger", PASSING);
+  await pastHistory(world, repo.id, [
+    { daysAgo: 0, suite: "unit", result: "skip" },
+    // The service answered skip; the action's signature check found no signature and ran the tests.
+    { daysAgo: 1, suite: "unit", result: "skip", reports: [["passed", 60]], local: { result: "fallback", reason: "signature_missing" } },
+    // A shadow would-skip whose signature would fail: no comparison, and no would-skip.
+    { daysAgo: 2, suite: "unit", result: "would_skip", reports: [["passed", 40]], local: { result: "would_fall_back", reason: "signature_invalid", detail: "permission: @someone has read, not admin or write" } },
+    { daysAgo: 2, suite: "unit", result: "fallback", reason: "no_attestation", reports: [["passed", 60]] },
+  ]);
+
+  await page.goto("/lina-local/ledger");
+  const kpis = page.getByRole("group", { name: "Key numbers" });
+  await expect(kpis.getByRole("link", { name: /Test jobs skipped/ })).toContainText("1 of 4 test jobs");
+  const why = page.getByRole("list", { name: "Why jobs ran" });
+  await expect(why.getByRole("listitem")).toHaveCount(3);
+  await expect(why).toContainText(/Signature required, none given\s*1/);
+  await expect(why).toContainText(/Signature check failed\s*1/);
+
+  // The Verifications list shows each by what the job did: one skip, and the fallback under its reason.
+  const rows = page.getByRole("table", { name: "Verifications" }).locator("tbody tr");
+  await page.goto("/lina-local/ledger/verifications?result=skip");
+  await expect(rows).toHaveCount(1);
+  await page.goto("/lina-local/ledger/verifications?reason=signature_missing");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.nth(0)).toContainText("Ran");
+  await page.goto("/lina-local/ledger/verifications?result=shadow");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.nth(0)).toContainText("Would have fallen back");
+  await expect(rows.nth(0)).toContainText("permission: @someone has read, not admin or write");
 });
 
 test("a repo with no verifications shows the setup checklist with the missing step marked", async ({ page, world }) => {

@@ -79,14 +79,12 @@ async function featureBranch(s: Story, files: Record<string, string> = { "src/a.
 }
 
 /**
- * Switches the repo to enforce mode, as an admin's setting change would (the toggle comes later),
+ * Switches the repo to enforce mode, as an admin's setting change does,
  * with a key version under which no tree attested so far is drawn for an audit: the skip tests
  * here are about skipping, and audits have their own (audit.test.ts).
  */
 async function enforce(repo: FakeRepo) {
-  const sql = world.db.connect("app");
-  await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  await world.enforce(repo);
   await world.audits.forbid(repo);
 }
 
@@ -103,6 +101,26 @@ describe("the gate job", () => {
     expect(result.exitCode).toBe(0);
     expect(result.outputs).toMatchObject({ result: "skip", skip: "true", ran: "false", reason: "" });
     expect(result.outputs.verification).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("a deleted attester reads deleted account in the line, with the token's kind and no name", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    // As the service answers once the account is deleted: deleted account, the token's name withheld.
+    const service = await world.compromisedService<{ attestation: { attester: unknown } | null }>((honest) => ({
+      ...honest,
+      attestation: honest.attestation && { ...honest.attestation, attester: { account: { id: 0, login: null }, token: { kind: "laptop", name: "" } } },
+    }));
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { suite: "test", mode: "verify" }, env: { TESTNOTARY_URL: service } });
+
+    expect(result.outputs).toMatchObject({ result: "skip" });
+    const title = world.github.checkRuns(s.repo).at(-1)!.output.title;
+    expect(title).toMatch(/ · attested by deleted account, laptop token(?: · |$)/);
+    expect(title).not.toContain('laptop token ""');
   });
 
   test("the same pull request in shadow mode would skip, and does not skip", async () => {
@@ -229,6 +247,19 @@ describe("the verification output", () => {
     expect(result.outputs).toMatchObject({ result: "would_skip", skip: "false" });
   });
 
+  test("skips in enforce mode on a runner with no checkout, the base config read through GitHub", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    const empty = await world.machine();
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: empty.home, inputs: { suite: "test", mode: "verify" } });
+
+    expect(result.outputs).toMatchObject({ result: "skip", skip: "true" });
+  });
+
   test("names the config's only suite when the job leaves suite out", async () => {
     const s = await story();
     await featureBranch(s);
@@ -302,6 +333,45 @@ describe("the gate job falls back", () => {
     } finally {
       world.clock.reset();
     }
+  });
+
+  test("a run whose end lies ahead of the service's clock ages from when the service received it", async () => {
+    const s = await story();
+    await featureBranch(s);
+    try {
+      // The laptop's clock runs 4 minutes ahead of the service's: inside the 5 minutes of skew an
+      // upload may claim, so the run is accepted with an end in the service's future.
+      const received = new Date(Date.now() - 4 * 60_000);
+      world.clock.set(received);
+      await s.attest();
+      await enforce(s.repo);
+      const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+      world.clock.set(new Date(received.getTime() + 24 * 3_600_000 + 60_000));
+      const result = await s.gate({ sha: merge.sha });
+
+      expect(result.outputs).toMatchObject({ result: "fallback", reason: "attestation_expired", skip: "false" });
+    } finally {
+      world.clock.reset();
+    }
+  });
+
+  test("the attester's write access is asked of the repo by its id: a missed rename and a new repo under the old name lend nothing", async () => {
+    const { s, merge } = await attestedPullRequest();
+    const installation = [...world.github.state.installations.values()].find((candidate) => candidate.repoIds.has(s.repo.id))!;
+    const oldName = s.repo.name;
+    // GitHub renames the repo, and the service misses the webhook.
+    world.github.state.moveRepo(s.repo, s.repo.owner, `${oldName}-renamed`);
+    // A new repo takes the old name in the same installation (with the same history, say a copy),
+    // and the attester can write there only.
+    const newcomer = world.github.addRepo(s.fixture, { owner: s.repo.owner, name: oldName });
+    await world.github.addInstallationRepos(installation, [newcomer]);
+    world.github.setPermission(newcomer, s.user, "write");
+    world.github.setPermission(s.repo, s.user, "read");
+
+    const result = await s.gate({ sha: merge.sha });
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "attester_no_write", skip: "false" });
   });
 
   test.each(["read", "triage", "none"] as const)("when the attester now has only %s: attester_no_write", async (permission) => {

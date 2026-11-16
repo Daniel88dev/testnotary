@@ -11,14 +11,14 @@ export interface InstallationToken {
 
 /**
  * A job's `GITHUB_TOKEN`: it reaches only the workflow's own repo, with the workflow's
- * `permissions`. A fork pull request's token is read-only whatever the workflow asks (§9).
+ * `permissions`. A fork pull request's token is read-only whatever the workflow asks.
  */
 export interface JobToken {
   repoId: number;
   checks: "write" | "read";
 }
 
-/** A check run made through `POST /repos/{owner}/{repo}/check-runs` (§9). */
+/** A check run made through `POST /repos/{owner}/{repo}/check-runs`. */
 export interface FakeCheckRun {
   id: number;
   repoId: number;
@@ -32,7 +32,7 @@ export interface FakeCheckRun {
   app: { slug: string; id: number };
 }
 
-/** An SSH signing key on a person's GitHub account (`GET /users/{login}/ssh_signing_keys`, §8). */
+/** An SSH signing key on a person's GitHub account (`GET /users/{login}/ssh_signing_keys`). */
 export interface FakeSigningKey {
   id: number;
   accountId: number;
@@ -70,11 +70,11 @@ export class GitHubState {
   readonly accounts = new Map<string, FakeAccount>();
   /** Every user token (`ghu_…`) handed out by the device flow or the browser sign-in, and whose it is. */
   readonly userTokens = new Map<string, FakeAccount>();
-  /** Installation access tokens (`ghs_…`) the App bought, by value (§10). */
+  /** Installation access tokens (`ghs_…`) the App bought, by value. */
   readonly installationTokens = new Map<string, InstallationToken>();
   /**
    * Collaborator permissions set by tests, by repo id then account id. Anyone not listed reads
-   * `read` on a public repo and `none` on a private one (§7); the owner of a personal repo is admin.
+   * `read` on a public repo and `none` on a private one; the owner of a personal repo is admin.
    */
   readonly permissions = new Map<number, Map<number, RepoPermission>>();
   /** Every job's `GITHUB_TOKEN`, by value. */
@@ -116,7 +116,7 @@ export class GitHubState {
     return [...this.accounts.values()].find((account) => account.id === id);
   }
 
-  /** What `GET …/collaborators/{login}/permission` reports: `maintain` folds into `write`, `triage` into `read` (§7). */
+  /** What `GET …/collaborators/{login}/permission` reports: `maintain` folds into `write`, `triage` into `read`. */
   permission(repo: FakeRepo, account: FakeAccount): "admin" | "write" | "read" | "none" {
     const set = this.explicitRole(repo, account);
     if (set === "maintain") return "write";

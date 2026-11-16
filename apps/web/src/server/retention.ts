@@ -21,6 +21,7 @@ import {
   repoStates,
   repos,
   runs,
+  sessionEnds,
   tokenBlocks,
   tokenRenames,
   tokenRevocations,
@@ -28,7 +29,9 @@ import {
   tokenUses,
   tokens,
   verifications,
+  webhookDeliveries,
 } from "../db/schema.ts";
+import { SESSION_SECONDS } from "./config.ts";
 import { RETAINED_DAYS } from "./history.ts";
 import { clearSpentTokenHashes } from "./revocations.ts";
 import { tokenExpiry } from "./tokens.ts";
@@ -42,14 +45,18 @@ import { tokenExpiry } from "./tokens.ts";
 // - a repo that left Testnotary (uninstalled, removed, deleted, transferred) loses all its data
 //   30 days after it left, unless it came back first;
 // - a deleted account loses its login at once and its row once nothing names it;
-// - and, so storage stays bounded, a token's superseded uses from before the window and spent
-//   Actions OIDC token ids a day after they expired.
+// - and, so storage stays bounded, a token's superseded uses from before the window, spent
+//   Actions OIDC token ids a day after they expired, webhook delivery ids 30 days after they
+//   arrived (GitHub redelivers for 3 days at most), and ended sessions a day after the session
+//   could have expired anyway.
 // Repos go first, so that what only they named (blocks, setting changes, mismatches) no longer
 // holds back a token or an account later in the same pass.
 
 const DAY_MS = 86_400_000;
 /** How long a repo's data outlives its leaving: a reinstall before then gets its history back. */
 export const DEPARTED_DAYS = 30;
+/** How long a webhook delivery's id is kept against a duplicate delivery. */
+export const DELIVERY_DAYS = 30;
 
 /** How many rows of each kind one pass deleted. */
 export interface RetentionSummary {
@@ -71,6 +78,10 @@ export interface RetentionSummary {
   tokenUses: number;
   /** Spent Actions OIDC tokens (kept against replay) a day past their expiry. */
   oidcTokens: number;
+  /** Webhook delivery ids (kept against duplicates) 30 days after they arrived. */
+  webhookDeliveries: number;
+  /** Ended sessions a day past the longest the session could have lasted. */
+  sessionEnds: number;
   /** Cached logins of deleted accounts. */
   logins: number;
   /** Rows of deleted accounts that nothing names any more. */
@@ -95,8 +106,26 @@ export async function runRetention(retention: Database, at: Date): Promise<Reten
       .delete(oidcTokenUses)
       .where(lt(oidcTokenUses.expiresAt, new Date(at.getTime() - DAY_MS)))
       .returning({ jti: oidcTokenUses.jti });
+    const deliveries = await tx
+      .delete(webhookDeliveries)
+      .where(lt(webhookDeliveries.receivedAt, new Date(at.getTime() - DELIVERY_DAYS * DAY_MS)))
+      .returning({ id: webhookDeliveries.deliveryId });
+    const ended = await tx
+      .delete(sessionEnds)
+      .where(lt(sessionEnds.at, new Date(at.getTime() - SESSION_SECONDS * 1000 - DAY_MS)))
+      .returning({ id: sessionEnds.sessionId });
     const deleted = await forgetDeletedAccounts(tx);
-    return { ...departed, ...pruned, tokenHashes, tokens: spentTokens, tokenUses: tokenUseRows, oidcTokens: oidcTokens.length, ...deleted };
+    return {
+      ...departed,
+      ...pruned,
+      tokenHashes,
+      tokens: spentTokens,
+      tokenUses: tokenUseRows,
+      oidcTokens: oidcTokens.length,
+      webhookDeliveries: deliveries.length,
+      sessionEnds: ended.length,
+      ...deleted,
+    };
   });
 }
 

@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
-import { serviceConfig, type ServiceConfig } from "./config.ts";
+import { SESSION_SECONDS, serviceConfig, type ServiceConfig } from "./config.ts";
 import { fetchUser } from "./github.ts";
 
 // Browser sessions, and only those (the CLI's tokens are ours, see tokens.ts). better-auth runs the
@@ -17,8 +17,7 @@ import { fetchUser } from "./github.ts";
 
 export const GITHUB_PROVIDER = "github";
 export const COOKIE_PREFIX = "testnotary";
-/** GitHub's App user tokens last 8 hours, so a session does too; signing in again is one click. */
-export const SESSION_SECONDS = 8 * 60 * 60;
+export { SESSION_SECONDS } from "./config.ts";
 
 const DISABLED_PATHS = [
   "/sign-up/email",

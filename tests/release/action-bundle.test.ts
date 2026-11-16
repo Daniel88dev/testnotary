@@ -58,9 +58,7 @@ async function story(config = MARKED()) {
 }
 
 async function enforce(repo: FakeRepo) {
-  const sql = world.db.connect("app");
-  await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  await world.enforce(repo);
   await world.audits.forbid(repo);
 }
 

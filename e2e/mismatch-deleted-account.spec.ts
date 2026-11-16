@@ -50,10 +50,14 @@ test("a deleted account's mismatch reads deleted account", async ({ page, world 
   const read = await page.request.get(`/api/v1/verifications/${verification.id}`, { headers: { authorization: `Bearer ${await job()}` } });
   expect(read.status()).toBe(200);
   const after = (await read.json()) as {
-    verification: { attestation: { payload: string | null; signature: unknown } | null; mismatch: { account: unknown; token: { kind: string }; attestation: { payload: string | null; signature: unknown } } | null };
+    verification: {
+      attestation: { payload: string | null; signature: unknown; attester: unknown } | null;
+      mismatch: { account: unknown; token: { kind: string; name: string }; attestation: { payload: string | null; signature: unknown } } | null;
+    };
   };
-  expect(after.verification.mismatch).toMatchObject({ account: { id: 0, login: null }, token: { kind: "laptop" }, attestation: { payload: null, signature: null } });
-  expect(after.verification.attestation).toMatchObject({ payload: null, signature: null });
+  // Token names are free text a person picks, so they are withheld too: the kind stays.
+  expect(after.verification.mismatch).toMatchObject({ account: { id: 0, login: null }, token: { kind: "laptop", name: "" }, attestation: { payload: null, signature: null } });
+  expect(after.verification.attestation).toMatchObject({ payload: null, signature: null, attester: { account: { id: 0, login: null }, token: { kind: "laptop", name: "" } } });
   for (const part of [after.verification.mismatch, after.verification.attestation]) {
     expect(JSON.stringify(part)).not.toContain("mira-mismatch");
     expect(JSON.stringify(part)).not.toMatch(new RegExp(`\\b${mira.id}\\b`));
@@ -66,4 +70,12 @@ test("a deleted account's mismatch reads deleted account", async ({ page, world 
   await expect(open.getByRole("article")).toContainText("deleted account, laptop token");
   await expect(open.getByRole("article")).not.toContainText("mira-mismatch");
   await expect(page.locator("main")).not.toContainText(new RegExp(`"account":\\s*${mira.id}\\b`));
+
+  // The commit page shows the verification's attestation: neither it nor the HTML behind it (the
+  // data the browser's components start from) carries her id.
+  await page.goto(`/mira-mismatch/kiln/commit/${merge.sha}`);
+  await expect(page.getByLabel("Attestation payload").first()).toContainText("(deleted account)");
+  const html = await (await page.request.get(`/mira-mismatch/kiln/commit/${merge.sha}`)).text();
+  expect(html).toContain(merge.sha.slice(0, 7));
+  expect(html).not.toMatch(new RegExp(`account\\\\?"\\s*:\\s*${mira.id}\\b`));
 });

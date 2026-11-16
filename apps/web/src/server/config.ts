@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ACTIONS_OIDC_ISSUER } from "@testnotary/protocol";
 
-/** What the service needs from its surroundings. Later tickets add fields here. */
+/** What the service needs from its surroundings. */
 export interface ServiceConfig {
   /** Postgres, as the app role: INSERT and SELECT on history tables, nothing else. */
   databaseUrl: string | undefined;
@@ -151,3 +151,6 @@ export function withServiceConfig<T>(config: ServiceConfig, fn: () => T): T {
 export function appInstallUrl(config: ServiceConfig = serviceConfig()): string {
   return `${config.githubWebUrl}/apps/${config.githubAppSlug}/installations/new`;
 }
+
+/** GitHub's App user tokens last 8 hours, so a session does too; signing in again is one click. */
+export const SESSION_SECONDS = 8 * 60 * 60;

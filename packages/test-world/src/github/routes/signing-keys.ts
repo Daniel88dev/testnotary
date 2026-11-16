@@ -1,6 +1,6 @@
 import { json, notFound, route } from "../router.ts";
 
-// §8: `GET /users/{login}/ssh_signing_keys`, read by the action's signature check (with
+// `GET /users/{login}/ssh_signing_keys`, read by the action's signature check (with
 // `GITHUB_TOKEN`) and by the service at upload (with an installation token). Public data:
 // `x-accepted-github-permissions: allows_permissionless_access=true`, so any token, or none, reads
 // it. `[]` for an account without keys, 404 for a login GitHub doesn't know. Every answer carries

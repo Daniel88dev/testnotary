@@ -17,7 +17,7 @@ interface Installed {
   fixture: FixtureRepo;
   repo: FakeRepo;
   /** A fresh OIDC token for a job building `sha`, as the runner would hand the action. */
-  token(sha: string, options?: { event?: string; claims?: JWTPayload; audience?: string }): Promise<string>;
+  token(sha: string, options?: { event?: string; ref?: string; claims?: JWTPayload; audience?: string }): Promise<string>;
 }
 
 /** An installed repo whose `feature` branch a developer with write access attested on their laptop. */
@@ -41,8 +41,8 @@ async function installed(options: { attest?: boolean; install?: boolean; visibil
   return {
     fixture,
     repo,
-    token: (sha, { event = "pull_request", claims, audience = AUDIENCE } = {}) =>
-      world.github.oidc.tokenFor({ repo, sha, ref: event === "pull_request" ? "refs/pull/1/merge" : "refs/heads/main", eventName: event, claims }, audience),
+    token: (sha, { event = "pull_request", ref, claims, audience = AUDIENCE } = {}) =>
+      world.github.oidc.tokenFor({ repo, sha, ref: ref ?? (event === "pull_request" ? "refs/pull/1/merge" : "refs/heads/main"), eventName: event, claims }, audience),
   };
 }
 
@@ -233,7 +233,7 @@ describe("the tree a verification matches", () => {
     expect(merge.tree).not.toBe(attestedTree);
   });
 
-  test("can't be read when GitHub refuses the App: github_denied with GitHub's message, and no decision", async () => {
+  test("can't be read when GitHub refuses the App: a recorded github_denied with GitHub's message", async () => {
     const r = await installed();
     const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
     const message = `Although you appear to have the correct authorization credentials, the '${r.repo.owner}' organization has an IP allow list enabled, and your IP address is not permitted to access this resource.`;
@@ -241,7 +241,23 @@ describe("the tree a verification matches", () => {
     try {
       const answer = await verify(await r.token(merge.sha));
 
-      expect(answer).toEqual({ status: 502, body: { error: "github_denied", message } });
+      expect(answer.status).toBe(200);
+      expect(answer.body).toMatchObject({ message, verification: { commit: merge.sha, result: "would_fall_back", reason: "github_denied", detail: "an IP allow list blocks the service" } });
+    } finally {
+      restore();
+    }
+  });
+
+  test("can't be read when GitHub fails: a recorded github_unavailable, never a decision", async () => {
+    const r = await installed({ attest: true });
+    const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
+    const restore = world.github.override("GET", "/repos/:owner/:repo/git/commits/:sha", () => githubError(502, "Server Error"));
+    try {
+      const answer = await verify(await r.token(merge.sha));
+
+      expect(answer.status).toBe(200);
+      expect(answer.body.verification).toMatchObject({ commit: merge.sha, result: "would_fall_back", reason: "github_unavailable" });
+      expect(answer.body).not.toHaveProperty("message");
     } finally {
       restore();
     }
@@ -255,6 +271,48 @@ describe("the tree a verification matches", () => {
     const answer = await verify(await r.token(attested, { event: "push" }));
 
     expect(answer.body.verification).toMatchObject({ commit: attested, tree: await r.fixture.tree("feature"), event: "push", result: "would_skip", reason: null });
+  });
+});
+
+describe("the events a verification verifies", () => {
+  // The OIDC `sha` is `GITHUB_SHA`, which is the code the job tests only on these events. On
+  // `pull_request_target` it is the base branch's head while the job may check out a fork's code;
+  // on `workflow_run`, `issue_comment` and the rest a job checks out whatever ref it likes. Each
+  // case's tree is attested, so only the event can stop the skip.
+  test.each(["pull_request_target", "workflow_run", "issue_comment", "workflow_dispatch", "schedule"])("%s is a recorded fallback, never a skip", async (event) => {
+    const r = await installed({ attest: true });
+    await r.fixture.git("push", "--quiet", "origin", "feature:main");
+    const attested = await r.fixture.revParse("feature");
+
+    const answer = await verify(await r.token(attested, { event }));
+
+    expect(answer.status).toBe(200);
+    expect(answer.body.verification).toMatchObject({ commit: attested, event, result: "would_fall_back", reason: "no_attestation", detail: `event ${event} is not verified` });
+  });
+
+  test("a push to a branch other than the default is a recorded fallback", async () => {
+    const r = await installed({ attest: true });
+    const attested = await r.fixture.revParse("feature");
+
+    const answer = await verify(await r.token(attested, { event: "push", ref: "refs/heads/feature" }));
+
+    expect(answer.body.verification).toMatchObject({ result: "would_fall_back", reason: "no_attestation", detail: "event push to refs/heads/feature is not verified: only a push to the default branch is" });
+  });
+
+  test("pull_request, merge_group and a push to the default branch are verified", async () => {
+    const r = await installed({ attest: true });
+    await r.fixture.git("push", "--quiet", "origin", "feature:main");
+    const attested = await r.fixture.revParse("feature");
+
+    for (const [event, ref] of [
+      ["pull_request", "refs/pull/1/merge"],
+      ["merge_group", "refs/heads/gh-readonly-queue/main/pr-1-abc"],
+      ["push", "refs/heads/main"],
+    ] as const) {
+      const answer = await verify(await r.token(attested, { event, ref }));
+
+      expect(answer.body.verification, event).toMatchObject({ result: "would_skip", reason: null });
+    }
   });
 });
 
@@ -286,7 +344,7 @@ describe("the paths a verification checks against the guarded files", () => {
     expect(answer.body.verification).toMatchObject({ result: "would_fall_back", reason: "guarded_file_changed", detail: ".nvmrc" });
   });
 
-  test("can't be listed when GitHub refuses the compare: github_denied with GitHub's message, and no decision", async () => {
+  test("can't be listed when GitHub refuses the compare: a recorded github_denied with GitHub's message", async () => {
     const r = await installed();
     const merge = await r.fixture.testMerge({ base: "main", head: "feature" });
     const message = `Although you appear to have the correct authorization credentials, the '${r.repo.owner}' organization has an IP allow list enabled, and your IP address is not permitted to access this resource.`;
@@ -294,7 +352,8 @@ describe("the paths a verification checks against the guarded files", () => {
     try {
       const answer = await verify(await r.token(merge.sha));
 
-      expect(answer).toEqual({ status: 502, body: { error: "github_denied", message } });
+      expect(answer.status).toBe(200);
+      expect(answer.body).toMatchObject({ message, verification: { commit: merge.sha, tree: merge.tree, result: "would_fall_back", reason: "github_denied", detail: "an IP allow list blocks the service" } });
     } finally {
       restore();
     }

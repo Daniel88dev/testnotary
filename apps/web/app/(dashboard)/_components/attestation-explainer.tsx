@@ -15,10 +15,10 @@ const FIELDS: Record<string, [string, string]> = {
   commit: ["Commit", "The commit the run had checked out, kept beside the tree for reference. A merge commit CI builds can match by tree."],
   outcome: ["Outcome", "Only a passed run yields an attestation. Failed and refused runs are recorded too."],
   attester: ["Attester", "The GitHub account (for a sandbox token, the person who created it) and the token the run uploaded with."],
-  endedAt: ["Ended", "When the run ended. An attestation counts for 24 hours from here."],
+  endedAt: ["Ended", "When the run ended. An attestation counts for 24 hours from here, or from when the service received it if that was earlier."],
 };
 
-export function AttestationExplainer({ payload, accountWithheld }: { payload: Record<string, unknown>; accountWithheld: boolean }) {
+export function AttestationExplainer({ payload }: { payload: Record<string, unknown> }) {
   const [field, setField] = useState("tree");
   const key = (name: string) => (
     <button
@@ -36,12 +36,10 @@ export function AttestationExplainer({ payload, accountWithheld }: { payload: Re
   const entries = Object.entries(payload);
   entries.forEach(([name, value], index) => {
     const comma = index < entries.length - 1 ? "," : "";
-    let shown = value;
-    if (name === "attester" && accountWithheld && value && typeof value === "object") shown = { ...value, account: "(deleted account)" };
     lines.push(
       <span key={name}>
         {"  "}
-        {key(name)}: <Value value={shown} />
+        {key(name)}: <Value value={value} />
         {comma}
         {"\n"}
       </span>,

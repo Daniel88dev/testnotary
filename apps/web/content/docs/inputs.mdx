@@ -8,7 +8,7 @@
 |---|---|---|
 | `suite` | none | The suite from `testnotary.json`. May be left out when the config declares exactly one. |
 | `mode` | `run` | `run` verifies, then skips the tests or runs them through the library. `verify` only verifies, on any runner, with no checkout needed: the [gate job](/docs/gate). Anything else is an error. |
-| `verification` | empty | A gate job’s `verification` output. The test step then reuses that answer instead of asking again. When it is empty, or doesn’t belong to this commit, the step verifies on its own. |
+| `verification` | empty | A gate job’s `verification` output. The test step then reuses that answer instead of asking again. When it is empty, or doesn’t belong to this commit and this step’s suite, the step verifies on its own. |
 | `github-token` | `${{ github.token }}` | The token the `Testnotary / <suite>` check run is made with. It needs `checks: write`; without it the step writes only the job summary. |
 
 The action also reads the repo variable `TESTNOTARY_DISABLED`, passed in the job’s `env` as the workflow snippet does: `true` turns skipping off for every job, without calling anything. See [Shadow mode and enforce](/docs/shadow).

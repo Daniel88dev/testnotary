@@ -182,12 +182,7 @@ export async function recordRepoState(
   });
   if (!input.installed) await revokeSandboxTokens(db, input.repo.id);
   if (input.change !== "added") return;
-  const [current] = await db
-    .select()
-    .from(repoSettingChanges)
-    .where(eq(repoSettingChanges.repoId, input.repo.id))
-    .orderBy(desc(repoSettingChanges.id))
-    .limit(1);
+  const current = await latestSettingChange(db, input.repo.id);
   if (current?.mode === "shadow") return;
   await db.insert(repoSettingChanges).values({
     repoId: input.repo.id,
@@ -216,6 +211,34 @@ async function revokeSandboxTokens(db: Executor, repoId: number): Promise<void> 
     .insert(tokenRevocations)
     .values(live.map((token) => ({ tokenId: token.id, reason: "repo_removed", revokedBy: null, at: now() })))
     .onConflictDoNothing();
+}
+
+/**
+ * What GitHub says about an installed repo now, asked by its id, when it differs from the recorded
+ * name or visibility: a webhook was missed. Recorded as a new state (no delivery), so the repo
+ * heals itself, and the view comes back with GitHub's answer.
+ */
+export async function healRepoState(db: Executor, repo: RepoView, live: { fullName: string; private: boolean }): Promise<RepoView> {
+  const visibility = live.private ? "private" : "public";
+  if (live.fullName === repo.fullName && visibility === repo.visibility) return repo;
+  const change: RepoChange = live.fullName !== repo.fullName ? "renamed" : live.private ? "privatized" : "publicized";
+  await db.insert(repoStates).values({
+    repoId: repo.id,
+    installationId: repo.installationId,
+    fullName: live.fullName,
+    visibility,
+    installed: repo.installed,
+    change,
+    deliveryId: null,
+    at: now(),
+  });
+  return { ...repo, fullName: live.fullName, visibility };
+}
+
+/** The repo's latest setting change (its mode and both rates now), or undefined before its first. */
+export async function latestSettingChange(db: Executor, repoId: number) {
+  const [row] = await db.select().from(repoSettingChanges).where(eq(repoSettingChanges.repoId, repoId)).orderBy(desc(repoSettingChanges.id)).limit(1);
+  return row;
 }
 
 /** The latest recorded state of a repo, whatever its installation. */

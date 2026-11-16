@@ -93,14 +93,40 @@ describe("the job report", () => {
     expect(await call("POST", `/verifications/${id}/report`, "not-a-jwt", REPORT)).toEqual({ status: 401, body: { error: "token_rejected" } });
   });
 
-  test("takes only the outcome, duration and environment", async () => {
+  test("carries what the job did in the end when it fell back on its own, and the verification shows it beside the service's answer", async () => {
+    const p = await pull();
+    const id = await verified(p);
+    // The action's signature check, say, turned the service's answer into a fallback.
+    const local = { result: "would_fall_back", reason: "signature_invalid", detail: "tree: signed for another tree" };
+
+    const answer = await call("POST", `/verifications/${id}/report`, await p.token(), { ...REPORT, outcome: "passed", ...local });
+
+    expect(answer.status).toBe(201);
+    expect(answer.body.jobReport).toMatchObject({ outcome: "passed", ...local });
+    const { verification } = (await call("GET", `/verifications/${id}`, await p.token())).body as { verification: Record<string, unknown> };
+    expect(verification).toMatchObject({ result: "would_fall_back", reason: "no_attestation", jobReport: { outcome: "passed", ...local } });
+  });
+
+  test("from an older action, without what the job did, is stored as before and shows none", async () => {
+    const p = await pull();
+    const id = await verified(p);
+
+    const answer = await call("POST", `/verifications/${id}/report`, await p.token(), REPORT);
+
+    expect(answer.status).toBe(201);
+    expect(answer.body.jobReport).toMatchObject({ outcome: "failed", result: null, reason: null, detail: null });
+  });
+
+  test("takes only the outcome, duration, environment and what the job did", async () => {
     const p = await pull();
     const id = await verified(p);
 
     const extra = await call("POST", `/verifications/${id}/report`, await p.token(), { ...REPORT, log: "…" });
     const badOutcome = await call("POST", `/verifications/${id}/report`, await p.token(), { ...REPORT, outcome: "cancelled" });
+    const badResult = await call("POST", `/verifications/${id}/report`, await p.token(), { ...REPORT, result: "skipped" });
 
     expect(extra.status).toBe(400);
     expect(badOutcome.status).toBe(400);
+    expect(badResult.status).toBe(400);
   });
 });

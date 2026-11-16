@@ -2,7 +2,7 @@ import { expect, signIn, test } from "@testnotary/test-world/playwright";
 import type { FakeAccount, FakeRepo, FixtureRepo, Machine, World } from "@testnotary/test-world";
 import type { Page } from "@playwright/test";
 
-// A repo admin cuts off a credential they no longer trust and sees who and what attests: People
+// A repo admin cuts off a token they no longer trust and sees who and what attests: People
 // with each account's counts and tokens, blocking a laptop token there, revoking anyone's sandbox
 // token in Settings, and the owner revoking their own laptop token on the Tokens page. Each voids
 // the token's attestations at once: the next verification falls back with `attestation_revoked`.
@@ -25,13 +25,7 @@ async function installedRepo(world: World, owner: string, name: string, visibili
   const fixture = await world.fixtureRepo({ config: PASSING, files: { ".gitignore": "node_modules\n" } });
   const repo = await world.hostOnGitHub(fixture, { owner, name, visibility });
   await world.github.installApp({ account: { login: owner, type: "Organization" }, repos: [repo] });
-  const sql = world.db.connect("app");
-  try {
-    await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-              values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
-  } finally {
-    await sql.end({ timeout: 1 });
-  }
+  await world.enforce(repo);
   await fixture.branch("feature");
   await fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
   await fixture.push();

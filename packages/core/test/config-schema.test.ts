@@ -1,11 +1,11 @@
 // The JSON schema for `testnotary.json` is published from the repo: the web app serves
 // apps/web/public/schema/v1.json at https://testnotary.dev/schema/v1.json, the `$schema` URL that
-// `init` writes. These tests read the published file as an editor would.
+// `init` writes. These tests read the published file as an editor would. That the file is current
+// with the parser's schema is tooling's job, not a test's: `pnpm schema:check`, part of `pnpm lint`.
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { configJsonSchema } from "../src/index.ts";
 
 const publishedPath = fileURLToPath(new URL("../../../apps/web/public/schema/v1.json", import.meta.url));
 
@@ -25,10 +25,6 @@ const fullConfig = {
 };
 
 describe("the published testnotary.json schema", () => {
-  test("is current with the parser's schema (run `pnpm schema:write` after changing it)", async () => {
-    expect(await published()).toEqual(configJsonSchema());
-  });
-
   test("names its own URL and JSON Schema draft", async () => {
     expect(await published()).toMatchObject({
       $id: "https://testnotary.dev/schema/v1.json",

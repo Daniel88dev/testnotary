@@ -1,9 +1,11 @@
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
-import { DELETED_ACCOUNT, type Mismatch, type SkippedCommit } from "@testnotary/protocol";
+import { COMPARED_RESULTS } from "@testnotary/core";
+import type { Mismatch, SkippedCommit } from "@testnotary/protocol";
 import { attestations, jobReports, mismatches, repoSettingChanges, runs, tokens, verifications } from "../db/schema.ts";
-import { accountsAsOf } from "./accounts.ts";
+import { accountsAsOf, shownPayload, withheld } from "./accounts.ts";
 import { now } from "./config.ts";
-import type { Executor } from "./installations.ts";
+import { latestSettingChange, type Executor } from "./installations.ts";
+import { shownResult } from "./shown-results.ts";
 import { currentNames } from "./tokens.ts";
 
 // Mismatches: a CI job's report that fails on an audit, or on a shadow verification that would
@@ -16,8 +18,6 @@ type VerificationRow = typeof verifications.$inferSelect;
 type JobReportRow = typeof jobReports.$inferSelect;
 type MismatchRow = typeof mismatches.$inferSelect;
 
-/** The verification results a failing report turns into a mismatch. */
-const COMPARED = ["audit", "would_skip"] as const;
 
 /**
  * Records the mismatch a job report makes, if it makes one, and returns the repo to shadow mode.
@@ -25,7 +25,10 @@ const COMPARED = ["audit", "would_skip"] as const;
  * that fails again adds a report, not a second mismatch, and one that passes takes nothing back.
  */
 export async function recordMismatch(tx: Executor, verification: VerificationRow, report: JobReportRow): Promise<MismatchRow | undefined> {
-  if (report.outcome !== "failed" || !(COMPARED as readonly string[]).includes(verification.result) || !verification.attestationId) return undefined;
+  if (report.outcome !== "failed" || !(COMPARED_RESULTS as readonly string[]).includes(verification.result) || !verification.attestationId) return undefined;
+  // The job fell back because its checkout was not the verified tree: its tests ran on something
+  // the attestation never named, so their failure contradicts nothing.
+  if (report.result !== null && report.reason === "no_attestation") return undefined;
   const [matched] = await tx
     .select({ attestation: attestations, run: runs, token: tokens })
     .from(attestations)
@@ -100,7 +103,8 @@ async function skippedSinceLastAgreeingAudit(tx: Executor, repoId: number, accou
     .select({ id: verifications.id, commit: verifications.commit, tree: verifications.tree, suite: verifications.suite, event: verifications.event, createdAt: verifications.createdAt })
     .from(verifications)
     .innerJoin(attestations, eq(attestations.id, verifications.attestationId))
-    .where(and(eq(verifications.repoId, repoId), eq(attestations.accountId, accountId), eq(verifications.result, "skip"), gt(verifications.createdAt, since)))
+    // What the job did: a skip the action turned into a fallback ran the tests.
+    .where(and(eq(verifications.repoId, repoId), eq(attestations.accountId, accountId), eq(shownResult, "skip"), gt(verifications.createdAt, since)))
     .orderBy(desc(verifications.createdAt));
   const seen = new Set<string>();
   const commits: SkippedCommit[] = [];
@@ -115,7 +119,7 @@ async function skippedSinceLastAgreeingAudit(tx: Executor, repoId: number, accou
 
 /** Sends the repo back to shadow mode, as Testnotary's own setting change, keeping its rates. Nothing to do when it is in shadow mode already. */
 async function returnToShadow(tx: Executor, repoId: number): Promise<void> {
-  const [current] = await tx.select().from(repoSettingChanges).where(eq(repoSettingChanges.repoId, repoId)).orderBy(desc(repoSettingChanges.id)).limit(1);
+  const current = await latestSettingChange(tx, repoId);
   if (!current || current.mode !== "enforce") return;
   await tx.insert(repoSettingChanges).values({
     repoId,
@@ -145,10 +149,10 @@ export async function mismatchViews(db: Executor, rows: MismatchRow[]): Promise<
     rows.map((row) => ({ accountId: row.accountId, at: row.attestedAt })),
   );
   return rows.map((row, index) => {
-    // A deleted account's mismatch keeps its copy of the payload and the signature (never removed
-    // on request), but no read hands them out: the payload names the account's GitHub id, the
-    // signature its key.
-    const withheld = accounts[index]!.id === DELETED_ACCOUNT.id;
+    // A deleted account's mismatch keeps its copy of the payload, the signature and the token's
+    // name (never removed on request), but no read hands them out: the payload names the account's
+    // GitHub id, the signature its key, and the name is free text its owner picked.
+    const hidden = withheld(accounts[index]!);
     return {
       id: row.id,
       result: row.result === "audit" ? "audit" : "would_skip",
@@ -157,15 +161,15 @@ export async function mismatchViews(db: Executor, rows: MismatchRow[]): Promise<
       tree: row.tree,
       event: row.event,
       account: accounts[index]!,
-      token: { id: row.tokenId, kind: row.tokenKind === "sandbox" ? "sandbox" : "laptop", name: row.tokenName },
+      token: { id: row.tokenId, kind: row.tokenKind === "sandbox" ? "sandbox" : "laptop", name: hidden ? "" : row.tokenName },
       attestation: {
         id: row.attestationId,
         runId: row.runId,
         commit: row.attestedCommit,
         endedAt: row.attestationEndedAt.toISOString(),
         format: row.attestationFormat,
-        payload: withheld ? null : row.attestationPayload.toString("utf8"),
-        signature: withheld ? null : (row.signature ?? null),
+        payload: shownPayload(accounts[index]!, row.attestationPayload),
+        signature: hidden ? null : (row.signature ?? null),
       },
       environments: { run: row.runEnvironment ?? null, ci: row.ciEnvironment },
       session: row.session ?? null,

@@ -45,8 +45,20 @@ export interface RefusedBeforeStart {
 export async function prepareRun(input: PrepareInput): Promise<Ready | RefusedBeforeStart> {
   const notes = emptyNotes();
   notes.session = detectSession(input.env);
-  const found = await locate(input);
   const token = await chooseToken(input.serviceUrl, input.env);
+  // The preflight goes first, as soon as origin names the repo: a service that can't be reached
+  // means nothing will be attested, so the run doesn't wait on fetching the base as well. Its
+  // answer still counts only after the refusal checks, in their order.
+  let asked: Preflight | undefined;
+  const found = await locate({
+    ...input,
+    beforeFetch: async (repository) => {
+      // A laptop token inside a sandbox is never sent: that run is refused before the start.
+      if (!repository || laptopTokenMarker(token, input.env)) return true;
+      asked = await preflight(input.serviceUrl, token, repository);
+      return !(asked.kind === "unreachable" && !asked.answered);
+    },
+  });
   if ("refused" in found) {
     const { refusal, lines, partial } = found.refused;
     // A laptop token inside a sandbox is never sent, not even with a refused run.
@@ -90,7 +102,7 @@ export async function prepareRun(input: PrepareInput): Promise<Ready | RefusedBe
       false,
     );
   }
-  const answer = await preflight(input.serviceUrl, token, repository);
+  const answer = asked ?? (await preflight(input.serviceUrl, token, repository));
   switch (answer.kind) {
     case "ok":
       return { kind: "ready", context, preflight: answer };

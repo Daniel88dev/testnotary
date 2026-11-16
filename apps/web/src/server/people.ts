@@ -6,6 +6,7 @@ import { now } from "./config.ts";
 import { retainedSince } from "./history.ts";
 import type { Executor } from "./installations.ts";
 import { blockedAmong } from "./revocations.ts";
+import { shownResult } from "./shown-results.ts";
 import { currentNames, tokenExpiry } from "./tokens.ts";
 
 // People: who and what attests on a repo. Each account that uploaded runs to the repo in the
@@ -67,8 +68,9 @@ export async function peopleOf(db: Executor, repoId: number): Promise<Person[]> 
     db
       .select({
         tokenId: attestations.tokenId,
-        skips: sql<number>`count(*) filter (where ${verifications.result} = 'skip')`.mapWith(Number),
-        audits: sql<number>`count(*) filter (where ${verifications.result} = 'audit')`.mapWith(Number),
+        // What the job did: a skip the action turned into a fallback is no skip.
+        skips: sql<number>`count(*) filter (where ${shownResult} = 'skip')`.mapWith(Number),
+        audits: sql<number>`count(*) filter (where ${shownResult} = 'audit')`.mapWith(Number),
       })
       .from(verifications)
       .innerJoin(attestations, eq(attestations.id, verifications.attestationId))

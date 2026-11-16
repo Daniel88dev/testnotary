@@ -120,9 +120,6 @@ interface RefusalCase {
   also?(result: ProcessResult, suite: Suite): void;
 }
 
-/** Codes whose checks a later ticket builds: their cases are listed as todo until it lands. */
-type Gap = { gap: string };
-
 const signedInRepo = async (s: Suite, options: Parameters<typeof developer>[0] = {}): Promise<Scene> => {
   const dev = await developer({ suite: s, ...options });
   return { dev, cwd: dev.fixture.dir, machine: dev.machine };
@@ -148,7 +145,8 @@ const NO_TOOLS = { PATH: "/usr/bin:/bin" };
 /** A machine on Node 24's LTS line. */
 const NODE_24: SystemOptions = { node: "v24.11.0", lts: "Krypton" };
 
-const REFUSALS: Record<RefusalCode, RefusalCase[] | Gap> = {
+// One entry per code: a code without cases fails to typecheck.
+const REFUSALS: Record<RefusalCode, RefusalCase[]> = {
   not_a_git_repo: [
     {
       name: "a directory outside any git repo",
@@ -222,6 +220,7 @@ const REFUSALS: Record<RefusalCode, RefusalCase[] | Gap> = {
         ["a turbo git-ref filter in the command", ["pnpm", "turbo", "run", "test", "--filter=...[origin/main]"], /--filter=\.\.\.\[origin\/main\]/],
         ["turbo's -F with a git-ref filter in the command", ["npx", "turbo", "test", "-F", "[HEAD^1]"], /\[HEAD\^1\]/],
         ["turbo --affected in the command", ["npx", "turbo", "run", "test", "--affected"], /--affected/],
+        ["jest's -o (--onlyChanged) in the command", ["npx", "jest", "-o"], /jest -o/],
       ] as const
     ).map(
       ([name, command, says]): RefusalCase => ({
@@ -239,6 +238,7 @@ const REFUSALS: Record<RefusalCode, RefusalCase[] | Gap> = {
         ["nx affected in the script pnpm run names", ["pnpm", "run", "test:ci"], "test:ci", "nx affected --target=test"],
         ["a quoted turbo filter in the script yarn names", ["yarn", "test:ci"], "test:ci", "turbo run test --filter='[origin/main]' && echo done"],
         ["--since in the script npm run-script names", ["npm", "run-script", "--silent", "check"], "check", "lerna run test --since=main"],
+        ["jest's -o in the script npm test names", ["npm", "test"], "test", "jest --ci -o"],
       ] as const
     ).map(
       ([name, command, script, text]): RefusalCase => ({
@@ -594,14 +594,7 @@ const REFUSALS: Record<RefusalCode, RefusalCase[] | Gap> = {
   ],
 };
 
-const refusalCases = REFUSAL_CODES.flatMap((refusal) => {
-  const cases = REFUSALS[refusal];
-  return "gap" in cases ? [] : cases.map((scenario) => ({ refusal, ...scenario }));
-});
-const refusalGaps = REFUSAL_CODES.flatMap((refusal) => {
-  const cases = REFUSALS[refusal];
-  return "gap" in cases ? [{ refusal, gap: cases.gap }] : [];
-});
+const refusalCases = REFUSAL_CODES.flatMap((refusal) => REFUSALS[refusal].map((scenario) => ({ refusal, ...scenario })));
 
 describe("each refusal code through testnotary run", () => {
   test.each(refusalCases)("$refusal: $name", async (scenario) => {
@@ -644,9 +637,6 @@ describe("each refusal code through testnotary run", () => {
     expect(await scene.machine.packageManagerCalls()).toEqual([]);
     scenario.also?.(result, s);
   });
-
-  // The codes whose checks aren't built yet: listed, so the table stays one entry per code.
-  for (const { refusal, gap } of refusalGaps) test.todo(`${refusal}: ${gap}`);
 });
 
 interface WarningCase {
@@ -658,7 +648,7 @@ interface WarningCase {
   attested: boolean;
 }
 
-const WARNINGS: Record<WarningCode, WarningCase[] | Gap> = {
+const WARNINGS: Record<WarningCode, WarningCase[]> = {
   not_signed_in: [
     {
       name: "no token on the laptop",
@@ -776,14 +766,7 @@ const WARNINGS: Record<WarningCode, WarningCase[] | Gap> = {
   ],
 };
 
-const warningCases = WARNING_CODES.flatMap((warning) => {
-  const cases = WARNINGS[warning];
-  return "gap" in cases ? [] : cases.map((scenario) => ({ warning, ...scenario }));
-});
-const warningGaps = WARNING_CODES.flatMap((warning) => {
-  const cases = WARNINGS[warning];
-  return "gap" in cases ? [{ warning, gap: cases.gap }] : [];
-});
+const warningCases = WARNING_CODES.flatMap((warning) => WARNINGS[warning].map((scenario) => ({ warning, ...scenario })));
 
 describe("each warning through testnotary run: a line on stderr, a code in warnings[], never a refusal", () => {
   test.each(warningCases)("$warning: $name", async (scenario) => {
@@ -809,8 +792,6 @@ describe("each warning through testnotary run: a line on stderr, a code in warni
     // from the upload itself, so the record can't carry it).
     if (scenario.warning !== "upload_failed") for (const upload of uploadsSince(mark)) expect(upload.warnings).toContain(scenario.warning);
   });
-
-  for (const { warning, gap } of warningGaps) test.todo(`${warning}: ${gap}`);
 
   test("a clean run on the base's tip warns about nothing; an ignored .env.example is not a .env file", async () => {
     const s = await suite();

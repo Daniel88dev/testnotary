@@ -178,4 +178,11 @@ test("a deleted account's run reads deleted account on the Runs page and the run
   await expect(page.getByRole("region", { name: "Who and where" })).toContainText("deleted account");
   await expect(page.getByLabel("Attestation payload")).toContainText("(deleted account)");
   await expect(page.getByLabel("Attestation payload")).not.toContainText(String(rhea.user.id));
+  // Nor does the page's HTML, the data the browser's components start from included.
+  expect(await (await page.request.get(attested.url)).text()).not.toMatch(accountIdIn(rhea.user.id));
 });
+
+/** The payload's `"account": <id>` in a page's HTML, plain or inside the flight data's escaped JSON. */
+function accountIdIn(id: number): RegExp {
+  return new RegExp(`account\\\\?"\\s*:\\s*${id}\\b`);
+}

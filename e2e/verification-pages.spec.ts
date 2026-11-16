@@ -68,13 +68,7 @@ async function story(world: World, page: Page, login: string, name: string): Pro
       expect(response.status()).toBe(201);
     },
     async enforce() {
-      const sql = world.db.connect("app");
-      try {
-        await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-                  values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
-      } finally {
-        await sql.end({ timeout: 1 });
-      }
+      await world.enforce(repo);
     },
   };
 }

@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { and, count, desc, eq, gte, inArray, sql, type SQL } from "drizzle-orm";
-import type { FallbackReason, VerificationResult } from "@testnotary/core";
+import { SHADOW_RESULTS, type FallbackReason, type Outcome, type RepoMode, type TokenKind, type VerificationResult } from "@testnotary/core";
 import type { CiEnvironment, RunEnvironment, SessionLabels } from "@testnotary/protocol";
 import { attestations, jobReports, mismatches, runs, tokens, verifications } from "../db/schema.ts";
-import { accountsAsOf, type ShownAccount } from "./accounts.ts";
+import { accountsAsOf, shownPayload, type ShownAccount } from "./accounts.ts";
 import { now } from "./config.ts";
 import type { Executor } from "./installations.ts";
 import { behindBy, commitAuthor, installationToken, type CommitAuthor } from "./github.ts";
+import { shownOutcome, shownReason, shownResult } from "./shown-results.ts";
 import { currentNames } from "./tokens.ts";
 
 // What the dashboard reads about a repo's runs and verifications: the Verifications and Runs
@@ -15,8 +16,8 @@ import { currentNames } from "./tokens.ts";
 // at most and nothing is aggregated beyond that. Every account is named through `accountsAsOf`, as
 // of the record's own time, so a deleted account's records read *deleted account*.
 //
-// Overview (T-826), People (T-827) and Settings (T-828) read from here too: `verificationRows`
-// and `runRows` take any filter, `retainedSince()` is the window's start.
+// The Overview, People and Settings read from here too: `verificationRows` and `runRows` take any
+// filter, `retainedSince()` is the window's start.
 
 /** How far back every dashboard list looks: what retention keeps. */
 export const RETAINED_DAYS = 90;
@@ -25,8 +26,6 @@ export const RETAINED_DAYS = 90;
 export function retainedSince(at: Date = now()): Date {
   return new Date(at.getTime() - RETAINED_DAYS * 86_400_000);
 }
-
-export type TokenKind = "laptop" | "sandbox";
 
 /** A token as the dashboard names it: its kind and its current name (after renames). */
 export interface TokenShown {
@@ -43,7 +42,7 @@ export interface Attester {
 
 /** A CI job's latest report on a verification. */
 export interface JobReportShown {
-  outcome: "passed" | "failed" | "refused";
+  outcome: Outcome;
   durationMs: number;
   environment: CiEnvironment;
   createdAt: Date;
@@ -58,14 +57,14 @@ export interface MatchedAttestation {
   endedAt: Date;
   createdAt: Date;
   format: string;
-  /** The canonical payload exactly as stored. */
-  payload: string;
+  /** The canonical payload exactly as stored; null when withheld (the attester reads *deleted account*). */
+  payload: string | null;
   attester: Attester;
   /** The run's environment, labels and flags, while the run is retained. */
   run: { environment: RunEnvironment | null; session: SessionLabels | null; notPinned: string[]; durationMs: number | null } | null;
 }
 
-/** One verification as the dashboard shows it. */
+/** One verification as the dashboard shows it: its result, reason and detail are what the job did (see shown-results.ts). */
 export interface VerificationShown {
   id: string;
   createdAt: Date;
@@ -73,7 +72,7 @@ export interface VerificationShown {
   tree: string;
   suite: string | null;
   event: string;
-  mode: "shadow" | "enforce";
+  mode: RepoMode;
   result: VerificationResult;
   reason: FallbackReason | null;
   detail: string | null;
@@ -90,17 +89,11 @@ export interface VerificationShown {
 export const RESULT_FILTERS = ["skip", "audit", "ran", "shadow"] as const;
 export type ResultFilter = (typeof RESULT_FILTERS)[number];
 
+/** The results each segment shows. */
+const FILTER_RESULTS: Record<ResultFilter, readonly VerificationResult[]> = { skip: ["skip"], audit: ["audit"], ran: ["fallback"], shadow: SHADOW_RESULTS };
+
 function resultCondition(filter: ResultFilter): SQL {
-  switch (filter) {
-    case "skip":
-      return eq(verifications.result, "skip");
-    case "audit":
-      return eq(verifications.result, "audit");
-    case "ran":
-      return eq(verifications.result, "fallback");
-    case "shadow":
-      return inArray(verifications.result, ["would_skip", "would_fall_back"]);
-  }
+  return inArray(shownResult, [...FILTER_RESULTS[filter]]);
 }
 
 /** Verifications matching `where`, newest first, as the dashboard shows them. */
@@ -139,6 +132,7 @@ export async function verificationRows(db: Executor, where: SQL | undefined, pag
   const mismatchOf = new Map(recorded.map((row) => [row.verificationId, row.id]));
   let named = 0;
   return rows.map(({ verification, attestation, run, token }) => {
+    const account = attestation ? accounts[named++]! : undefined;
     const report = reportOf.get(verification.id);
     const mismatchId = mismatchOf.get(verification.id);
     return {
@@ -149,9 +143,7 @@ export async function verificationRows(db: Executor, where: SQL | undefined, pag
       suite: verification.suite,
       event: verification.event,
       mode: verification.mode === "enforce" ? "enforce" : "shadow",
-      result: verification.result as VerificationResult,
-      reason: verification.reason as FallbackReason | null,
-      detail: verification.detail,
+      ...shownOutcome(verification, report),
       environment: verification.environment,
       ci: verification.ciRunId ? { runId: verification.ciRunId, attempt: verification.ciRunAttempt, jobId: verification.ciJobId } : null,
       attestation: attestation
@@ -163,9 +155,9 @@ export async function verificationRows(db: Executor, where: SQL | undefined, pag
             endedAt: attestation.endedAt,
             createdAt: attestation.createdAt,
             format: attestation.format,
-            payload: attestation.payload.toString("utf8"),
+            payload: shownPayload(account!, attestation.payload),
             attester: {
-              account: accounts[named++]!,
+              account: account!,
               token: { id: attestation.tokenId, kind: token?.kind === "sandbox" ? "sandbox" : "laptop", name: (token && names.get(token.id)) ?? "" },
             },
             run: run ? { environment: run.environment, session: run.session, notPinned: run.notPinned, durationMs: run.durationMs } : null,
@@ -197,28 +189,28 @@ export async function listVerifications(
   limit: number,
 ): Promise<{ rows: VerificationShown[]; total: number; segments: Record<ResultFilter | "all", number>; suites: string[] }> {
   const base = [eq(verifications.repoId, repoId), gte(verifications.createdAt, retainedSince())];
-  const narrowed = [...base, ...(filter.reason ? [eq(verifications.reason, filter.reason)] : []), ...(filter.suite ? [eq(verifications.suite, filter.suite)] : [])];
+  const narrowed = [...base, ...(filter.reason ? [eq(shownReason, filter.reason)] : []), ...(filter.suite ? [eq(verifications.suite, filter.suite)] : [])];
   const where = and(...narrowed, ...(filter.result ? [resultCondition(filter.result)] : []));
   const [rows, byResult, suites] = await Promise.all([
     verificationRows(db, where, { limit }),
     db
-      .select({ result: verifications.result, n: count() })
+      .select({ result: shownResult, n: count() })
       .from(verifications)
       .where(and(...narrowed))
-      .groupBy(verifications.result),
+      .groupBy(shownResult),
     db
       .selectDistinct({ suite: verifications.suite })
       .from(verifications)
       .where(and(...base))
       .orderBy(verifications.suite),
   ]);
-  const of = (results: string[]) => byResult.filter((row) => results.includes(row.result)).reduce((sum, row) => sum + row.n, 0);
+  const of = (results: readonly string[]) => byResult.filter((row) => results.includes(row.result)).reduce((sum, row) => sum + row.n, 0);
   const segments = {
     all: of(byResult.map((row) => row.result)),
-    skip: of(["skip"]),
-    audit: of(["audit"]),
-    ran: of(["fallback"]),
-    shadow: of(["would_skip", "would_fall_back"]),
+    skip: of(FILTER_RESULTS.skip),
+    audit: of(FILTER_RESULTS.audit),
+    ran: of(FILTER_RESULTS.ran),
+    shadow: of(FILTER_RESULTS.shadow),
   };
   return { rows, total: filter.result ? segments[filter.result] : segments.all, segments, suites: suites.flatMap((row) => (row.suite ? [row.suite] : [])) };
 }
@@ -299,7 +291,7 @@ export async function commitFacts(repo: { installationId: number; fullName: stri
 /** Each suite's latest verification in the window, by suite name: the repo column's Suites. */
 export async function suitesLastResult(db: Executor, repoId: number): Promise<{ suite: string; result: VerificationResult; at: Date }[]> {
   const rows = await db
-    .selectDistinctOn([verifications.suite], { suite: verifications.suite, result: verifications.result, at: verifications.createdAt })
+    .selectDistinctOn([verifications.suite], { suite: verifications.suite, result: shownResult, at: verifications.createdAt })
     .from(verifications)
     .where(and(eq(verifications.repoId, repoId), gte(verifications.createdAt, retainedSince())))
     .orderBy(verifications.suite, desc(verifications.createdAt));
@@ -323,7 +315,7 @@ export interface RunShown {
   receivedAt: Date;
   startedAt: Date | null;
   endedAt: Date | null;
-  outcome: "passed" | "failed" | "refused";
+  outcome: Outcome;
   refusal: string | null;
   suite: string | null;
   tree: string | null;
@@ -338,8 +330,8 @@ export interface RunShown {
   flaky: boolean;
 }
 
-export const RUN_OUTCOMES = ["passed", "failed", "refused"] as const;
-export type RunOutcome = (typeof RUN_OUTCOMES)[number];
+export const RUN_OUTCOMES = ["passed", "failed", "refused"] as const satisfies readonly Outcome[];
+export type RunOutcome = Outcome;
 
 type RunRow = typeof runs.$inferSelect;
 
@@ -420,7 +412,8 @@ export interface RunDetail extends RunShown {
   warnings: string[];
   notPinned: string[];
   baselineOverrides: string[];
-  attestation: { id: string; format: string; payload: string; sha256: string; endedAt: Date } | null;
+  /** Its payload exactly as stored; null when withheld (the account reads *deleted account*). */
+  attestation: { id: string; format: string; payload: string | null; sha256: string; endedAt: Date } | null;
   /** The verifications that matched its attestation, newest first. */
   verifications: VerificationShown[];
 }
@@ -453,7 +446,7 @@ export async function runDetail(db: Executor, repoId: number, runId: string): Pr
       ? {
           id: attestation.id,
           format: attestation.format,
-          payload: attestation.payload.toString("utf8"),
+          payload: shownPayload(shown!.account, attestation.payload),
           sha256: createHash("sha256").update(attestation.payload).digest("hex"),
           endedAt: attestation.endedAt,
         }

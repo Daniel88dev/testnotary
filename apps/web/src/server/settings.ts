@@ -1,6 +1,7 @@
 import { and, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import {
   AUDIT_RATE_DEFAULTS,
+  COMPARED_RESULTS,
   CONFIG_FILE,
   GUARDED_DEFAULTS,
   INITIAL_REPO_SETTINGS,
@@ -17,8 +18,9 @@ import { accountsAsOf, type ShownAccount } from "./accounts.ts";
 import { now } from "./config.ts";
 import { fileAt, installationToken } from "./github.ts";
 import { retainedSince } from "./history.ts";
-import type { Executor, RepoView } from "./installations.ts";
+import { latestSettingChange, type Executor, type RepoView } from "./installations.ts";
 import { mismatchViews } from "./mismatches.ts";
+import { shownResult } from "./shown-results.ts";
 
 // A repo admin's settings and mismatch explanations (the Settings and Mismatches sections). Every
 // change is a new row: a setting change carries the mode and both rates after it, an explanation
@@ -41,8 +43,6 @@ export const NOTE_MAX = 2000;
 
 export const OPEN_MISMATCH_PROBLEM = "Explain the open mismatch before switching to enforce.";
 
-/** Verifications CI compares with the attestation when its tests run: an audit, and a shadow *would skip*. */
-const COMPARED = ["audit", "would_skip"];
 
 export interface Comparisons {
   /** Comparisons whose CI test job reported passed or failed (a cancelled job sent nothing; a refused one ran no tests). */
@@ -72,7 +72,7 @@ export interface SettingsShown extends RepoSettings {
 
 /** The settings in effect and the evidence beside the toggle. */
 export async function settingsOf(db: Executor, repoId: number): Promise<SettingsShown> {
-  const latest = await latestChange(db, repoId);
+  const latest = await latestSettingChange(db, repoId);
   const settings = settingsFrom(latest);
   const since = retainedSince();
   const [record, [lastMismatch], open] = await Promise.all([
@@ -102,12 +102,12 @@ function enforceWarnings(evidence: Comparisons, sinceMismatch: boolean): string[
   return [`Fewer than ${ENFORCE_AGREEMENTS} agreeing comparisons${sinceMismatch ? " since the last mismatch" : ""}: ${evidence.agreed} so far.`];
 }
 
-/** Comparisons since `since`, each counted by its CI job's latest report. */
+/** Comparisons since `since` (by what the job did: a would-skip whose signature would fail is none), each counted by its CI job's latest report. */
 async function comparisons(db: Executor, repoId: number, since: Date): Promise<Comparisons> {
   const compared = await db
     .select({ id: verifications.id })
     .from(verifications)
-    .where(and(eq(verifications.repoId, repoId), inArray(verifications.result, COMPARED), gte(verifications.createdAt, since)));
+    .where(and(eq(verifications.repoId, repoId), inArray(shownResult, [...COMPARED_RESULTS]), gte(verifications.createdAt, since)));
   if (compared.length === 0) return { compared: 0, agreed: 0 };
   const reports = await db
     .selectDistinctOn([jobReports.verificationId], { outcome: jobReports.outcome })
@@ -121,11 +121,6 @@ async function comparisons(db: Executor, repoId: number, since: Date): Promise<C
     .orderBy(jobReports.verificationId, desc(jobReports.seq));
   const ran = reports.filter((report) => report.outcome === "passed" || report.outcome === "failed");
   return { compared: ran.length, agreed: ran.filter((report) => report.outcome === "passed").length };
-}
-
-async function latestChange(db: Executor, repoId: number) {
-  const [row] = await db.select().from(repoSettingChanges).where(eq(repoSettingChanges.repoId, repoId)).orderBy(desc(repoSettingChanges.id)).limit(1);
-  return row;
 }
 
 function settingsFrom(row: { mode: string; auditOneIn: number; sandboxAuditOneIn: number } | undefined): RepoSettings {
@@ -148,7 +143,7 @@ export type SettingsChange = { ok: true; settings: RepoSettings; warnings: strin
  * for a rate below the defaults. Switching to enforce answers its warnings and switches anyway.
  */
 export async function changeRepoSettings(db: Executor, input: { repoId: number; by: { id: number } } & SettingsRequest): Promise<SettingsChange> {
-  const current = settingsFrom(await latestChange(db, input.repoId));
+  const current = settingsFrom(await latestSettingChange(db, input.repoId));
   const auditOneIn = input.auditOneIn ?? current.auditOneIn;
   const followed = current.sandboxAuditOneIn === sandboxAuditDefault(current.auditOneIn);
   const sandboxAuditOneIn =

@@ -1,12 +1,10 @@
-import { drizzle } from "drizzle-orm/postgres-js";
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import { useWorld } from "@testnotary/test-world/vitest";
-import * as schema from "../src/db/schema.ts";
-import { clearSpentTokenHashes } from "../src/server/revocations.ts";
-import { hashToken } from "../src/server/tokens.ts";
 
 // Revocations and blocks are append-only rows the app role writes; clearing a spent token's hash is
-// a delete only the retention role can make. Once cleared, the value can never authenticate again.
+// a delete only the retention job (as the retention role) makes. Once cleared, the value can never
+// authenticate again.
 
 const world = useWorld();
 
@@ -26,26 +24,29 @@ async function laptopToken(): Promise<{ value: string; machine: Awaited<ReturnTy
   return { value: (await machine.keychain())[0]!.secret, machine };
 }
 
-function retention() {
-  return drizzle(world.db.connect("retention"), { schema });
+/** A token's stored hash, as the spec defines it: SHA-256 of the value, hex. */
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 describe("clearing a spent token's hash", () => {
-  test("a revoked token's hash is cleared by the retention role, and its value never authenticates again", async () => {
+  test("a revoked token's hash is cleared by the retention job, and its value never authenticates again", async () => {
     const revoked = await laptopToken();
     const live = await laptopToken();
+    const revokedId = ((await (await fetch(`${world.service.url}/api/v1/whoami`, { headers: { authorization: `Bearer ${revoked.value}` } })).json()) as { token: { id: string } }).token.id;
     expect((await world.runCli(["logout"], { cwd: revoked.machine.home, machine: revoked.machine })).exitCode).toBe(0);
     expect(await whoami(revoked.value)).toBe(401);
 
-    expect(await clearSpentTokenHashes(retention(), new Date())).toBeGreaterThanOrEqual(1);
+    expect((await world.runRetentionJob()).tokenHashes).toBeGreaterThanOrEqual(1);
 
     const dump = await world.db.dump();
-    expect(dump).not.toContain(hashToken(revoked.value));
-    expect(dump).toContain(hashToken(live.value));
+    expect(dump).not.toContain(sha256(revoked.value));
+    expect(dump).toContain(sha256(live.value));
     expect(await whoami(revoked.value)).toBe(401);
     expect(await whoami(live.value)).toBe(200);
-    // The token's row and its revocation stay for history.
-    expect(dump).toMatch(/token_revocations\n.*"reason":"logout"/);
+    // The token and its revocation stay for history; only the hash went.
+    expect(dump).toContain(revokedId);
+    expect(dump).toContain('"reason":"logout"');
   });
 
   test("an expired sandbox token's hash is cleared too", async () => {
@@ -62,9 +63,9 @@ describe("clearing a spent token's hash", () => {
       world.clock.reset();
     }
 
-    await clearSpentTokenHashes(retention(), new Date());
+    await world.runRetentionJob();
 
-    expect(await world.db.dump()).not.toContain(hashToken(value));
+    expect(await world.db.dump()).not.toContain(sha256(value));
     expect(await whoami(value)).toBe(401);
   });
 

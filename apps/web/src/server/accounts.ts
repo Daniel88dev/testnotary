@@ -16,6 +16,20 @@ export interface ShownAccount {
 }
 
 /**
+ * Whether what a record's attester left is withheld from every read: once the account reads
+ * *deleted account*, the attestation's payload (it names the account's GitHub id), its signature
+ * (the account's key) and the token's name (free text its owner picked). The rows keep them.
+ */
+export function withheld(account: { id: number }): boolean {
+  return account.id === DELETED_ACCOUNT.id;
+}
+
+/** An attestation's payload exactly as stored, or null when it is withheld (see `withheld`). Decided on the server, so it never reaches a browser. */
+export function shownPayload(account: { id: number }, payload: Uint8Array): string | null {
+  return withheld(account) ? null : Buffer.from(payload).toString("utf8");
+}
+
+/**
  * The accounts of records made at the given times, in the same order. A record made before its
  * account was deleted shows the *deleted account* tombstone; otherwise the account's cached login.
  * Every page and API answer that names a record's account goes through here.

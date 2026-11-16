@@ -9,18 +9,21 @@ export interface AttestationCandidate {
   accountId: number;
   tokenId: string;
   tokenKind: TokenKind;
-  /** The run's end: the attestation's age counts from here. */
+  /** The run's end, as the uploader said: up to a few minutes of clock skew ahead of the service. */
   endedAt: Date;
+  /** When the service received the attestation. The age counts from the earlier of the two. */
+  createdAt: Date;
   /** The command the attested run executed, from its payload. */
   command: string[];
 }
 
 /**
  * What a verification reads from outside, supplied by the service. Every source is asked for only
- * when a step needs it, so a verification that stops early makes no further GitHub calls. Later
- * steps add sources here (changed paths, the audit key, revocations).
+ * when a step needs it, so a verification that stops early makes no further GitHub calls.
  */
 export interface VerificationSources {
+  /** The repo's default branch, as GitHub has it now; undefined when GitHub doesn't say. Asked for on a push only. */
+  defaultBranch(): Promise<string | undefined>;
   /** The text of `testnotary.json` at the built commit's first parent, or undefined when it has none. */
   configAtBase(): Promise<string | undefined>;
   /** Every attestation for the repo and suite that names `tree`, newest run end first. */
@@ -64,6 +67,8 @@ export interface VerificationInput {
   tree: string;
   /** The OIDC `event_name`. */
   event: string;
+  /** The OIDC `ref`, such as `refs/heads/main`; empty when the token has none. */
+  ref: string;
   mode: RepoMode;
   /** The repo's audit rates, as "1 in N" (the draw never goes below the defaults whatever they say). */
   rates: Pick<RepoSettings, "auditOneIn" | "sandboxAuditOneIn">;

@@ -69,7 +69,7 @@ export class OidcIssuer {
     const { repo } = job;
     const iat = this.now();
     const actor = job.actor ?? "octocat";
-    // Repos created after 2026-07-15 get the id form of `sub` (github-behaviours §2). Testnotary
+    // Repos created after 2026-07-15 get the id form of `sub`. Testnotary
     // keys on `repository_id`, never on `sub`.
     const subject = `repo:${repo.owner}@${repo.ownerId}/${repo.name}@${repo.id}`;
     const claims: JWTPayload = {

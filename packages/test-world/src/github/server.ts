@@ -64,8 +64,8 @@ export interface AddRepoOptions {
 
 /**
  * One HTTP server playing GitHub: the REST API at its root and the Actions OIDC issuer under
- * `/oidc`. Its answers follow what the live tests recorded (NOTES/github-behaviours.md and the
- * `research/live-github-tests` branch); cite the behaviour next to each endpoint that encodes one.
+ * `/oidc`. Its answers follow what live tests against GitHub recorded; each endpoint links the
+ * GitHub docs page it follows, or says which behaviour it encodes.
  */
 export class FakeGitHub {
   readonly state = new GitHubState();
@@ -111,7 +111,7 @@ export class FakeGitHub {
 
   /**
    * Gives a person a role on a repo (`admin`, `maintain`, `write`, `triage`, `read`, `none`). Without
-   * one they read `read` on a public repo and `none` on a private one (§7), and the owner of a
+   * one they read `read` on a public repo and `none` on a private one, and the owner of a
    * personal repo is admin. `none` takes a role away. The dashboard sees the same roles through the
    * person's user token (`GET /repos/{owner}/{repo}`, `GET /user/installations…`).
    */
@@ -126,7 +126,7 @@ export class FakeGitHub {
 
   /**
    * A job's `GITHUB_TOKEN` for `repo`. `checks: "write"` when the workflow grants `checks: write`
-   * (the snippet does); a fork pull request's token is always read-only (§9).
+   * (the snippet does); a fork pull request's token is always read-only.
    */
   jobToken(repo: FakeRepo, options: { checks: "write" | "read" }): string {
     const value = `ghs_job_${randomBytes(18).toString("base64url")}`;
@@ -155,7 +155,7 @@ export class FakeGitHub {
     return id;
   }
 
-  /** The person deletes a signing key: it is gone from the very next `ssh_signing_keys` read (§8). */
+  /** The person deletes a signing key: it is gone from the very next `ssh_signing_keys` read. */
   removeSigningKey(id: number): void {
     const index = this.state.signingKeys.findIndex((key) => key.id === id);
     if (index >= 0) this.state.signingKeys.splice(index, 1);
@@ -168,7 +168,7 @@ export class FakeGitHub {
 
   /**
    * The account installs the App on some of its repos: GitHub records the installation and sends
-   * `installation` `created` with the repos (§12). Returns the installation and the delivery.
+   * `installation` `created` with the repos. Returns the installation and the delivery.
    */
   async installApp(options: InstallAppOptions): Promise<{ installation: FakeInstallation; delivery: WebhookDelivery }> {
     const account = this.state.account(options.account.login, options.account.type ?? "User", options.account.id);
@@ -221,7 +221,7 @@ export class FakeGitHub {
     });
   }
 
-  /** Something happens to an installed repo: a `repository` event (§12). */
+  /** Something happens to an installed repo: a `repository` event. */
   repositoryEvent(installation: FakeInstallation, repo: FakeRepo, change: RepositoryAction): Promise<WebhookDelivery> {
     let changes: Record<string, unknown> | undefined;
     if (change.action === "renamed") {

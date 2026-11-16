@@ -76,6 +76,8 @@ export interface WorldOptions {
   secrets?: string[];
   /** `next` only: environment for the service, over the world's defaults. `undefined` removes one. */
   serviceEnv?: Record<string, string | undefined>;
+  /** The service's `AUDIT_MASTER_KEY`: the world's fixed key (`WORLD_AUDIT_MASTER_KEY`) unless set; null for none. */
+  auditMasterKey?: string | null;
 }
 
 /** The secret id under which the world stores a service variable named in `WorldOptions.secrets`. */
@@ -161,6 +163,12 @@ export interface World {
    * Throws when the fake GitHub does not make `admin` an admin.
    */
   changeRepoSettings(options: { admin: FakeAccount; repo: FakeRepo } & SettingsRequest): Promise<SettingsChange>;
+  /**
+   * Switches `repo` to enforce mode, with `rates` ("1 in N") when given, as a repo admin's Settings
+   * change does (`changeRepoSettings`, with an admin made on the fake GitHub for it). Throws with
+   * the service's problem when it refuses (an open mismatch, a rate below the defaults).
+   */
+  enforce(repo: FakeRepo, rates?: Pick<SettingsRequest, "auditOneIn" | "sandboxAuditOneIn">): Promise<void>;
   /**
    * A repo admin explains the mismatch recorded on a verification (by the verification's id, as the
    * job summary names it), as the Mismatches section does. False when the service refuses: no such
@@ -250,7 +258,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       githubAppPrivateKey: github.app.privateKey,
       actionsOidcIssuer: github.oidc.issuer,
       legalDir: undefined,
-      auditMasterKey: WORLD_AUDIT_MASTER_KEY,
+      auditMasterKey: options.auditMasterKey === null ? undefined : (options.auditMasterKey ?? WORLD_AUDIT_MASTER_KEY),
       now: () => clock.now(),
       log: (entry) => logs.push(entry),
     };
@@ -305,6 +313,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       return withServiceConfig(config, () => act(database(), { id: admin.id, login: admin.login }));
     };
     const repos: FixtureRepo[] = [];
+    let admins = 0;
     cleanups.push(async () => {
       await Promise.all(repos.map((repo) => repo.remove()));
     });
@@ -367,6 +376,12 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       },
       async changeRepoSettings({ admin, repo, ...request }) {
         return asAdmin(admin, repo, (db, by) => changeRepoSettings(db, { repoId: repo.id, by, ...request }));
+      },
+      async enforce(repo, rates = {}) {
+        const admin = github.addUser({ login: `world-admin-${repo.id}-${++admins}` });
+        github.setPermission(repo, admin, "admin");
+        const change = await asAdmin(admin, repo, (db, by) => changeRepoSettings(db, { repoId: repo.id, by, mode: "enforce", ...rates }));
+        if (!change.ok) throw new Error(`enforce on ${repo.fullName}: ${change.problem}`);
       },
       async explainMismatch({ admin, repo, verification, cause, note }) {
         return asAdmin(admin, repo, async (db, by) => {

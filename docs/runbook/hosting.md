@@ -77,7 +77,10 @@ connections above 70% for a day, or a security review that asks for it. The code
 5. **Everything else.** `terraform apply -var-file=production.tfvars`. App Runner's first
    deployment fails its health check until the database secret is filled; that is expected.
 6. **Database.** From a bastion session in the VPC, run `infra/database/bootstrap.sql` as the
-   instance's master user (passwords as psql variables, see the file's header).
+   instance's master user (passwords as psql variables, see the file's header). On the shared
+   instance it refuses to start while another database (flexi-day's) still grants `CONNECT` to
+   `PUBLIC`, naming it: that product's owner revokes it first (T-802), then run it again. Launch
+   condition 2's queries confirm the result.
 7. **Secrets.** Put each value into the entry named in the `secret_names` output, for example
    `aws secretsmanager put-secret-value --secret-id testnotary/production/database-url --secret-string file://-`
    (read from stdin, so the value never sits in shell history):
@@ -95,9 +98,12 @@ connections above 70% for a day, or a security review that asks for it. The code
 9. **First deploy.** Run the Deploy workflow on `main` (or push to `main`). It migrates, then moves
    App Runner to the new image; `https://<service_url>/api/v1/health` answers
    `{"status":"ok","database":"ok"}`.
-10. **Logs.** Set 30-day retention on App Runner's log groups once they exist:
-    `aws logs put-retention-policy --log-group-name /aws/apprunner/testnotary-production/<id>/application --retention-in-days 30`
-    (and `…/service`). The jobs' log group already keeps 30 days.
+10. **Logs.** Terraform manages App Runner's two log groups (`…/application` and `…/service`) with
+    30-day retention, as it does the jobs' group. If the apply in step 5 failed on one because App
+    Runner had already created it, import it and apply again:
+    `terraform import 'aws_cloudwatch_log_group.apprunner["application"]' /aws/apprunner/<service name>/<service id>/application`
+    (and `["service"]`). `aws logs describe-log-groups --log-group-name-prefix /aws/apprunner/` then
+    shows `retentionInDays: 30` for both.
 
 ## 3. Operating it
 

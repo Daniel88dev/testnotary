@@ -1,5 +1,6 @@
 import type { FakeAccount, FakeInstallation } from "../app.ts";
 import { githubError, json, notFound, route, type RouteContext } from "../router.ts";
+import { installationFor } from "./installation.ts";
 import type { FakeRepo } from "../state.ts";
 
 type Folded = "admin" | "write" | "read" | "none";
@@ -70,6 +71,27 @@ export const userAccessRoutes = [
     const user = bearerUser(context);
     if (user === null) return githubError(401, "Bad credentials");
     const repo = context.github.state.repo(context.params.owner!, context.params.repo!);
+    if (!repo) return notFound();
+    const permission: Folded = user ? context.github.state.permission(repo, user) : repo.visibility === "public" ? "read" : "none";
+    if (permission === "none") return notFound();
+    if (repo.visibility === "private" && !installationOf(context, repo)) return notFound();
+    return json(200, repoBody(repo, permission, user !== undefined));
+  }),
+
+  // GET /repositories/{id}: the repo by its numeric id, whatever its name now. With an installation
+  // token, only the installation's repos (no `permissions`); with a user token, as GET
+  // /repos/{owner}/{repo} answers that person.
+  route("GET", "/repositories/:id", (context) => {
+    const repo = [...context.github.state.repos.values()].find((candidate) => String(candidate.id) === context.params.id);
+    const token = /^(?:Bearer|token) (\S+)$/i.exec(context.request.headers.get("authorization") ?? "")?.[1];
+    if (token && context.github.state.installationTokens.has(token)) {
+      const installation = installationFor(context);
+      if (installation instanceof Response) return installation;
+      if (!repo || !installation.repoIds.has(repo.id)) return notFound();
+      return json(200, repoBody(repo, "read", false));
+    }
+    const user = bearerUser(context);
+    if (user === null) return githubError(401, "Bad credentials");
     if (!repo) return notFound();
     const permission: Folded = user ? context.github.state.permission(repo, user) : repo.visibility === "public" ? "read" : "none";
     if (permission === "none") return notFound();

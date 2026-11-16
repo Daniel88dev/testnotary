@@ -4,8 +4,8 @@ import { LAPTOP_TOKEN_LIFETIME_DAYS, SANDBOX_TOKEN_MAX_DAYS, tokenKind, type Tok
 import type { Account, TokenInfo } from "@testnotary/protocol";
 import { database } from "../db/client.ts";
 import { now } from "./config.ts";
-import { accountLogins, accounts, repoStates, tokenRenames, tokenRevocations, tokenSecrets, tokenUses, tokens } from "../db/schema.ts";
-import type { Executor } from "./installations.ts";
+import { accountLogins, accounts, tokenRenames, tokenRevocations, tokenSecrets, tokenUses, tokens } from "../db/schema.ts";
+import { latestRepoState, type Executor } from "./installations.ts";
 
 // Tokens: issued here, stored as SHA-256 hashes only, and recognised by hash. Every API route that
 // takes a token goes through `authenticate`, which also renews a laptop token on use.
@@ -147,13 +147,13 @@ export async function revokeToken(db: Executor, tokenId: string, reason: string,
 }
 
 /** When the token expires as of now: a sandbox token's fixed expiry, a laptop token's 90 days from its latest use. */
-export async function tokenExpiry(db: Executor, token: { id: string; kind: string; expiresAt: Date | null; createdAt: Date }): Promise<Date> {
+export async function tokenExpiry(db: Executor, token: { id: string; expiresAt: Date | null; createdAt: Date }): Promise<Date> {
   if (token.expiresAt) return token.expiresAt;
   const [lastUse] = await db.select({ at: tokenUses.at }).from(tokenUses).where(eq(tokenUses.tokenId, token.id)).orderBy(desc(tokenUses.id)).limit(1);
   return expiry(token, lastUse?.at ?? token.createdAt);
 }
 
-function expiry(token: { kind: string; expiresAt: Date | null }, lastSeen: Date): Date {
+function expiry(token: { expiresAt: Date | null }, lastSeen: Date): Date {
   if (token.expiresAt) return token.expiresAt;
   return new Date(lastSeen.getTime() + LAPTOP_TOKEN_LIFETIME_DAYS * DAY_MS);
 }
@@ -269,7 +269,7 @@ export async function sandboxTokens(db: Executor, filter: { createdBy?: number; 
   const repoNames = new Map<number, string>();
   const logins = new Map<number, string>();
   for (const token of list) {
-    if (!repoNames.has(token.repoId!)) repoNames.set(token.repoId!, (await latestRepoName(db, token.repoId!)) ?? String(token.repoId));
+    if (!repoNames.has(token.repoId!)) repoNames.set(token.repoId!, (await latestRepoState(db, token.repoId!))?.fullName ?? String(token.repoId));
     if (!logins.has(token.accountId)) logins.set(token.accountId, (await accountLogin(db, token.accountId)) ?? "");
   }
   return list.map((token) => ({
@@ -281,16 +281,6 @@ export async function sandboxTokens(db: Executor, filter: { createdBy?: number; 
     expiresAt: token.expiresAt!,
     lastUsedAt: uses.find((use) => use.tokenId === token.id)?.at ?? null,
   }));
-}
-
-async function latestRepoName(db: Executor, repoId: number): Promise<string | undefined> {
-  const [state] = await db
-    .select({ fullName: repoStates.fullName })
-    .from(repoStates)
-    .where(eq(repoStates.repoId, repoId))
-    .orderBy(desc(repoStates.id))
-    .limit(1);
-  return state?.fullName;
 }
 
 /** The account's own sandbox token with this id, live or not; `undefined` for anyone else's. */

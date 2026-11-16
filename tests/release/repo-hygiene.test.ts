@@ -22,6 +22,21 @@ describe("the workflows", () => {
     expect(result.exitCode).toBe(0);
   });
 
+  test("pin every action to a full commit SHA with its release in a comment, so a moved tag runs nothing new", async () => {
+    const names = await readdir(join(repoRoot, ".github/workflows"));
+    const uses: string[] = [];
+    for (const name of names) {
+      const text = await readFile(join(repoRoot, ".github/workflows", name), "utf8");
+      uses.push(...[...text.matchAll(/^\s*(?:- )?uses:\s*(.+)$/gm)].map((match) => `${name}: ${match[1]!.trim()}`));
+    }
+    expect(uses.length).toBeGreaterThan(0);
+    for (const use of uses) {
+      // A local action (`./…`) is the repo's own code at the same commit.
+      if (/: \.\//.test(use)) continue;
+      expect(use).toMatch(/: [\w.-]+\/[\w./-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
+    }
+  });
+
   test("in the release workflow, every step that pushes, releases or publishes is skipped in a dry run", async () => {
     const text = await readFile(join(repoRoot, ".github/workflows/release.yml"), "utf8");
     const steps = text.split(/\n(?= {6}- )/).filter((step) => /^ {6}- /.test(step));

@@ -21,6 +21,6 @@ The job report after the tests, and a test job reading back its gate job’s ver
 
 ## Versioning
 
-Reason codes are stable snake_case. Adding a code is a minor version of the action; renaming or removing one is a major version. A workflow that reads `steps.testnotary.outputs.reason` keeps working within a major version, though it may meet a code it hasn’t seen before.
+Reason codes are stable snake_case. Adding a code is a minor version of the action; renaming or removing one is a major version. A workflow that reads `steps.testnotary.outputs.reason` keeps working within a major version, though it may meet a code it hasn’t seen before. An action older than a code still falls back on it and runs the tests: its line shows the code, without the words for it.
 
 <Next pages="how pr inputs shadow" />

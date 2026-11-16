@@ -2,7 +2,6 @@ import { githubError, json, route } from "../router.ts";
 import type { FakeGitHub } from "../server.ts";
 
 // The Actions OIDC issuer (token.actions.githubusercontent.com in production), mounted under /oidc.
-// See NOTES/github-behaviours.md §1 and §2.
 
 function discovery(github: FakeGitHub, issuer: string) {
   return json(200, {

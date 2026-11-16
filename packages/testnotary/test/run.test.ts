@@ -331,9 +331,25 @@ describe("when the service can't say", () => {
 
     expect(suite.started()).toBe(true);
     expect(result.exitCode).toBe(1);
-    expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "failed", exitCode: 3, attested: false, warnings: ["service_unreachable"] });
+    expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "failed", exitCode: 3, attested: false, warnings: ["base_fetch_skipped", "service_unreachable"] });
     expect(result.stderr).toMatch(/^testnotary: the Testnotary service could not be reached .*nothing will be attested$/m);
     expect(uploadsSince(mark)).toEqual([]);
+  });
+
+  test("with the service unreachable the base isn't fetched: the last fetched base counts, with a warning", async () => {
+    const dev = await developer();
+    // origin's main moves on (its suite now fails), but this clone last fetched it before that.
+    const fetched = await dev.fixture.revParse("origin/main");
+    await dev.fixture.commit("Make the suite fail", { "testnotary.json": `${JSON.stringify({ suites: { test: { command: ["node", "-e", "process.exit(7)"] } } })}\n` });
+    await dev.fixture.push("main");
+    await dev.fixture.git("update-ref", "refs/remotes/origin/main", fetched);
+
+    const result = await dev.run(["--json"], { TESTNOTARY_URL: "http://127.0.0.1:9" });
+
+    expect(result.exitCode).toBe(0);
+    // The local config (the failing one) differs from the base's, which is what ran.
+    expect(JSON.parse(result.stdout)).toMatchObject({ outcome: "passed", attested: false, warnings: ["base_fetch_skipped", "local_config_differs", "service_unreachable"] });
+    expect(await dev.fixture.revParse("origin/main")).toBe(fetched);
   });
 
   test("an unreachable service doesn't hold a passing run up or attest it", async () => {

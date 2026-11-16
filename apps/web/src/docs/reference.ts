@@ -39,7 +39,7 @@ export const REFUSAL_HELP: Record<RefusalCode, CodeHelp> = {
   },
   history_dependent_command: {
     cause:
-      "The command, or the `package.json` script it names (one level deep), picks tests by what changed since a commit: `--changed`, `--changedSince`, `--onlyChanged`, `--since`, `--affected`, `nx affected`, or turbo’s `--filter`/`-F` with a `[git range]`. Such a run tests less than the tree it would attest.",
+      "The command, or the `package.json` script it names (one level deep), picks tests by what changed since a commit: `--changed`, `--changedSince`, `--onlyChanged` (or Jest’s `-o`), `--since`, `--affected`, `nx affected`, or turbo’s `--filter`/`-F` with a `[git range]`. Such a run tests less than the tree it would attest.",
     fix: "Declare a suite that runs every test, without history filters, in `testnotary.json` on the base branch.",
   },
   command_not_found: {
@@ -145,7 +145,8 @@ export const REASON_HELP: Record<FallbackReason, CodeHelp> = {
     fix: "Usually nothing: the next job gets a fresh token. A repeated rejection is worth a report.",
   },
   github_denied: {
-    cause: "GitHub refused one of the service’s requests. When an IP allow list is the cause, the line says so, quotes GitHub and links the limits page.",
+    cause:
+      "GitHub refused one of the service’s requests. The service records it like any other answer, so it counts on the dashboard. When an IP allow list is the cause, the line says so, quotes GitHub and links the limits page.",
     fix: "None for an IP allow list in v1: Testnotary has no fixed IP addresses. See [Limits in v1](/docs/limits#github-enterprise).",
   },
   unknown_suite: {
@@ -153,8 +154,9 @@ export const REASON_HELP: Record<FallbackReason, CodeHelp> = {
     fix: "Name a suite the base branch declares in the action’s `suite` input, or merge the config change first.",
   },
   no_attestation: {
-    cause: "No attestation for this repo and suite names the tree CI is building.",
-    fix: "Commit everything, bring the branch up to date with the base (CI tests the merge into it), then `testnotary run <suite>` and push.",
+    cause:
+      "No attestation for this repo and suite names the tree CI is building. The detail says when no attestation could be checked at all: the event isn’t one whose commit is the code the job tests (only `pull_request`, `merge_group` and a `push` to the default branch are), or the job’s checkout isn’t the tree the service verified.",
+    fix: "Commit everything, bring the branch up to date with the base (CI tests the merge into it), then `testnotary run <suite>` and push. With an event or checkout detail, nothing: such a job always runs its tests.",
   },
   attestation_expired: {
     cause: "The attested run ended 24 hours ago or more.",
@@ -185,11 +187,12 @@ export const REASON_HELP: Record<FallbackReason, CodeHelp> = {
   },
   signature_invalid: {
     cause:
-      "In signature mode, the action’s own check of the attestation failed. The detail starts with the check: `signature:`, `tree:`, `repository:`, `suite:`, `command:`, `age:`, `guarded file:`, `permission:`, or `checkout:` when the job’s checkout has no first parent to read the config from.",
-    fix: "Follow the detail. For `checkout:`, give `actions/checkout` `fetch-depth: 2`. For an untrusted key, add it to GitHub as a signing key or to `.testnotary/allowed_signers` on the base branch.",
+      "In signature mode, the action’s own check of the attestation failed. The detail starts with the check: `signature:`, `tree:`, `repository:`, `suite:`, `command:`, `age:`, `guarded file:`, `permission:`, `checkout:` when the repo requires signatures and the job has no checkout, or no first parent in it, or `config:` when the base’s `testnotary.json` isn’t JSON, or requires signatures in a form this release of the action can’t read.",
+    fix: "Follow the detail. For `checkout:`, give `actions/checkout` `fetch-depth: 2`. For `config:`, fix the base’s config, or update the action’s pinned SHA to a release that reads it. For an untrusted key, add it to GitHub as a signing key or to `.testnotary/allowed_signers` on the base branch.",
   },
   github_unavailable: {
-    cause: "In signature mode, a GitHub call the action makes with the job’s token failed, took over 10 seconds, or hit the rate limit.",
+    cause:
+      "GitHub couldn’t be asked: in signature mode, a call the action makes with the job’s token failed, took over 10 seconds, or hit the rate limit; or one of the service’s own calls to GitHub failed while it verified the job.",
     fix: "Nothing to fix in the repo; the tests ran. Re-run the job if you want the skip.",
   },
   audit: {
@@ -212,7 +215,7 @@ export const WARNING_HELP: Record<WarningCode, CodeHelp> = {
     fix: "Run the suite again.",
   },
   base_fetch_skipped: {
-    cause: "The base branch couldn’t be fetched (offline, or 20 seconds passed). The last fetched copy is used, so its config and the branch-behind check may be out of date.",
+    cause: "The base branch couldn’t be fetched (offline, or 20 seconds passed), or wasn’t tried because the service couldn’t be reached first and nothing will be attested anyway. The last fetched copy is used, so its config and the branch-behind check may be out of date.",
     fix: "Fetch when you’re back online and run again.",
   },
   branch_behind_base: {

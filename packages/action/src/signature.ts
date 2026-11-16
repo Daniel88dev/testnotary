@@ -16,7 +16,7 @@
 //
 // No signature is `signature_missing`; a failed condition `signature_invalid`, its detail naming
 // the check; a failed or rate-limited GitHub call `github_unavailable`. Every one runs the tests.
-import { execFile } from "node:child_process";
+import { git } from "./git.ts";
 import {
   ALLOWED_SIGNERS_FILE,
   CONFIG_FILE,
@@ -37,7 +37,7 @@ import {
   type TestnotaryConfig,
 } from "./shared.ts";
 import { input, type RunnerEnv } from "./runner.ts";
-import type { Verdict } from "./verify.ts";
+import type { JobAnswer } from "./verify.ts";
 
 /** How old a signature may be, counted from its signing time (the run's end). */
 export const SIGNATURE_MAX_AGE_MS = 24 * 3_600_000;
@@ -47,44 +47,97 @@ export const SIGNATURE_CLOCK_SKEW_MS = 5 * 60_000;
 const GITHUB_TIMEOUT_MS = 10_000;
 
 /**
- * The verdict the job acts on: a `skip` in a repo whose base config requires signatures stands
+ * The answer the job acts on: a `skip` in a repo whose base config requires signatures stands
  * only when the attestation's signature passes the check; otherwise the job falls back (keeping
- * the service's record, so the tests still report against it). Any other verdict is returned as
+ * the service's record, so the tests still report against it). Shadow mode previews the same
+ * check: a *would skip* whose signature would fail reads *would have fallen back* with the
+ * signature's reason, so it never counts as evidence for enforce. Any other answer is returned as
  * it is: only a skip is ever trusted.
  */
-export async function checkSkip(env: RunnerEnv, verdict: Verdict, suiteInput: string | null): Promise<Verdict> {
-  if (verdict.result !== "skip") return verdict;
+export async function checkSkip(env: RunnerEnv, jobAnswer: JobAnswer, suiteInput: string | null): Promise<JobAnswer> {
+  if (jobAnswer.result !== "skip" && jobAnswer.result !== "would_skip") return jobAnswer;
   const workspace = env.GITHUB_WORKSPACE || process.cwd();
-  const mode = await signatureMode(workspace);
-  if (mode.kind === "off") return verdict;
-  const fallBack = (reason: FallbackReason, detail: string | null = null): Verdict => ({ result: "fallback", reason, detail, record: verdict.record });
-  if (mode.kind === "no_parent") {
-    return fallBack("signature_invalid", "checkout: the repo requires signatures and HEAD^1 is missing; check out with fetch-depth: 2");
-  }
-  const attestation = verdict.record?.attestation;
+  const mode = await signatureRequirement(env, workspace);
+  if (mode.kind === "off") return jobAnswer;
+  const result = jobAnswer.result === "skip" ? "fallback" : "would_fall_back";
+  const fallBack = (reason: FallbackReason, detail: string | null = null): JobAnswer => ({ result, reason, detail, record: jobAnswer.record });
+  if (mode.kind === "unchecked") return fallBack(mode.problem.reason, mode.problem.detail);
+  const attestation = jobAnswer.record?.attestation;
   if (!attestation?.signature || attestation.payload === null) return fallBack("signature_missing");
   const failed = await signatureProblem(env, workspace, mode.config, suiteInput, attestation.payload, attestation.signature.sshsig);
-  return failed ? fallBack(failed.reason, failed.detail) : verdict;
+  return failed ? fallBack(failed.reason, failed.detail) : jobAnswer;
 }
 
-type Mode = { kind: "off" } | { kind: "required"; config: TestnotaryConfig } | { kind: "no_parent" };
+/**
+ * Whether a skip needs the signature check: `off` when the base config doesn't require signatures,
+ * `required` with the base config to check against, or `unchecked` when it requires them (or can't
+ * be told) but can't be checked here. A skip that is `unchecked` falls back with the problem.
+ */
+type SignatureRequirement = { kind: "off" } | { kind: "required"; config: TestnotaryConfig } | { kind: "unchecked"; problem: Problem };
 
 /**
- * Whether the repo requires signatures, from `testnotary.json` at `HEAD^1`. A checkout without
- * `HEAD^1` (the default `fetch-depth: 1`) whose own config requires them can't be checked. Without
- * a checkout at all (a gate job with no `actions/checkout`), nothing can be read: the action then
- * trusts the service, which is why signature mode's gate job needs a checkout.
+ * Whether the repo requires signatures, from `testnotary.json` at the built commit's first parent,
+ * decided apart from the checkout and from what this action's parser accepts, so that neither can
+ * turn the check off:
+ *
+ * - with `HEAD^1` in the checkout, the config is read there; without it (`fetch-depth: 1`, or a
+ *   gate job with no checkout at all) through GitHub's API with the step's `github-token`: the
+ *   commit's first parent, then the file at it. Only a skip pays for these two calls;
+ * - the raw JSON's `signatures` field decides, even when the strict schema rejects the file (a key
+ *   from a later release, say); a file that exists but isn't JSON can't say, and falls back;
+ * - a repo that requires signatures needs the checkout's `HEAD^1` for the tree, command and diff
+ *   conditions: without it the skip falls back, saying to check out with `fetch-depth: 2`.
  */
-async function signatureMode(workspace: string): Promise<Mode> {
-  const parent = await git(workspace, ["rev-parse", "--verify", "--quiet", "HEAD^1^{commit}"]);
-  if (parent === undefined) {
-    const own = await git(workspace, ["show", `HEAD:${CONFIG_FILE}`]);
-    const parsed = own === undefined ? undefined : parseConfig(own);
-    return parsed?.ok && parsed.config.signatures === "required" ? { kind: "no_parent" } : { kind: "off" };
+async function signatureRequirement(env: RunnerEnv, workspace: string): Promise<SignatureRequirement> {
+  const head = await git(workspace, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+  const parent = head === undefined ? undefined : await git(workspace, ["rev-parse", "--verify", "--quiet", "HEAD^1^{commit}"]);
+  let text: string | undefined;
+  if (parent !== undefined) text = await git(workspace, ["show", `HEAD^1:${CONFIG_FILE}`]);
+  else {
+    const read = await baseConfigFromGitHub(env);
+    if (read.kind === "failed") return { kind: "unchecked", problem: read.problem };
+    text = read.text;
   }
-  const text = await git(workspace, ["show", `HEAD^1:${CONFIG_FILE}`]);
-  const parsed = text === undefined ? undefined : parseConfig(text);
-  return parsed?.ok && parsed.config.signatures === "required" ? { kind: "required", config: parsed.config } : { kind: "off" };
+  if (text === undefined) return { kind: "off" };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text.replace(/^\uFEFF/, ""));
+  } catch {
+    return { kind: "unchecked", problem: invalid(`config: ${CONFIG_FILE} at HEAD^1 is unreadable`) };
+  }
+  if (!raw || typeof raw !== "object" || (raw as { signatures?: unknown }).signatures !== "required") return { kind: "off" };
+  const parsed = parseConfig(text);
+  if (!parsed.ok) return { kind: "unchecked", problem: invalid(`config: ${CONFIG_FILE} at HEAD^1 requires signatures, but this action can't read it: ${parsed.problems[0] ?? "invalid"}`) };
+  if (head === undefined) return { kind: "unchecked", problem: invalid("checkout: the repo requires signatures and the job has no checkout; check out with fetch-depth: 2") };
+  if (parent === undefined) return { kind: "unchecked", problem: invalid("checkout: the repo requires signatures and HEAD^1 is missing; check out with fetch-depth: 2") };
+  return { kind: "required", config: parsed.config };
+}
+
+/**
+ * `testnotary.json` at `GITHUB_SHA`'s first parent through GitHub's API, for a job whose checkout
+ * can't show it: the text, undefined when the parent has no such file (or the commit no parent).
+ * A failed call, or a commit GitHub doesn't show the token, can't be told from a repo without
+ * signatures, so it fails.
+ */
+async function baseConfigFromGitHub(env: RunnerEnv): Promise<{ kind: "read"; text: string | undefined } | { kind: "failed"; problem: Problem }> {
+  const github = new GitHub(env);
+  const repository = env.GITHUB_REPOSITORY ?? "";
+  const sha = env.GITHUB_SHA ?? "";
+  const commit = await github.get(`/repos/${repository}/commits/${encodeURIComponent(sha)}`);
+  if (commit.kind === "failed") return commit;
+  if (commit.kind === "not_found") return { kind: "failed", problem: { reason: "github_unavailable", detail: `GET /repos/${repository}/commits/${sha.slice(0, 12)} found no such commit` } };
+  const parents = (commit.body as { parents?: { sha?: unknown }[] }).parents;
+  const first = Array.isArray(parents) ? parents[0]?.sha : undefined;
+  if (first === undefined) return { kind: "read", text: undefined };
+  if (typeof first !== "string") return { kind: "failed", problem: { reason: "github_unavailable", detail: `GET /repos/${repository}/commits answered without its parents` } };
+  const file = await github.get(`/repos/${repository}/contents/${CONFIG_FILE}?ref=${encodeURIComponent(first)}`);
+  if (file.kind === "failed") return file;
+  if (file.kind === "not_found") return { kind: "read", text: undefined };
+  const { type, encoding, content } = file.body as { type?: unknown; encoding?: unknown; content?: unknown };
+  if (type !== "file" || encoding !== "base64" || typeof content !== "string") {
+    return { kind: "failed", problem: { reason: "github_unavailable", detail: `GET /repos/${repository}/contents/${CONFIG_FILE} answered without the file's content` } };
+  }
+  return { kind: "read", text: Buffer.from(content, "base64").toString("utf8") };
 }
 
 interface Problem {
@@ -216,13 +269,4 @@ class GitHub {
       return unavailable(`${what} answered without JSON`);
     }
   }
-}
-
-/** Git's trimmed stdout in the checkout, or undefined when it fails. */
-function git(cwd: string, args: string[]): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    execFile("git", args, { cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) =>
-      resolve(error ? undefined : stdout.trim()),
-    );
-  });
 }
