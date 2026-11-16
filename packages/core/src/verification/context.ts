@@ -9,8 +9,10 @@ export interface AttestationCandidate {
   accountId: number;
   tokenId: string;
   tokenKind: TokenKind;
-  /** The run's end: the attestation's age counts from here. */
+  /** The run's end, as the uploader said: up to a few minutes of clock skew ahead of the service. */
   endedAt: Date;
+  /** When the service received the attestation. The age counts from the earlier of the two. */
+  createdAt: Date;
   /** The command the attested run executed, from its payload. */
   command: string[];
 }

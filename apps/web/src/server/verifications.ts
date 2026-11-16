@@ -116,6 +116,7 @@ async function attestationsOfTree(db: Executor, repoId: number, suite: string, t
     tokenId: attestation.tokenId,
     tokenKind: tokenKind === "sandbox" ? "sandbox" : "laptop",
     endedAt: attestation.endedAt,
+    createdAt: attestation.createdAt,
     command: decodeAttestationPayload(attestation.payload.toString("utf8"))?.command ?? [],
   }));
 }

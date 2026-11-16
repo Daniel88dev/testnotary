@@ -304,6 +304,27 @@ describe("the gate job falls back", () => {
     }
   });
 
+  test("a run whose end lies ahead of the service's clock ages from when the service received it", async () => {
+    const s = await story();
+    await featureBranch(s);
+    try {
+      // The laptop's clock runs 4 minutes ahead of the service's: inside the 5 minutes of skew an
+      // upload may claim, so the run is accepted with an end in the service's future.
+      const received = new Date(Date.now() - 4 * 60_000);
+      world.clock.set(received);
+      await s.attest();
+      await enforce(s.repo);
+      const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+
+      world.clock.set(new Date(received.getTime() + 24 * 3_600_000 + 60_000));
+      const result = await s.gate({ sha: merge.sha });
+
+      expect(result.outputs).toMatchObject({ result: "fallback", reason: "attestation_expired", skip: "false" });
+    } finally {
+      world.clock.reset();
+    }
+  });
+
   test.each(["read", "triage", "none"] as const)("when the attester now has only %s: attester_no_write", async (permission) => {
     const { s, merge } = await attestedPullRequest();
     world.github.setPermission(s.repo, s.user, permission);
