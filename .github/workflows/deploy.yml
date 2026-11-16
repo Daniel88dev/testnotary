@@ -5,9 +5,12 @@ name: Deploy
 # this repository's main branch in that environment. The environment's variables come from the
 # Terraform outputs (docs/runbook/hosting.md).
 
+# Switched off for now: the push trigger is commented out, so a merge to main deploys nothing. The
+# workflow runs only when started by hand. Uncomment the two lines to deploy on every push to main.
+
 on:
-  push:
-    branches: [main]
+  # push:
+  #   branches: [main]
   workflow_dispatch:
 
 permissions:

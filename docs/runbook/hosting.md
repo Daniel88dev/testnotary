@@ -95,7 +95,7 @@ connections above 70% for a day, or a security review that asks for it. The code
 8. **Deploy variables.** In the `production` environment, set the variables `AWS_DEPLOY_ROLE_ARN`,
    `ECR_REPOSITORY_URL`, `APPRUNNER_SERVICE_ARN`, `JOBS_CLUSTER_ARN`, `JOB_SUBNET_IDS` and
    `JOB_SECURITY_GROUP_ID` from the Terraform outputs of the same names.
-9. **First deploy.** Run the Deploy workflow on `main` (or push to `main`). It migrates, then moves
+9. **First deploy.** Run the Deploy workflow on `main` by hand. It migrates, then moves
    App Runner to the new image; `https://<service_url>/api/v1/health` answers
    `{"status":"ok","database":"ok"}`.
 10. **Logs.** Terraform manages App Runner's two log groups (`…/application` and `…/service`) with
@@ -107,7 +107,9 @@ connections above 70% for a day, or a security review that asks for it. The code
 
 ## 3. Operating it
 
-- **Deploys** run on every push to `main`. A secret the service cannot read, or a database it
+- **Deploys** are switched off for now: the push trigger in `.github/workflows/deploy.yml` is
+  commented out, so the workflow runs only when started by hand. Uncomment it and they run on every
+  push to `main`. A secret the service cannot read, or a database it
   cannot reach, fails the health check; App Runner keeps the previous version and the workflow
   fails. A failed migration stops the workflow before App Runner changes.
 - **Rollback**: revert on `main`; the deploy ships the revert. Migrations only move forward, so the

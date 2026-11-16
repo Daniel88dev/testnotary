@@ -8,6 +8,10 @@ bought.
 
 ## How a release happens
 
+**Switched off for now.** The push trigger in `.github/workflows/release.yml` is commented out, so
+nothing below happens on a merge to `main`; the workflow runs only when started by hand (a dry run
+by default). Uncomment the trigger to turn the flow below on.
+
 1. Pull requests that change what the library or the action does carry a changeset
    (`pnpm changeset`). The library and the action are one fixed group, so both get the bump.
 2. On every push to `main`, the workflow's `changesets` job opens or updates the **Version
