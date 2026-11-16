@@ -17,7 +17,7 @@ export interface LocateInput {
   base: string | undefined;
 }
 
-export type Located = Pick<RunContext, "root" | "checkout" | "origin" | "base" | "config" | "suite">;
+export type Located = Pick<RunContext, "root" | "checkout" | "statusBefore" | "origin" | "base" | "config" | "suite">;
 
 /** A refusal, with whatever of the repo was found by then (a refused run reports tree and commit). */
 export type LocateRefusal = Refusal & { partial: { repository?: string; checkout?: { commit: string; tree: string } } };
@@ -84,7 +84,16 @@ export async function locate(input: LocateInput): Promise<{ located: Located } |
   const config = read.config;
   const suite = chooseSuite(config, input.suite, branch);
   if ("refusal" in suite) return { refused: { ...suite, partial } };
-  return { located: { root, checkout, origin, base: { branch, ref: `origin/${branch}`, fetched }, config, suite } };
+  const statusBefore = await treeStatus(root, env);
+  return { located: { root, checkout, statusBefore, origin, base: { branch, ref: `origin/${branch}`, fetched }, config, suite } };
+}
+
+/**
+ * Everything git sees changed in the working tree, submodules included whatever `ignore` says:
+ * `git status --porcelain` entries, NUL-separated. Undefined when git status fails.
+ */
+export function treeStatus(root: string, env: Env): Promise<string | undefined> {
+  return tryGit(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"], env);
 }
 
 function refuse(refusal: LocateRefusal["refusal"], lines: string[], partial: LocateRefusal["partial"]): { refused: LocateRefusal } {

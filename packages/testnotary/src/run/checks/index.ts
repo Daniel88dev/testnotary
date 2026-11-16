@@ -7,6 +7,8 @@
 // `config_invalid`) are found before these run, in `../locate.ts`; the service's clear no's
 // (`token_rejected`, `repo_not_installed`, `no_write_access`) come from the preflight after them;
 // `command_not_found` comes from starting the command.
+//
+// `WARNINGS` are checks that only ever warn: they run once every refusal check passed.
 import type { RunCheck } from "../context.ts";
 import { dirtyTree } from "./dirty-tree.ts";
 
@@ -14,6 +16,14 @@ import { dirtyTree } from "./dirty-tree.ts";
 import { laptopTokenInSandbox } from "./laptop-token-in-sandbox.ts";
 
 // Imports for the command and tree checks (T-816).
+import { extraArguments } from "./extra-arguments.ts";
+import { historyDependentCommand } from "./history-dependent-command.ts";
+import { submodules } from "./submodules.ts";
+import { treeChangedDuringRun } from "./tree-changed-during-run.ts";
+import { baseFetchSkipped } from "./base-fetch-skipped.ts";
+import { branchBehindBase } from "./branch-behind-base.ts";
+import { localConfigDiffers } from "./local-config-differs.ts";
+import { ignoredEnvFile } from "./ignored-env-file.ts";
 
 // Imports for the platform and environment floor checks (T-815).
 
@@ -23,9 +33,12 @@ export const BEFORE_START: readonly RunCheck[] = [
   laptopTokenInSandbox,
 
   // 2. The command line and the command (T-816: `extra_arguments`, `history_dependent_command`).
+  extraArguments,
+  historyDependentCommand,
 
   // 3. The tree. (T-816: submodules, after `dirtyTree`.)
   dirtyTree,
+  submodules,
 
   // 4. The platform and the environment floor (T-815: `platform_unsupported`, `platform_not_allowed`,
   //    `package_manager_unsupported`, `runtime_mismatch`, `package_manager_mismatch`, `install_stale`).
@@ -33,12 +46,27 @@ export const BEFORE_START: readonly RunCheck[] = [
 ];
 
 /**
+ * Warnings, never refusals, after every check in `BEFORE_START` passed and before the preflight.
+ * Each returns nothing and raises its warning with `warn()`.
+ */
+export const WARNINGS: readonly RunCheck[] = [
+  // The base and its config (T-816).
+  baseFetchSkipped,
+  branchBehindBase,
+  localConfigDiffers,
+
+  // The environment (T-816: `ignored_env_file`; T-815: `runtime_sources_disagree`).
+  ignoredEnvFile,
+
+];
+
+/**
  * After the command exited, before the upload (T-816: `tree_changed_during_run`). A refusal here
- * ends the run *refused* although the command ran. `context.checkout` still holds `HEAD` as it was
- * before the start; a check that needs more of the before-state (such as `git status`) adds a
- * field to `RunContext` and fills it in `../locate.ts`.
+ * ends the run *refused* although the command ran. `context.checkout` and `context.statusBefore`
+ * hold `HEAD` and `git status` as they were before the start (filled in `../locate.ts`).
  */
 export const AFTER_RUN: readonly RunCheck[] = [
   // T-816: `tree_changed_during_run`.
+  treeChangedDuringRun,
 
 ];

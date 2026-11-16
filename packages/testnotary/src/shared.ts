@@ -32,6 +32,7 @@ export {
   type Suite,
   type TestnotaryConfig,
   type TokenKind,
+  type WarningCode,
 } from "@testnotary/core";
 export {
   API_V1,
