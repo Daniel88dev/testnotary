@@ -60,7 +60,7 @@ export class FixtureRepo {
   }
 
   /** Writes files into the working tree without committing. `null` deletes a file. */
-  async write(files: Record<string, string | null>): Promise<void> {
+  async write(files: Record<string, string | Uint8Array | null>): Promise<void> {
     for (const [path, content] of Object.entries(files)) {
       const file = join(this.dir, path);
       if (content === null) {
@@ -73,7 +73,7 @@ export class FixtureRepo {
   }
 
   /** Writes `files`, stages everything and commits on the current branch. Returns the commit. */
-  async commit(message: string, files: Record<string, string | null> = {}): Promise<string> {
+  async commit(message: string, files: Record<string, string | Uint8Array | null> = {}): Promise<string> {
     await this.write(files);
     await this.git("add", "--all");
     await this.git("commit", "--quiet", "--allow-empty", "--no-verify", "-m", message);
