@@ -115,9 +115,9 @@ variable "custom_domain" {
 }
 
 variable "retention_job_enabled" {
-  description = "Turns the retention job's schedule on. Leave false until the retention job ships."
+  description = "Turns the retention job's schedule on. It ships in the image (apps/web/dist/scripts/retention.mjs); turn it off only to pause deletions."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "retention_schedule" {

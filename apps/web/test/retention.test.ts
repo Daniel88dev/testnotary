@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { useWorld } from "@testnotary/test-world/vitest";
 import { daysAgo, daysOn, histories } from "./support/history.ts";
@@ -10,6 +12,7 @@ import { daysAgo, daysOn, histories } from "./support/history.ts";
 
 const world = useWorld();
 const { history, api, at, table } = histories(world, "keep");
+const script = fileURLToPath(new URL("../scripts/retention.ts", import.meta.url));
 
 describe("the 90-day prune", () => {
   test("deletes runs, attestations, verifications and job reports older than 90 days, and keeps younger ones", async () => {
@@ -136,5 +139,39 @@ describe("tokens", () => {
     expect(await table("verifications")).not.toContain(verification.id);
     expect(await table("mismatches")).toContain(mismatch!.id);
     expect(await table("tokens")).toContain(h.tokenId);
+  });
+});
+
+describe("the scheduled job's entry point", () => {
+  function job(databaseUrl: string | undefined): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    return new Promise((resolve) => {
+      const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script], {
+        env: { PATH: process.env.PATH, ...(databaseUrl ? { RETENTION_DATABASE_URL: databaseUrl } : {}) },
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => (stdout += chunk));
+      child.stderr.on("data", (chunk) => (stderr += chunk));
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+    });
+  }
+
+  test("only the retention role can run it: as the app role it fails and deletes nothing", async () => {
+    const h = await history();
+    await h.logout();
+
+    const refused = await job(world.db.urls.app);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toMatch(/permission denied/);
+    expect(await table("token_secrets")).toContain(h.tokenId);
+
+    const ran = await job(world.db.urls.retention);
+    expect(ran).toMatchObject({ code: 0, stderr: "" });
+    expect(JSON.parse(ran.stdout)).toMatchObject({ retention: "done", deleted: { tokenHashes: expect.any(Number) as number } });
+    expect(await table("token_secrets")).not.toContain(h.tokenId);
+  });
+
+  test("without RETENTION_DATABASE_URL it says so and exits 2", async () => {
+    expect(await job(undefined)).toMatchObject({ code: 2, stderr: expect.stringContaining("RETENTION_DATABASE_URL") as string });
   });
 });
