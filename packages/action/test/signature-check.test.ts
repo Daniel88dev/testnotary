@@ -47,9 +47,7 @@ async function scene(options: { files?: Record<string, string> } = {}): Promise<
   const machine = await world.machine();
   world.github.deviceFlow.approveNext(user);
   expect((await world.runCli(["login"], { cwd: machine.home, machine })).exitCode).toBe(0);
-  const sql = world.db.connect("app");
-  await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  await world.enforce(repo);
   const key = await world.sshKey();
   world.github.addSigningKey(user, key.publicKey);
   await fixture.git("config", "gpg.format", "ssh");

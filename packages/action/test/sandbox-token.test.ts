@@ -37,9 +37,7 @@ async function scene(): Promise<Scene> {
   const creator = world.github.addUser({ login: `devon-${n}` });
   world.github.setPermission(repo, creator, "write");
   const token = await world.sandboxToken({ creator, repo, name: "codex-cloud" });
-  const sql = world.db.connect("app");
-  await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  await world.enforce(repo);
   await fixture.branch("feature");
   await fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
   await fixture.push();

@@ -25,13 +25,7 @@ async function installedRepo(world: World, owner: string, name: string, visibili
   const fixture = await world.fixtureRepo({ config: PASSING, files: { ".gitignore": "node_modules\n" } });
   const repo = await world.hostOnGitHub(fixture, { owner, name, visibility });
   await world.github.installApp({ account: { login: owner, type: "Organization" }, repos: [repo] });
-  const sql = world.db.connect("app");
-  try {
-    await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-              values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
-  } finally {
-    await sql.end({ timeout: 1 });
-  }
+  await world.enforce(repo);
   await fixture.branch("feature");
   await fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
   await fixture.push();

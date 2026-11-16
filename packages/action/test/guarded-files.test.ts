@@ -50,11 +50,9 @@ async function story(options: { config?: Record<string, unknown>; files?: Record
   };
 }
 
-/** Switches the repo to enforce mode, as an admin's setting change would. */
+/** Switches the repo to enforce mode, as an admin's setting change does. */
 async function enforce(repo: FakeRepo) {
-  const sql = world.db.connect("app");
-  await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  await world.enforce(repo);
 }
 
 /**

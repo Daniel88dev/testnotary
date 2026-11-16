@@ -164,6 +164,12 @@ export interface World {
    */
   changeRepoSettings(options: { admin: FakeAccount; repo: FakeRepo } & SettingsRequest): Promise<SettingsChange>;
   /**
+   * Switches `repo` to enforce mode, with `rates` ("1 in N") when given, as a repo admin's Settings
+   * change does (`changeRepoSettings`, with an admin made on the fake GitHub for it). Throws with
+   * the service's problem when it refuses (an open mismatch, a rate below the defaults).
+   */
+  enforce(repo: FakeRepo, rates?: Pick<SettingsRequest, "auditOneIn" | "sandboxAuditOneIn">): Promise<void>;
+  /**
    * A repo admin explains the mismatch recorded on a verification (by the verification's id, as the
    * job summary names it), as the Mismatches section does. False when the service refuses: no such
    * mismatch in `repo`, a cause other than the four, or one explained already.
@@ -307,6 +313,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       return withServiceConfig(config, () => act(database(), { id: admin.id, login: admin.login }));
     };
     const repos: FixtureRepo[] = [];
+    let admins = 0;
     cleanups.push(async () => {
       await Promise.all(repos.map((repo) => repo.remove()));
     });
@@ -369,6 +376,12 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       },
       async changeRepoSettings({ admin, repo, ...request }) {
         return asAdmin(admin, repo, (db, by) => changeRepoSettings(db, { repoId: repo.id, by, ...request }));
+      },
+      async enforce(repo, rates = {}) {
+        const admin = github.addUser({ login: `world-admin-${repo.id}-${++admins}` });
+        github.setPermission(repo, admin, "admin");
+        const change = await asAdmin(admin, repo, (db, by) => changeRepoSettings(db, { repoId: repo.id, by, mode: "enforce", ...rates }));
+        if (!change.ok) throw new Error(`enforce on ${repo.fullName}: ${change.problem}`);
       },
       async explainMismatch({ admin, repo, verification, cause, note }) {
         return asAdmin(admin, repo, async (db, by) => {

@@ -64,6 +64,22 @@ describe("database roles", () => {
     expect(tables.filter((t) => t.update || t.delete || t.truncate)).toEqual([]);
   });
 
+  test.each([
+    { auditOneIn: 11, sandboxAuditOneIn: 5 },
+    { auditOneIn: 20, sandboxAuditOneIn: 5 },
+    { auditOneIn: 10, sandboxAuditOneIn: 6 },
+    { auditOneIn: 0, sandboxAuditOneIn: 5 },
+  ])("the database itself refuses an audit rate below the defaults: 1 in $auditOneIn, sandbox 1 in $sandboxAuditOneIn", async ({ auditOneIn, sandboxAuditOneIn }) => {
+    // The service refuses these first (audit.test.ts); this is the guarantee under it.
+    const app = world.db.connect("app");
+    await app`insert into repos (github_id) values (${990_000 + auditOneIn * 10 + sandboxAuditOneIn}) on conflict do nothing`;
+
+    await expect(
+      app`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
+          values (${990_000 + auditOneIn * 10 + sandboxAuditOneIn}, 'enforce', ${auditOneIn}, ${sandboxAuditOneIn}, null, 'test')`,
+    ).rejects.toThrow(/repo_setting_changes_(sandbox_)?audit_rate/);
+  });
+
   test("no role is a superuser, and each connects only to Testnotary's database", async () => {
     const roles = await world.db.connect("app")`
       select rolname, rolsuper, rolcreatedb, rolcreaterole from pg_roles

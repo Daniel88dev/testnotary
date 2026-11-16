@@ -47,11 +47,7 @@ async function scene(options: { config?: Record<string, unknown>; files?: Record
   const machine = await world.machine();
   world.github.deviceFlow.approveNext(user);
   expect((await world.runCli(["login"], { cwd: machine.home, machine })).exitCode).toBe(0);
-  if (!options.shadow) {
-    const sql = world.db.connect("app");
-    await sql`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-              values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
-  }
+  if (!options.shadow) await world.enforce(repo);
   await fixture.branch("feature");
   await fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
   await fixture.push();

@@ -30,8 +30,7 @@ async function installedRepo(owner = `revo-${++n}`): Promise<Repo> {
   await world.github.installApp({ account: { login: owner, type: "Organization" }, repos: [repo] });
   const admin = world.github.addUser({ login: `${owner}-admin` });
   world.github.setPermission(repo, admin, "admin");
-  await world.db.connect("app")`insert into repo_setting_changes (repo_id, mode, audit_one_in, sandbox_audit_one_in, changed_by, reason)
-            values (${repo.id}, 'enforce', 10, 5, null, 'test')`;
+  await world.enforce(repo);
   await fixture.branch("feature");
   await fixture.commit("Add a", { "src/a.js": "export const a = 1;\n" });
   await fixture.push();
