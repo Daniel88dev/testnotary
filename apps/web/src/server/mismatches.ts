@@ -27,6 +27,9 @@ const COMPARED = ["audit", "would_skip"] as const;
  */
 export async function recordMismatch(tx: Executor, verification: VerificationRow, report: JobReportRow): Promise<MismatchRow | undefined> {
   if (report.outcome !== "failed" || !(COMPARED as readonly string[]).includes(verification.result) || !verification.attestationId) return undefined;
+  // The job fell back because its checkout was not the verified tree: its tests ran on something
+  // the attestation never named, so their failure contradicts nothing.
+  if (report.result !== null && report.reason === "no_attestation") return undefined;
   const [matched] = await tx
     .select({ attestation: attestations, run: runs, token: tokens })
     .from(attestations)

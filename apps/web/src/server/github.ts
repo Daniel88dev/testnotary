@@ -174,6 +174,30 @@ export async function collaboratorPermission(token: string, fullName: string, lo
   return permission === "admin" || permission === "write" || permission === "read" ? permission : "none";
 }
 
+/** A repo as GitHub has it now, asked by its id: what a cached name or visibility can't be trusted for. */
+export interface LiveRepo {
+  id: number;
+  fullName: string;
+  defaultBranch: string;
+  private: boolean;
+}
+
+/**
+ * `GET /repositories/{id}`: the repo by its numeric id, which survives renames and transfers, or
+ * undefined when the token can't see it (404). With an installation token it reaches the
+ * installation's repos only.
+ */
+export async function repositoryById(token: string, repoId: number): Promise<LiveRepo | undefined> {
+  const response = await call(`${serviceConfig().githubApiUrl}/repositories/${repoId}`, withToken(token));
+  if (response.status === 404) return undefined;
+  if (!response.ok) return failure(response, `GET /repositories/${repoId}`);
+  const body = await jsonBody(response);
+  if (typeof body.id !== "number" || typeof body.full_name !== "string" || typeof body.default_branch !== "string" || typeof body.private !== "boolean") {
+    throw new GitHubUnavailable(`GET /repositories/${repoId} answered without a name, default branch or visibility`);
+  }
+  return { id: body.id, fullName: body.full_name, defaultBranch: body.default_branch, private: body.private };
+}
+
 /**
  * `GET /repos/{owner}/{repo}/git/commits/{sha}` (§4): the commit's tree and parents, or undefined
  * when GitHub has no such commit. A commit object never changes, so this answer can't go stale.

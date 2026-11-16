@@ -306,6 +306,70 @@ describe("the job report", () => {
   });
 });
 
+describe("the job tests the verified tree, or falls back", () => {
+  /** Passes where `src/a.js` exists (the attested pull request), fails where it doesn't. */
+  const NEEDS_A = { suites: { test: { command: ["node", "-e", "require('fs').writeFileSync('ran.txt', 'x'); process.exit(require('fs').existsSync('src/a.js') ? 0 : 1)"] } } };
+
+  test("a checkout of another ref than the commit verified (`actions/checkout` with `ref:`) falls back and runs the tests", async () => {
+    const s = await story();
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    // The job checks out the base branch, not GITHUB_SHA.
+    const workspace = await ciWorkspace(s, await s.fixture.revParse("main"));
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(workspace, "ran.txt"))).toBe(true);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(world.github.checkRuns(s.repo)[0]!.output.title).toMatch(/^Fell back: no_attestation \(the checked-out tree is not the verified tree\), no passing run attested this tree · the tests passed in /);
+    // The service answered skip; the report says the job fell back, so the dashboard counts a fallback.
+    const id = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    expect((await readBack(s.repo, merge.sha, id)).verification).toMatchObject({ result: "skip", jobReport: { result: "fallback", reason: "no_attestation" } });
+  });
+
+  test("an audit on another tree records no mismatch when its tests fail: they tested something else", async () => {
+    const s = await story({ config: NEEDS_A });
+    await pullRequest(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    await world.audits.force(s.repo);
+    const workspace = await ciWorkspace(s, await s.fixture.revParse("main"));
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(world.github.checkRuns(s.repo)[0]).toMatchObject({ conclusion: "neutral" });
+    const id = /- Verification: `([0-9a-f-]{36})`/.exec(result.summary)![1]!;
+    expect((await readBack(s.repo, merge.sha, id)).verification).toMatchObject({ result: "audit", mismatch: null, jobReport: { outcome: "failed", result: "fallback" } });
+  });
+
+  test("pull_request_target, whose GITHUB_SHA is the base's head while the job tests a fork's code, falls back", async () => {
+    const s = await story({ config: NEEDS_A });
+    await pullRequest(s);
+    await s.attest();
+    // The maintainer's attested work is on the base branch; a fork's pull request deletes src/a.js.
+    await s.fixture.git("push", "--quiet", "origin", "feature:main");
+    const base = await s.fixture.revParse("feature");
+    await enforce(s.repo);
+    await s.fixture.branch("fork-change");
+    await s.fixture.git("rm", "--quiet", "src/a.js");
+    await s.fixture.commit("Drop a");
+    await s.fixture.push("fork-change");
+    const workspace = await ciWorkspace(s, await s.fixture.revParse("fork-change"));
+
+    const result = await world.runAction({ repo: s.repo, sha: base, event: "pull_request_target", workspace, inputs: { suite: "test" } });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(world.github.checkRuns(s.repo)[0]!.output.title).toMatch(/^Fell back: no_attestation \(event pull_request_target is not verified\), /);
+  });
+});
+
 describe("setup errors", () => {
   test.each(["pnpm@10.34.9", "yarn@4.9.2", null])(
     "packageManager %s without the library installed: the step fails with a setup error and never runs the raw command",

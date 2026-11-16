@@ -16,7 +16,7 @@
 //
 // No signature is `signature_missing`; a failed condition `signature_invalid`, its detail naming
 // the check; a failed or rate-limited GitHub call `github_unavailable`. Every one runs the tests.
-import { execFile } from "node:child_process";
+import { git } from "./git.ts";
 import {
   ALLOWED_SIGNERS_FILE,
   CONFIG_FILE,
@@ -216,13 +216,4 @@ class GitHub {
       return unavailable(`${what} answered without JSON`);
     }
   }
-}
-
-/** Git's trimmed stdout in the checkout, or undefined when it fails. */
-function git(cwd: string, args: string[]): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    execFile("git", args, { cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) =>
-      resolve(error ? undefined : stdout.trim()),
-    );
-  });
 }

@@ -16,7 +16,7 @@ import {
 import type { Database } from "../db/client.ts";
 import { attestations, jobReports, runs, tokens, verifications } from "../db/schema.ts";
 import { now } from "./config.ts";
-import { GitHubDenied, GitHubUnavailable, changedPaths, fileAt, gitCommit, installationToken } from "./github.ts";
+import { GitHubDenied, GitHubUnavailable, changedPaths, fileAt, gitCommit, installationToken, repositoryById } from "./github.ts";
 import { apiError } from "./http.ts";
 import { installedRepo, latestRepoState, type Executor, type RepoView } from "./installations.ts";
 import { acceptActionsToken, type ActionsClaims } from "./oidc.ts";
@@ -107,10 +107,12 @@ async function decide(db: Database, job: { claims: ActionsClaims; repo: RepoView
     commit: claims.sha,
     tree: commit.tree,
     event: claims.eventName,
+    ref: claims.ref,
     mode: repo.mode,
     rates: { auditOneIn: repo.auditOneIn, sandboxAuditOneIn: repo.sandboxAuditOneIn },
     now: now(),
     sources: {
+      defaultBranch: async () => (await repositoryById(installation, repo.id))?.defaultBranch,
       auditKey: () => auditKeyOf(db, repo.id),
       configAtBase: async () => (firstParent ? fileAt(installation, repo.fullName, CONFIG_FILE, firstParent) : undefined),
       attestations: (suite) => attestationsOfTree(db, repo.id, suite, commit.tree),

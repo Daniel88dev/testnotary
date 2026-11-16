@@ -14,6 +14,7 @@ import {
 export function isFallbackReason(code: string): code is FallbackReason {
   return (FALLBACK_REASONS as readonly string[]).includes(code);
 }
+import { git } from "./git.ts";
 import { command, type RunnerEnv } from "./runner.ts";
 import { callService, type ServiceAnswer } from "./service.ts";
 
@@ -108,6 +109,24 @@ function fromFork(env: RunnerEnv): boolean {
   } catch {
     return false;
   }
+}
+
+/** The detail of a job whose checkout is not the tree the service verified. */
+export const OTHER_TREE_DETAIL = "the checked-out tree is not the verified tree";
+
+/**
+ * The service verified the tree of `GITHUB_SHA`; a job may check out something else (a `ref:` on
+ * `actions/checkout`, a later commit). Before a skip, an audit or a *would skip* counts, the
+ * checkout's `HEAD^{tree}` must be the verified tree; otherwise (or when git can't say) the job
+ * falls back with `no_attestation`, as no attestation was checked for what it tests. Run mode
+ * only: the gate job needs no checkout.
+ */
+export async function onTheVerifiedTree(workspace: string, verdict: Verdict): Promise<Verdict> {
+  const relied = verdict.result === "skip" || verdict.result === "audit" || verdict.result === "would_skip";
+  if (!relied || !verdict.record) return verdict;
+  if ((await git(workspace, ["rev-parse", "--verify", "HEAD^{tree}"])) === verdict.record.tree) return verdict;
+  const result = verdict.result === "would_skip" ? "would_fall_back" : "fallback";
+  return { result, reason: "no_attestation", detail: OTHER_TREE_DETAIL, record: verdict.record };
 }
 
 /**

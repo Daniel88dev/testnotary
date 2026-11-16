@@ -2,6 +2,7 @@ import type { VerificationOrder } from "../context.ts";
 import { ageStep } from "./age.ts";
 import { auditStep } from "./audit.ts";
 import { commandStep } from "./command.ts";
+import { eventStep } from "./event.ts";
 import { guardedFilesStep } from "./guarded-files.ts";
 import { revocationStep } from "./revocation.ts";
 import { suiteStep } from "./suite.ts";
@@ -16,6 +17,7 @@ import { writeAccessStep } from "./write-access.ts";
  */
 export const VERIFICATION_STEPS: VerificationOrder = {
   tree: [
+    eventStep,
     suiteStep,
     guardedFilesStep,
   ],

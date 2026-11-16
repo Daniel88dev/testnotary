@@ -21,6 +21,7 @@ The service checks the token’s signature against GitHub’s keys, its issuer, 
 | Check | Reason when it fails |
 |---|---|
 | The GitHub App is installed on the repo. | `repo_not_installed` |
+| The event is one whose commit is the code the job tests: `pull_request`, `merge_group`, or a `push` to the default branch. Anything else (`pull_request_target`, `workflow_run`, `issue_comment`, `schedule`, a push to another branch) never skips; the detail names the event. | `no_attestation` |
 | The suite exists in `testnotary.json` at the built commit’s first parent. | `unknown_suite` |
 | No changed path matches a guarded file: the product defaults plus the repo’s own globs. | `guarded_file_changed` |
 | Some attestation for the repo and suite names the same tree. | `no_attestation` |
@@ -45,6 +46,10 @@ In enforce mode a clean answer skips the test step and the action outputs `resul
 ## In signature mode
 
 A repo whose base-branch config sets `"signatures": "required"` adds one more gate before a skip: the action itself checks the attester’s signature, with keys from GitHub or from the repo, without trusting the service. No signature is `signature_missing`; one that fails any of the seven conditions is `signature_invalid`; a GitHub call that fails or is rate-limited is `github_unavailable`. See [Security](/docs/security).
+
+## The checkout
+
+In run mode the action then compares its own checkout with the tree the service verified. A job that checked out something else (`actions/checkout` with `ref:`, say) doesn’t skip, isn’t audited and isn’t a shadow comparison: it falls back with `no_attestation`, detail `the checked-out tree is not the verified tree`, and runs its tests. A gate job has no checkout to compare, so give the test job no `ref:` of its own.
 
 ## After the tests
 

@@ -195,20 +195,22 @@ const CASES: Record<FallbackReason, Case> = {
   command_changed: {
     async run() {
       // main changes the suite's command after the branch left it; the developer's run reads the
-      // command from the fetched main, and CI on the push of the branch builds its head, whose
-      // first parent has the old one.
+      // command from the fetched main, and CI on a pull request of the branch into a release
+      // branch (cut from the first main) builds the attested tree, whose first parent has the old one.
       const s = await scene();
-      const head = (await s.fixture.git("rev-parse", "feature")).trim();
+      await s.fixture.git("branch", "release", "main");
+      await s.fixture.push("release");
       await s.fixture.checkout("main");
       await s.fixture.commit("Change the test command", { "testnotary.json": `${JSON.stringify({ suites: { test: { command: [...MARKED.suites.test.command, "changed"] } } })}\n` });
       await s.fixture.push();
       await s.fixture.checkout("feature");
       await s.attest();
       await world.audits.forbid(s.repo);
-      const workspace = await s.fixture.ciCheckout(head);
+      const merge = await s.fixture.testMerge({ base: "release", head: "feature" });
+      const workspace = await s.fixture.ciCheckout(merge.sha);
       await installLibrary(workspace);
-      const result = await world.runAction({ repo: s.repo, sha: head, workspace, event: "push", ref: "refs/heads/feature", inputs: { suite: "test" } });
-      return { ...result, workspace, sha: head, repo: s.repo };
+      const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "test" } });
+      return { ...result, workspace, sha: merge.sha, repo: s.repo };
     },
   },
   guarded_file_changed: {

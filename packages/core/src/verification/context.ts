@@ -23,6 +23,8 @@ export interface AttestationCandidate {
  * steps add sources here (changed paths, the audit key, revocations).
  */
 export interface VerificationSources {
+  /** The repo's default branch, as GitHub has it now; undefined when GitHub doesn't say. Asked for on a push only. */
+  defaultBranch(): Promise<string | undefined>;
   /** The text of `testnotary.json` at the built commit's first parent, or undefined when it has none. */
   configAtBase(): Promise<string | undefined>;
   /** Every attestation for the repo and suite that names `tree`, newest run end first. */
@@ -66,6 +68,8 @@ export interface VerificationInput {
   tree: string;
   /** The OIDC `event_name`. */
   event: string;
+  /** The OIDC `ref`, such as `refs/heads/main`; empty when the token has none. */
+  ref: string;
   mode: RepoMode;
   /** The repo's audit rates, as "1 in N" (the draw never goes below the defaults whatever they say). */
   rates: Pick<RepoSettings, "auditOneIn" | "sandboxAuditOneIn">;

@@ -154,8 +154,9 @@ export const REASON_HELP: Record<FallbackReason, CodeHelp> = {
     fix: "Name a suite the base branch declares in the action’s `suite` input, or merge the config change first.",
   },
   no_attestation: {
-    cause: "No attestation for this repo and suite names the tree CI is building.",
-    fix: "Commit everything, bring the branch up to date with the base (CI tests the merge into it), then `testnotary run <suite>` and push.",
+    cause:
+      "No attestation for this repo and suite names the tree CI is building. The detail says when no attestation could be checked at all: the event isn’t one whose commit is the code the job tests (only `pull_request`, `merge_group` and a `push` to the default branch are), or the job’s checkout isn’t the tree the service verified.",
+    fix: "Commit everything, bring the branch up to date with the base (CI tests the merge into it), then `testnotary run <suite>` and push. With an event or checkout detail, nothing: such a job always runs its tests.",
   },
   attestation_expired: {
     cause: "The attested run ended 24 hours ago or more.",

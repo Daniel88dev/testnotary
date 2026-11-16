@@ -6,7 +6,7 @@ import { createCheckRun, writeSummary } from "./publish.ts";
 import { sendJobReport } from "./report.ts";
 import { checkSkip } from "./signature.ts";
 import { appendSummary, command, input, setOutputs, type RunnerEnv } from "./runner.ts";
-import { beforeTheService, readVerification, verifyJob, type Verdict } from "./verify.ts";
+import { beforeTheService, onTheVerifiedTree, readVerification, verifyJob, type Verdict } from "./verify.ts";
 
 const env = process.env;
 const mode = input(env, "mode") || "run";
@@ -41,7 +41,8 @@ async function run(env: RunnerEnv): Promise<number> {
   if (env.RUNNER_OS === "Windows" || process.platform === "win32") {
     return setupError(env, "run mode does not support Windows runners. Run the tests on Linux or macOS, or use a gate job (mode: verify), which works on any runner.");
   }
-  const verdict = await checkSkip(env, await verdictForJob(env), suite);
+  const workspace = env.GITHUB_WORKSPACE || process.cwd();
+  const verdict = await checkSkip(env, await onTheVerifiedTree(workspace, await verdictForJob(env)), suite);
   if (verdict.result === "skip") {
     const presentation = presentJob(env, verdict, null);
     setOutputs(env, presentation.outputs);
@@ -49,7 +50,6 @@ async function run(env: RunnerEnv): Promise<number> {
     return 0;
   }
 
-  const workspace = env.GITHUB_WORKSPACE || process.cwd();
   const suiteName = suiteToRun(workspace, suite, verdict.record?.suite);
   if (!suiteName) {
     setOutputs(env, { ...presentJob(env, verdict, null).outputs });
