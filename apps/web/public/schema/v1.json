@@ -3,6 +3,7 @@
   "type": "object",
   "properties": {
     "$schema": {
+      "description": "This schema's URL, so editors can check the file. Ignored by the library.",
       "type": "string"
     },
     "base": {

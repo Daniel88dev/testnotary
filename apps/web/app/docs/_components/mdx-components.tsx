@@ -4,6 +4,7 @@ import {
   BASELINE_FIXED,
   BASELINE_OVERRIDABLE,
   CONFIG_SCHEMA_URL,
+  configJsonSchema,
   FALLBACK_REASONS,
   GUARDED_DEFAULTS,
   INITIAL_REPO_SETTINGS,
@@ -13,10 +14,13 @@ import {
   LAPTOP_TOKEN_LIFETIME_DAYS,
   PASSED_THROUGH,
   SANDBOX_MARKERS,
+  SESSION_AGENTS,
+  WARNING_CODES,
 } from "@testnotary/core";
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 import { DOCS_PAGES } from "../../../src/docs/nav.ts";
+import { REASON_HELP, REFUSAL_HELP, WARNING_HELP, type CodeHelp } from "../../../src/docs/reference.ts";
 import { PMS, checkLabel, snippet, substitute } from "../../../src/docs/snippets.ts";
 import { CodePanel, type Variants } from "./code-panel.tsx";
 import { VendorSteps } from "./vendors.tsx";
@@ -28,7 +32,7 @@ import { VendorSteps } from "./vendors.tsx";
  * block's text, with {{tokens}} filled per package manager. `lang="check"` draws a pull request's
  * check line; its info string is `<suite> <event>`.
  */
-function Code({ text = "", lang = "", file, snippet: name }: { text?: string; lang?: string; file?: string; snippet?: string }) {
+function Code({ text = "", lang = "", file, snippet: name, suite }: { text?: string; lang?: string; file?: string; snippet?: string; suite?: string }) {
   if (lang === "check") {
     const [suite = "unit", event = "pull_request"] = (file ?? "").split(/\s+/).filter(Boolean);
     const label = checkLabel(suite, event);
@@ -36,7 +40,7 @@ function Code({ text = "", lang = "", file, snippet: name }: { text?: string; la
     return <CodePanel variants={{ pnpm: same, npm: same, yarn: same }} lang={lang} check />;
   }
   const variants = Object.fromEntries(
-    PMS.map((pm) => [pm, { text: name ? snippet(name, pm) : substitute(text, pm), label: substitute(file ?? lang, pm) }]),
+    PMS.map((pm) => [pm, { text: name ? snippet(name, pm, suite) : substitute(text, pm), label: substitute(file ?? lang, pm) }]),
   ) as Variants;
   return <CodePanel variants={variants} lang={lang} />;
 }
@@ -171,7 +175,147 @@ function CodeList({ of }: { of: string }) {
   );
 }
 
-/** The sandbox markers the library ships. */
+/** Text from src/docs/reference.ts: `backticks` are code, [words](/docs/…) a link. */
+function Rich({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`|\[[^\]]+\]\([^)]+\))/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith("`")) return <code key={i}>{part.slice(1, -1)}</code>;
+        const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(part);
+        if (link)
+          return (
+            <A key={i} href={link[2]}>
+              {link[1]}
+            </A>
+          );
+        return part;
+      })}
+    </>
+  );
+}
+
+const CODE_TABLES: Record<string, { label: string; codes: readonly string[]; help: Record<string, CodeHelp> }> = {
+  refusals: { label: "Refusal codes", codes: REFUSAL_CODES, help: REFUSAL_HELP },
+  reasons: { label: "Fallback reason codes", codes: FALLBACK_REASONS, help: REASON_HELP },
+  warnings: { label: "Warning codes", codes: WARNING_CODES, help: WARNING_HELP },
+};
+
+/**
+ * Every code of a list from the core package, in its order, with its cause and fix from
+ * src/docs/reference.ts. Each row is the code's anchor (`/docs/refusals#dirty_tree`).
+ */
+function CodeTable({ of }: { of: string }) {
+  const table = CODE_TABLES[of];
+  if (!table) throw new Error(`<CodeTable> names an unknown list ${JSON.stringify(of)}`);
+  return (
+    <div className="table-wrap">
+      <table className="codes" aria-label={table.label}>
+        <thead>
+          <tr>
+            <th scope="col">Code</th>
+            <th scope="col">Cause</th>
+            <th scope="col">Fix</th>
+          </tr>
+        </thead>
+        <tbody>
+          {table.codes.map((code) => {
+            const help = table.help[code];
+            if (!help) throw new Error(`${table.label}: ${code} has no cause and fix in src/docs/reference.ts`);
+            return (
+              <tr key={code} id={code}>
+                <td>
+                  <code>{code}</code>
+                </td>
+                <td>
+                  <Rich text={help.cause} />
+                </td>
+                <td>
+                  <Rich text={help.fix} />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+interface SchemaNode {
+  type?: string;
+  const?: unknown;
+  description?: string;
+  properties?: Record<string, SchemaNode>;
+  additionalProperties?: SchemaNode | boolean;
+  items?: SchemaNode;
+  required?: string[];
+}
+
+interface ConfigKey {
+  path: string;
+  type: string;
+  required: boolean;
+  description: string;
+}
+
+function schemaType(node: SchemaNode): string {
+  if (node.const !== undefined) return JSON.stringify(node.const);
+  if (node.type === "array") return `array of ${node.items?.type ?? "values"}s`;
+  if (node.type === "object" && !node.properties && typeof node.additionalProperties === "object") {
+    const entry = node.additionalProperties;
+    return entry.properties ? "object of named entries" : `object of ${entry.type ?? "value"}s`;
+  }
+  return node.type ?? "any";
+}
+
+/** Every key the schema allows, depth first: `env`, `env.pass`, and `suites.<name>.command` for a map's entries. */
+function configKeys(node: SchemaNode, prefix = ""): ConfigKey[] {
+  const keys: ConfigKey[] = [];
+  for (const [name, child] of Object.entries(node.properties ?? {})) {
+    keys.push({ path: `${prefix}${name}`, type: schemaType(child), required: node.required?.includes(name) ?? false, description: child.description ?? "" });
+    keys.push(...configKeys(child, `${prefix}${name}.`));
+  }
+  const entry = node.additionalProperties;
+  if (entry && typeof entry === "object" && entry.properties) keys.push(...configKeys(entry, `${prefix}<name>.`));
+  return keys;
+}
+
+/** The keys of `testnotary.json`, read from the schema the library parses with (and publishes). */
+function ConfigKeys() {
+  const keys = configKeys(configJsonSchema() as SchemaNode);
+  return (
+    <div className="table-wrap">
+      <table className="codes" aria-label="testnotary.json keys">
+        <thead>
+          <tr>
+            <th scope="col">Key</th>
+            <th scope="col">Type</th>
+            <th scope="col">Meaning</th>
+          </tr>
+        </thead>
+        <tbody>
+          {keys.map((key) => {
+            if (!key.description) throw new Error(`testnotary.json key ${key.path} has no description in the schema`);
+            return (
+              <tr key={key.path}>
+                <td>
+                  <code>{key.path}</code>
+                </td>
+                <td>{key.type}</td>
+                <td>
+                  {key.description}
+                  {key.required ? " Required." : ""}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** The product-default guarded globs, from the core package: the list verification uses. */
 function GuardedDefaults() {
   return (
@@ -185,6 +329,7 @@ function GuardedDefaults() {
   );
 }
 
+/** The sandbox markers the library ships. */
 function SandboxMarkers() {
   return (
     <ul>
@@ -192,6 +337,38 @@ function SandboxMarkers() {
         <li key={marker.name}>{marker.condition.split("`").map((part, i) => (i % 2 === 1 ? <code key={i}>{part}</code> : part))}</li>
       ))}
     </ul>
+  );
+}
+
+/** The agents the library names in a run's session labels, from its own table. */
+function SessionAgents() {
+  return (
+    <div className="table-wrap">
+      <table className="codes" aria-label="Agent detection">
+        <thead>
+          <tr>
+            <th scope="col">Agent</th>
+            <th scope="col">Read from</th>
+          </tr>
+        </thead>
+        <tbody>
+          {SESSION_AGENTS.map((agent) => (
+            <tr key={agent.vendor}>
+              <td>{agent.vendor}</td>
+              <td>
+                <Rich text={agent.readFrom} />
+              </td>
+            </tr>
+          ))}
+          <tr>
+            <td>Any other</td>
+            <td>
+              <Rich text="`AI_AGENT=<name>`, checked after the agents above" />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -251,8 +428,11 @@ export const MDX_COMPONENTS = {
   VendorSteps,
   Fact,
   CodeList,
+  CodeTable,
+  ConfigKeys,
   GuardedDefaults,
   SandboxMarkers,
+  SessionAgents,
   BaselineEnvironment,
   a: A,
   table: Table,

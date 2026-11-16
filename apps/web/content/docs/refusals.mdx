@@ -1,0 +1,19 @@
+<Lede>A refused run never attests. The library stops before the command starts whenever it can, says why in one code, and tells you what to do.</Lede>
+
+A refusal ends a run with `outcome=refused`, exit code 2 (130 for `interrupted`) and the code in the summary line and the `--json` object. The lines above the summary say what was found, in your repo’s own terms. `testnotary check` runs the same checks without starting the command, and refuses with the same codes. See [Exit codes and output](/docs/output).
+
+Most refusals happen before the command starts, so nothing runs. Two can only happen after it ran: `tree_changed_during_run`, checked once the command ends, and `interrupted`. When `origin` is a GitHub repo and the service can be reached, `run` uploads a refused run with its code, tree and commit only, so it shows on the dashboard. A refusal the service gave itself isn’t uploaded again, `laptop_token_in_sandbox` never is, and `check` uploads nothing.
+
+Refusal codes are stable snake_case, and a shipped code is never renamed.
+
+## All refusal codes
+
+<CodeTable of="refusals" />
+
+## In what order
+
+The library checks in this order and stops at the first refusal: the repo and its base-branch config (`not_a_git_repo` to `config_invalid`), a laptop token in a sandbox, the command (`extra_arguments`, `history_dependent_command`), the tree (`dirty_tree`), the platform and the environment floor (Node, the package manager, the install), then the service (`repo_not_installed`, `no_write_access`, `token_rejected`). `command_not_found` is checked as the command starts.
+
+A refusal is never a warning, and no flag turns one off. Warnings, which never refuse, are listed in [Exit codes and output](/docs/output#warnings).
+
+<Next pages="output cli config agents" />

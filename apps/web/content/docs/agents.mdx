@@ -41,18 +41,11 @@ A laptop token belongs to a person and works for every repo they can write to; i
 
 ## Session labels
 
-To help a reviewer find the session behind a run, the library fills in the agent’s vendor, its session id and a session URL from the environment:
+To help a reviewer find the session behind a run, the library fills in the agent’s vendor, its session id and a session URL from the environment, on every run, laptops included. The first agent in this table that matches names the session:
 
-| Agent | Read from |
-|---|---|
-| Claude Code | `CLAUDECODE`, `CLAUDE_CODE_REMOTE`; the session from `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_SESSION_ID` |
-| Codex | `CODEX_CI`; the session from `CODEX_THREAD_ID` or `CODEX_SESSION_ID` |
-| Copilot | `COPILOT_AGENT_SESSION_ID` with `GITHUB_ACTIONS` |
-| Cursor | `CURSOR_AGENT`, `CURSOR_AGENT_SOCKET` |
-| Gemini CLI | `GEMINI_CLI` |
-| Any other | `AI_AGENT=<name>` |
+<SessionAgents />
 
-`TESTNOTARY_SESSION_VENDOR`, `TESTNOTARY_SESSION_ID` and `TESTNOTARY_SESSION_URL` each override their own value.
+`TESTNOTARY_SESSION_VENDOR`, `TESTNOTARY_SESSION_ID` and `TESTNOTARY_SESSION_URL` each override their own value. An id or URL with no vendor at all is uploaded with the vendor `unknown`.
 
 These labels always read *unverified*, on the pull request and the dashboard. Anything in the sandbox can set an environment variable, so a label is a pointer for the reviewer, not a fact Testnotary checked. What Testnotary does check is the token, and the token names its creator.
 

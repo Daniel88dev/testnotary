@@ -1,0 +1,26 @@
+<Lede>Every answer other than a skip runs the tests and names one reason code. A fallback never fails a build: the job’s result is the tests’ result.</Lede>
+
+The action puts the code in its `reason` output, and the pull request line reads `Fell back: <code>, <what it means>` (in shadow mode, `Would have fallen back: …`). Some codes carry a detail in parentheses, such as the guarded file that changed: `Fell back: guarded_file_changed (.github/workflows/ci.yml), the pull request changes a guarded file`. See [What the pull request shows](/docs/pr).
+
+`audit` is listed here too: the action outputs `result=audit` and `reason=audit`, and the tests run although an attestation covers the tree. Only an audit can turn a skip into a failed build, when CI’s tests fail where the run passed.
+
+## All fallback reason codes
+
+They are listed in the order the [verification](/docs/how) meets them: before the service, the service’s availability, identity and GitHub, the attestation, the repo’s rules, signature mode, and the audit draw.
+
+<CodeTable of="reasons" />
+
+## Retries and the time budget
+
+The whole exchange with the service has a budget of 10 seconds, from fetching the OIDC token to the last answer. A connection error, any 5xx or a 429 gets one retry, a second later. Any other answer counts at once.
+
+- **The token on a retry.** After the service answered at all, the retry fetches a fresh OIDC token, because the service spends a token the moment it accepts one. After a connection error the same token is sent again, unless it has under 60 seconds left.
+- **When the budget ends during the pause,** the first answer stands: the job falls back with `service_error` or `service_unreachable`, not `timeout`.
+
+The job report after the tests, and a test job reading back its gate job’s verification, use the same budget and the same rule.
+
+## Versioning
+
+Reason codes are stable snake_case. Adding a code is a minor version of the action; renaming or removing one is a major version. A workflow that reads `steps.testnotary.outputs.reason` keeps working within a major version, though it may meet a code it hasn’t seen before.
+
+<Next pages="how pr inputs shadow" />

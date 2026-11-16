@@ -46,12 +46,12 @@ const SAMPLE = {
   tokenName: "macOS machine, 15 Nov 2026",
 };
 
-function config(pm: PackageManagerName): string {
+function config(pm: PackageManagerName, suite: string): string {
   return [
     "{",
     `  "$schema": "${CONFIG_SCHEMA_URL}",`,
     '  "suites": {',
-    `    "unit": { "command": ${substitute("{{test}}", pm)} }`,
+    `    "${suite}": { "command": ${substitute("{{test}}", pm)} }`,
     "  }",
     "}",
   ].join("\n");
@@ -141,26 +141,30 @@ function login(pm: PackageManagerName): string {
   ].join("\n");
 }
 
-function firstRun(pm: PackageManagerName): string {
+function firstRun(pm: PackageManagerName, suite: string): string {
   const x = PACKAGE_MANAGERS[pm].exec;
   const url = runPageUrl(DEFAULT_SERVICE_URL, SAMPLE.repository, SAMPLE.runId);
   return [
     "$ git pull --rebase origin main",
-    `$ ${x} testnotary run unit`,
-    `testnotary: run unit: ${PACKAGE_MANAGERS[pm].testCommand.join(" ")}`,
+    `$ ${x} testnotary run ${suite}`,
+    `testnotary: run ${suite}: ${PACKAGE_MANAGERS[pm].testCommand.join(" ")}`,
     "  …your test output…",
-    "testnotary: suite unit passed",
+    `testnotary: suite ${suite} passed`,
     `testnotary: attested: ${url}`,
-    `outcome=passed suite=unit attested=true tree=${SAMPLE.tree} commit=${SAMPLE.commit} url=${url}`,
+    `outcome=passed suite=${suite} attested=true tree=${SAMPLE.tree} commit=${SAMPLE.commit} url=${url}`,
     "",
     "$ git push -u origin fix-cart-total",
   ].join("\n");
 }
 
-export const SNIPPETS: Record<string, (pm: PackageManagerName) => string> = {
-  workflow: (pm) => workflowSnippet({ packageManager: pm, suite: "unit" }),
+/**
+ * Each snippet takes the package manager, and the suite its sample names: `unit`, unless a panel
+ * says `suite="…"` (the setup guide uses `test`, the suite `init` writes).
+ */
+export const SNIPPETS: Record<string, (pm: PackageManagerName, suite: string) => string> = {
+  workflow: (pm, suite) => workflowSnippet({ packageManager: pm, suite }),
   config,
-  agents: (pm) => agentsBlock(pm, "unit"),
+  agents: (pm, suite) => agentsBlock(pm, suite),
   gate,
   matrix,
   coverage,
@@ -174,14 +178,15 @@ export const SNIPPETS: Record<string, (pm: PackageManagerName) => string> = {
       "          suite: unit",
     ].join("\n"),
   "kill-switch": () => workflowHeader({ suite: "unit" }).slice(-2).join("\n"),
+  step: () => ["      - id: testnotary", `        uses: ${ACTION_REF}`, "        with:", "          suite: unit"].join("\n"),
   login,
   "first-run": firstRun,
 };
 
-export function snippet(name: string, pm: PackageManagerName): string {
+export function snippet(name: string, pm: PackageManagerName, suite = "unit"): string {
   const build = SNIPPETS[name];
   if (!build) throw new Error(`unknown docs snippet ${JSON.stringify(name)}`);
-  return build(pm);
+  return build(pm, suite);
 }
 
 /** How GitHub lists the check run in a pull request's checks: `<workflow> / Testnotary / <suite> (<event>)`. */

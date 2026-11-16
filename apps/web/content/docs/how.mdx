@@ -12,7 +12,7 @@ The action’s step is one verification: it asks whether a valid attestation nam
 
 None of these calls Testnotary. A fork gets a plain notice; a same-repo run without the permission gets a warning telling you to add it.
 
-The action then sends its OIDC token, the suite and the runner’s environment. It never sends a commit, a tree or file paths. The whole exchange has a budget of 10 seconds: a connection error, a 5xx or a 429 gets one retry after a second, and anything else falls back at once with `service_unreachable`, `service_error` or `timeout`. A slow or absent service means CI runs its tests, never a skip on a guess.
+The action then sends its OIDC token, the suite and the runner’s environment. It never sends a commit, a tree or file paths. The whole exchange has a budget of 10 seconds: a connection error, a 5xx or a 429 gets one retry after a second, and anything else falls back at once with `service_unreachable`, `service_error` or `timeout`. A slow or absent service means CI runs its tests, never a skip on a guess. Which token a retry sends is in [Retries and the time budget](/docs/reasons#retries-and-the-time-budget).
 
 ## What the service checks
 

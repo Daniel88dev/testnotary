@@ -1,5 +1,7 @@
-import { FALLBACK_REASONS, REFUSAL_CODES, VERIFICATION_RESULTS, parseConfig } from "@testnotary/core";
-import { LINKS } from "@testnotary/protocol";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { FALLBACK_REASONS, REFUSAL_CODES, SESSION_AGENTS, VERIFICATION_RESULTS, WARNING_CODES, parseConfig } from "@testnotary/core";
+import { LINKS, githubDeniedCause, loginError } from "@testnotary/protocol";
 import { expect, test } from "@testnotary/test-world/playwright";
 
 // The docs tree as the spec lists it ("Docs": 28 pages in six groups, plus the licensing and
@@ -16,17 +18,30 @@ const WRITTEN: Record<string, string[]> = {
     "Run the suite in Docker",
     "A pre-push hook",
   ],
+  Reference: [
+    "testnotary.json",
+    "CLI commands",
+    "Exit codes and output",
+    "Refusal codes",
+    "Action inputs and outputs",
+    "Fallback reason codes",
+    "What the pull request shows",
+    "Guarded files",
+  ],
   Trust: ["What Testnotary can’t prove", "What leaves your machine", "Limits in v1", "Security", "Licensing"],
 };
-const REFERENCE = [
-  "testnotary.json",
-  "CLI commands",
-  "Exit codes and output",
-  "Refusal codes",
-  "Action inputs and outputs",
-  "Fallback reason codes",
-  "What the pull request shows",
-  "Guarded files",
+
+// The CLI's own failure codes (`{"error": …}` with `--json`), which the CLI reference names.
+const CLI_ERRORS = [
+  ...loginError.options,
+  ...githubDeniedCause.options,
+  "login_in_sandbox",
+  "service_error",
+  "token_not_found",
+  "token_ambiguous",
+  "ssh_keygen_failed",
+  "no_package_json",
+  "no_test_script",
 ];
 
 test("the package-manager tabs switch every code panel on the page and the choice is remembered", async ({ page }) => {
@@ -45,7 +60,7 @@ test("the package-manager tabs switch every code panel on the page and the choic
   await expect(article).toContainText("npm install -D testnotary");
   await expect(article).toContainText("- run: npm ci");
   await expect(article).toContainText('"command": ["npm", "test"]');
-  await expect(article).toContainText("npx testnotary run unit");
+  await expect(article).toContainText("npx testnotary run test");
   await expect(article).not.toContainText("pnpm/action-setup");
   await expect(article).not.toContainText("pnpm exec");
 
@@ -172,7 +187,7 @@ test("the setup guide has nine numbered steps in three parts at the anchors the 
 
 test("every testnotary.json the docs show is one the library accepts", async ({ page }) => {
   let seen = 0;
-  for (const slug of ["setup", "build", "services", "caches", "shell", "docker", "security"]) {
+  for (const slug of ["setup", "build", "services", "caches", "shell", "docker", "security", "config", "guarded"]) {
     await page.goto(`/docs/${slug}`);
     for (const panel of await page.locator("figure.code").filter({ hasText: /^testnotary\.json/ }).all()) {
       const text = await panel.locator("pre").innerText();
@@ -182,7 +197,28 @@ test("every testnotary.json the docs show is one the library accepts", async ({ 
       seen++;
     }
   }
-  expect(seen).toBeGreaterThanOrEqual(8);
+  expect(seen).toBeGreaterThanOrEqual(10);
+});
+
+test("the setup guide shows the testnotary.json init writes, and the suite it names runs through the guide", async ({ page, world }) => {
+  const repo = await world.fixtureRepo({ config: null, files: { "package.json": '{ "packageManager": "pnpm@10.34.9", "scripts": { "test": "vitest run" } }\n' } });
+  const init = await world.runCli(["init", "--yes"], { cwd: repo.dir });
+  expect(init.exitCode).toBe(0);
+  const written = parseConfig(await readFile(join(repo.dir, "testnotary.json"), "utf8"));
+  if (!written.ok) throw new Error(written.problems.join("\n"));
+  const [suite] = Object.keys(written.config.suites);
+
+  await page.goto("/docs/setup");
+  const article = page.getByRole("main");
+  const panel = article.locator("li#library figure.code").filter({ hasText: /^testnotary\.json/ });
+  const shown = parseConfig(await panel.locator("pre").innerText());
+  if (!shown.ok) throw new Error(shown.problems.join("\n"));
+  expect(shown.config).toEqual(written.config);
+
+  // init asks about the two files only, and the rest of the guide runs the suite it wrote.
+  await expect(article.locator("li#library")).not.toContainText("asks for your suites");
+  await expect(article).toContainText(`pnpm exec testnotary run ${suite}`);
+  for (const label of await article.locator("figure.code.check figcaption").allInnerTexts()) expect(label).toContain(`/ Testnotary / ${suite} (`);
 });
 
 // The spec's "Accepted limits the docs must state", each as words a page must carry.
@@ -223,6 +259,15 @@ test("“How a skip is decided” lists the product-default guarded files the ve
   }
 });
 
+test("“Agents and sandbox tokens” lists the agents the library detects, from the library’s own table", async ({ page }) => {
+  await page.goto("/docs/agents");
+  const table = page.getByRole("main").getByRole("table", { name: "Agent detection" });
+  const agents = (await table.locator("tbody tr td:first-child").allInnerTexts()).map((text) => text.trim());
+  expect(agents).toEqual([...SESSION_AGENTS.map((agent) => agent.vendor), "Any other"]);
+  // Each row names the variables the library reads, in code.
+  for (const row of await table.locator("tbody tr").all()) expect(await row.locator("td:nth-child(2) code").count()).toBeGreaterThan(0);
+});
+
 test("“What leaves your machine” links the privacy policy, and the docs footer links the terms and the privacy policy", async ({ page }) => {
   await page.goto("/docs/data");
   const privacy = page.getByRole("main").getByRole("link", { name: "privacy policy" });
@@ -246,17 +291,19 @@ test("the docs use only real codes, the checks-list shape and none of the banned
     .getByRole("navigation", { name: "Docs" })
     .getByRole("link")
     .evaluateAll((links) => links.map((link) => link.getAttribute("href")!));
-  // Codes the docs may name: refusals, fallback reasons, results and warnings, as the product spells them.
-  // GitHub's event names and node_modules look the same, and are fine.
-  const known = new Set([
+  // Codes the docs may name: refusals, fallback reasons, results, warnings and the CLI's failure
+  // codes, as the product spells them. GitHub's event names, node_modules and the variable npm sets
+  // for the tools it starts look the same, and are fine.
+  const known = new Set<string>([
     ...REFUSAL_CODES,
     ...FALLBACK_REASONS,
     ...VERIFICATION_RESULTS,
-    "runtime_sources_disagree",
-    "ignored_env_file",
+    ...WARNING_CODES,
+    ...CLI_ERRORS,
     "pull_request",
     "merge_group",
     "node_modules",
+    "npm_config_user_agent",
   ]);
 
   for (const href of hrefs) {
@@ -278,7 +325,7 @@ test("the docs use only real codes, the checks-list shape and none of the banned
   expect([...origins]).toEqual([world.service.url]);
 });
 
-test("every page in the tree exists: the written groups with content, the Reference group as stubs whose links resolve", async ({ page, request }) => {
+test("every page in the tree exists with content, and every link inside the docs resolves", async ({ page, request }) => {
   await page.goto("/docs/setup");
   const tree = page.getByRole("navigation", { name: "Docs" });
 
@@ -298,21 +345,26 @@ test("every page in the tree exists: the written groups with content, the Refere
     }
   }
 
+  // No page is left a stub: the tree holds exactly the pages above.
   await page.goto("/docs/setup");
-  for (const title of REFERENCE) {
-    const href = await tree.getByRole("link", { name: title, exact: true }).getAttribute("href");
-    const response = await request.get(href!);
-    expect(response.status(), title).toBe(200);
-  }
+  const listed = await tree.getByRole("link").allInnerTexts();
+  expect(listed.sort()).toEqual(Object.values(WRITTEN).flat().sort());
 
-  // Every link inside the docs resolves, the stubs' included.
+  // Every link inside the docs resolves, and an in-page anchor lands on an element of that id.
   const hrefs = new Set<string>();
   for (const link of await page.locator("a[href^='/docs']").all()) hrefs.add((await link.getAttribute("href"))!.split("#")[0]!);
+  const anchors = new Map<string, string>();
   for (const href of hrefs) {
     await page.goto(href);
     for (const link of await page.getByRole("main").locator("a[href^='/docs']").all()) {
-      const target = (await link.getAttribute("href"))!.split("#")[0]!;
+      const [target = "", anchor] = (await link.getAttribute("href"))!.split("#");
       expect((await request.get(target)).status(), `${href} → ${target}`).toBe(200);
+      if (anchor) anchors.set(`${target}#${anchor}`, href);
     }
+  }
+  for (const [target, from] of anchors) {
+    const [path = "", id = ""] = target.split("#");
+    await page.goto(path);
+    expect(await page.locator(`[id="${id}"]`).count(), `${from} → ${target}`).toBe(1);
   }
 });

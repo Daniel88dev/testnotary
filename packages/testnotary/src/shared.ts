@@ -24,6 +24,8 @@ export {
   REFUSAL_CODES,
   SANDBOX_MARKERS,
   baselineOverrides,
+  detectSession,
+  type SessionLabels,
   guardedGlobs,
   guardedMatches,
   parseConfig,

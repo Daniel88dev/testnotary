@@ -14,7 +14,7 @@ Every run uploads one record, whatever its outcome:
 - the guarded globs the change matched, the warnings, the *not pinned* flags, and any `env.set` overrides of `CI`, `TZ` or `LANG`;
 - for a passed run, the attestation: a versioned record of the fields above that the service stores byte for byte, and in signature mode its signature and public key.
 
-A run refused before it started sends only the refusal code, the tree and the commit. A run with no token, or with the service unreachable, sends nothing at all, and nothing is queued for later.
+A run refused before it started sends only the repo’s name, the refusal code, the tree and the commit. A run with no token asks the service once, naming only the repo, in case an agent sandbox’s proxy adds a token on the way; when the answer is no, it uploads nothing. With the service unreachable nothing arrives, and nothing is queued for later.
 
 ## What a run never sends
 

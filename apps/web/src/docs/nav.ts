@@ -81,9 +81,9 @@ export const DOCS_NAV: DocsGroup[] = [
     pages: [
       { slug: "config", title: "testnotary.json", holds: "Every key, the schema, what is refused, and the baseline environment." },
       { slug: "cli", title: "CLI commands", holds: "init, login, logout, whoami, run, check, exec, sandbox-key, and their flags." },
-      { slug: "output", title: "Exit codes and output", holds: "Exit codes 0, 1, 2, 3, 64 and 130; the summary line; the --json object." },
+      { slug: "output", title: "Exit codes and output", holds: "Exit codes 0, 1, 2, 3, 64 and 130; the summary line; the --json objects; the warning codes." },
       { slug: "refusals", title: "Refusal codes", holds: "All 20 refusal codes, each with its cause and fix." },
-      { slug: "inputs", title: "Action inputs and outputs", holds: "suite, mode, verification; result, reason, ran, skip." },
+      { slug: "inputs", title: "Action inputs and outputs", holds: "suite, mode, verification, github-token; result, reason, ran, skip, verification." },
       { slug: "reasons", title: "Fallback reason codes", holds: "All 20 fallback reason codes, each with its cause and fix, and the versioning rule." },
       {
         slug: "pr",

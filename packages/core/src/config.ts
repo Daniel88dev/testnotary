@@ -41,7 +41,7 @@ const suite = z
 
 const configSchema = z
   .strictObject({
-    $schema: z.string().optional(),
+    $schema: z.string().optional().meta({ description: "This schema's URL, so editors can check the file. Ignored by the library." }),
     base: z.string().min(1).optional().meta({ description: "The base branch. Default: the remote's default branch." }),
     platforms: z
       .array(z.string().regex(PLATFORM, { error: (issue) => `${JSON.stringify(issue.input)} is not a platform in Node's spelling, such as linux/x64 or darwin` }))

@@ -1,0 +1,93 @@
+<Lede>Every test job says in one line what Testnotary decided and why: in the job summary always, and as a check on the pull request when the job may create one.</Lede>
+
+## Where the line appears
+
+- **The job summary.** Every run of the action writes a block headed `Testnotary / <suite>`: the line in bold, then the details below.
+- **A check run named `Testnotary / <suite>`,** made with the job’s `GITHUB_TOKEN` when the workflow grants `checks: write`. In the pull request’s checks list it reads like this, with your workflow’s name and the event in front:
+
+```check unit pull_request
+Skipped · unit passed 9 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0
+```
+
+- **The step’s log** prints the same line, after `Testnotary: `.
+
+On a pull request the check run goes on the pull request’s head commit, so it shows in the pull request; elsewhere on the commit the workflow built. Never make it a required check: your test job’s own check stays the one that counts, and it keeps its name. A fork’s token is read-only, so a fork’s pull request gets the job summary and a log line, but no check run. A gate job makes the check run only for a skip; otherwise the test job makes it, with the tests’ outcome.
+
+The action never comments on a pull request, and never pushes or changes anything in the repo.
+
+## The line for each result
+
+**Skip.** The attestation’s age, who attested and with which token, and the platform and Node of the run. A sandbox token names its creator, and an agent session label is marked *unverified*: anything in a sandbox can set it.
+
+```check unit pull_request
+Skipped · unit passed 4 min ago · sandbox token "claude-code", created by @maria-k · linux/x64 · Node 22.11.0 · agent Claude Code (unverified)
+```
+
+**Fallback.** The reason code, a detail in parentheses when there is one, what the code means, and how the tests went. See [Fallback reason codes](/docs/reasons).
+
+```check unit pull_request
+Fell back: no_attestation, no passing run attested this tree · the tests passed in 48 s
+```
+
+```check unit pull_request
+Fell back: guarded_file_changed (pnpm-lock.yaml), the pull request changes a guarded file · the tests passed in 52 s
+```
+
+**Shadow mode.** Nothing skips; the line says what would have happened, and the tests’ result after `shadow mode:`.
+
+```check unit pull_request
+Would have skipped · unit passed 14 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0 · shadow mode: the tests passed in 48 s
+```
+
+```check unit pull_request
+Would have fallen back: command_changed, the attested command differs from testnotary.json on the base branch · shadow mode: the tests passed in 50 s
+```
+
+**Audit.** The skip was drawn for an audit, so the tests ran anyway.
+
+```check unit pull_request
+Audit · unit passed 9 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0 · the tests passed in 47 s
+```
+
+**Mismatch.** CI’s tests failed where the attested run passed, on an audit or on a shadow-mode *would have skipped*. This is the only line whose check run fails. After a failed audit the repo goes back to shadow mode.
+
+```check unit pull_request
+Mismatch: the audit failed · unit passed 9 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0 · the tests failed in 51 s (exit code 1) · the repo is back in shadow mode
+```
+
+```check unit pull_request
+Mismatch: would have skipped · unit passed 14 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0 · shadow mode: the tests failed in 51 s (exit code 1)
+```
+
+The age reads `under a minute ago`, `9 min ago` or `3 h ago`. Durations read `1.2 s` under ten seconds, `48 s` under two minutes, then `4 min`. When `exec` refused to start the tests, the line says `exec refused to start the tests (exit code 2)`.
+
+## The check run’s conclusion
+
+| Line | Conclusion |
+|---|---|
+| Skipped, Would have skipped | `success` |
+| Audit, when the tests passed | `success` |
+| Fell back, Would have fallen back | `neutral` |
+| Mismatch | `failure` |
+
+## The details
+
+Under the line, in the job summary and the check run’s summary:
+
+- **Result** and **Reason**: the codes the step also outputs as `result` and `reason`.
+- **GitHub said**: only for `github_denied` caused by an IP allow list, with GitHub’s words and a link to [Limits in v1](/docs/limits#github-enterprise).
+- **Tests**: how the tests went, or *not run in this step*.
+- **Attested run**: a link to the run’s page on the dashboard.
+- **Agent session (unverified)**: the vendor, session id and session URL the run uploaded. The URL is shown as code, never as a link.
+- **Verification**: the verification’s id, which the dashboard’s Verifications page finds.
+- **Mismatch**: who it is recorded against, that the repo is back in shadow mode after an audit, that nothing was revoked, and a link to the repo’s Mismatches page. If the job report didn’t reach the service, it says no mismatch was recorded.
+
+## In the step’s log
+
+Besides the line, the log can carry:
+
+- a **notice** for `host_not_supported`, and for a fork’s pull request that has no OIDC token (`no_oidc_token`);
+- a **warning** when a same-repo job has no OIDC token (add `permissions: id-token: write`), when the runner’s token request failed, when the job report didn’t reach the service (its verification then shows *outcome unknown*), or when the check run couldn’t be made for another reason than a missing `checks: write`;
+- an **error** and a *Setup error* block in the job summary when the step can’t run safely, such as a missing library. See [Action inputs and outputs](/docs/inputs#the-steps-exit-code).
+
+<Next pages="reasons inputs shadow audits" />

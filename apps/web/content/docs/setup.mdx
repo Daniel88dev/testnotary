@@ -41,32 +41,32 @@ Without them a run still attests, but every attestation shows *runtime not pinne
 
 <Step id="library" title="Add the library and its config" who="Developer" where="terminal">
 
-Add `testnotary` as a dev dependency, then run `init`. It asks for your suites and writes `testnotary.json`. A suite is a name and the exact command CI runs for it. The command is a list of arguments, run without a shell; for pipes or `&&`, point it at a `package.json` script.
+Add `testnotary` as a dev dependency, then run `init`. It writes `testnotary.json` with one suite, `test`, which runs your `test` script through your package manager. A suite is a name and the exact command CI runs for it. The command is a list of arguments, run without a shell; for pipes or `&&`, point it at a `package.json` script. Rename the suite or add more by editing the file.
 
-The command must build whatever the tests import, because a run tests the files as they are. If the tests need a variable such as `DATABASE_URL`, list its name under `env.pass`. Everything else is left out of the test environment.
+The command must build whatever the tests import, because a run tests the files as they are. If the tests need a variable such as `DATABASE_URL`, list its name under `env.pass`. Everything else is left out of the test environment. See [testnotary.json](/docs/config).
 
-`init` also offers to add a short block to `AGENTS.md` (or `CLAUDE.md`), which tells agents to run the suite before they open a pull request. Agents write `init --yes` and get the defaults.
+`init` also adds a short block to `AGENTS.md` (or `CLAUDE.md`), which tells agents to run the suite before they open a pull request, and prints the workflow snippet for the next step. It asks before it writes each of the two files; `init --yes` takes both without asking, which is what an agent should run.
 
 ```sh terminal
 $ {{add}}
 $ {{x}} testnotary init
 ```
 
-<Code snippet="config" lang="json" file="testnotary.json" />
+<Code snippet="config" suite="test" lang="json" file="testnotary.json" />
 
-<Code snippet="agents" lang="md" file="AGENTS.md" />
+<Code snippet="agents" suite="test" lang="md" file="AGENTS.md" />
 
 </Step>
 
 <Step id="action" title="Add the action to your workflow" who="Developer" where=".github/workflows/ci.yml">
 
-Replace your test step with the action. Keep checkout, Node setup and the install before it. The action asks Testnotary whether this tree has a passing run. If it does, the step ends at once. If not, it runs `testnotary exec unit`, the same command in the same stripped environment as a laptop run.
+Replace your test step with the action. Keep checkout, Node setup and the install before it. The action asks Testnotary whether this tree has a passing run. If it does, the step ends at once. If not, it runs `testnotary exec test`, the same command in the same stripped environment as a laptop run.
 
 Keep the job’s name, so your required check stays the same. The job always runs and always reports; only the test step inside it is skipped.
 
 Set `node-version-file` to the file from the pin step. If you upload coverage or test reports after the tests, guard those steps with `if: ${{ !cancelled() && steps.testnotary.outputs.ran == 'true' }}`. A required coverage check never reports on a skipped commit.
 
-<Code snippet="workflow" lang="yaml" file=".github/workflows/ci.yml" />
+<Code snippet="workflow" suite="test" lang="yaml" file=".github/workflows/ci.yml" />
 
 <Aside>Expensive setup such as building containers or seeding a database? The [gate job recipe](/docs/gate) skips the whole job instead. [Matrix jobs](/docs/matrix) use the shape above in every leg.</Aside>
 
@@ -74,7 +74,7 @@ Set `node-version-file` to the file from the pin step. If you upload coverage or
 
 <Step id="merge" title="Merge the setup pull request" who="Developer" where="GitHub">
 
-Open one pull request with everything so far. Its tests run in full: it changes guarded files (the workflow, `package.json`, the lockfile and `testnotary.json`), and those always run CI. The **CI / Testnotary / unit (pull_request)** check reads *would have fallen back: guarded_file_changed*. That’s expected.
+Open one pull request with everything so far. Its tests run in full: it changes guarded files (the workflow, `package.json`, the lockfile and `testnotary.json`), and those always run CI. The **CI / Testnotary / test (pull_request)** check reads *would have fallen back: guarded_file_changed*. That’s expected.
 
 Merge it. Laptop and sandbox runs read the config from the base branch, so until it lands there, `testnotary run` refuses with `no_config_on_base`.
 
@@ -116,12 +116,12 @@ Make a change on a branch and commit it. Bring the branch up to date with `main`
 
 Run the suite. The tests run as usual; the last line says whether the run was attested. Push and open the pull request.
 
-In shadow mode the tests still run in CI. The **CI / Testnotary / unit (pull_request)** check reads *would have skipped* and names your run. If it reads *would have fallen back*, its reason code says why; the table below covers the common ones.
+In shadow mode the tests still run in CI. The **CI / Testnotary / test (pull_request)** check reads *would have skipped* and names your run. If it reads *would have fallen back*, its reason code says why; the table below covers the common ones.
 
-<Code snippet="first-run" lang="sh" file="terminal" />
+<Code snippet="first-run" suite="test" lang="sh" file="terminal" />
 
-```check unit pull_request
-Would have skipped · unit passed 14 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0 · shadow mode: the tests passed in 48 s
+```check test pull_request
+Would have skipped · test passed 14 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0 · shadow mode: the tests passed in 48 s
 ```
 
 | Reason | What to do |
@@ -143,8 +143,8 @@ Switch to enforce. From the next pull request on, a matching run skips the test 
 
 To turn Testnotary off in a hurry, set the repo variable `TESTNOTARY_DISABLED` to `true`. Every job then runs its tests.
 
-```check unit pull_request
-Skipped · unit passed 9 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0
+```check test pull_request
+Skipped · test passed 9 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0
 ```
 
 </Step>
