@@ -76,3 +76,25 @@ test("a public repo that goes private stops anonymous reads at the next request"
 
   expect((await page.goto("/oss-lab/gadgets"))?.status()).toBe(404);
 });
+
+test("a public repo that went private stops anonymous reads although its webhook was lost", async ({ page, world }) => {
+  const { repo } = await installedRepo(world, "oss-lab", "sprockets", "public");
+  // GitHub makes it private, and the `privatized` delivery never arrives.
+  repo.visibility = "private";
+
+  expect((await page.goto("/oss-lab/sprockets"))?.status()).toBe(404);
+  expect((await page.request.get("/oss-lab/sprockets/runs")).status()).toBe(404);
+  expect((await page.request.get("/api/live/oss-lab/sprockets")).status()).toBe(404);
+});
+
+test("anonymous reads fail closed when GitHub can't confirm a public repo is still public", async ({ page, world }) => {
+  await installedRepo(world, "oss-lab", "flanges", "public");
+  const restore = world.github.override("GET", "/repositories/:id", () => new Response("upstream", { status: 502 }));
+  try {
+    expect((await page.request.get("/oss-lab/flanges")).status()).toBe(404);
+    expect((await page.request.get("/api/live/oss-lab/flanges")).status()).toBe(404);
+  } finally {
+    restore();
+  }
+  expect((await page.request.get("/oss-lab/flanges")).status()).toBe(200);
+});

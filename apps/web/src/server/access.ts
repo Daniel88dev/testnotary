@@ -1,7 +1,8 @@
 import { desc, sql } from "drizzle-orm";
 import { database } from "../db/client.ts";
 import { repoStates } from "../db/schema.ts";
-import { fetchAccessibleRepos, fetchRepoPermission, type RepoPermission } from "./github.ts";
+import { now } from "./config.ts";
+import { fetchAccessibleRepos, fetchRepoPermission, installationToken, repositoryById, type RepoPermission } from "./github.ts";
 import { healRepoState, repoViews, type RepoView } from "./installations.ts";
 import type { Viewer } from "./sessions.ts";
 
@@ -56,11 +57,45 @@ export async function installedRepoNamed(owner: string, name: string): Promise<R
 export async function repoAccess(viewer: Viewer | undefined, owner: string, name: string): Promise<RepoAccess | undefined> {
   const repo = await installedRepoNamed(owner, name);
   if (!repo) return undefined;
-  if (!viewer) return repo.visibility === "public" ? { repo, permission: undefined } : undefined;
+  if (!viewer) {
+    if (repo.visibility !== "public") return undefined;
+    const confirmed = await stillPublic(repo);
+    return confirmed ? { repo: confirmed, permission: undefined } : undefined;
+  }
   const live = await fetchRepoPermission(viewer.githubToken, repo.id);
   // GitHub shows a public repo to everyone: one it doesn't show this person is private now, or gone.
   if (!live) return undefined;
   return { repo: await healRepoState(database(), repo, live), permission: live.permission };
+}
+
+/** How long a signed-out read trusts GitHub's word that a repo is public. */
+export const PUBLIC_CONFIRMED_FOR_MS = 60_000;
+
+/** When GitHub last said each repo is public, by the service clock. Per process; a short TTL. */
+const confirmedPublic = new Map<number, number>();
+
+/**
+ * A repo recorded as public, confirmed public with GitHub (the installation token, by the repo's
+ * id) at most a minute ago, or undefined: it went private (a lost `privatized` delivery would
+ * otherwise leave it readable signed out), or GitHub can't be asked, which fails closed. A changed
+ * name or visibility is recorded, as a missed webhook would have.
+ */
+async function stillPublic(repo: RepoView): Promise<RepoView | undefined> {
+  const at = now().getTime();
+  const confirmedAt = confirmedPublic.get(repo.id);
+  if (confirmedAt !== undefined && at - confirmedAt < PUBLIC_CONFIRMED_FOR_MS) return repo;
+  confirmedPublic.delete(repo.id);
+  let live;
+  try {
+    live = await repositoryById(await installationToken(repo.installationId), repo.id);
+  } catch {
+    return undefined;
+  }
+  if (!live) return undefined;
+  const healed = await healRepoState(database(), repo, live);
+  if (healed.visibility !== "public") return undefined;
+  confirmedPublic.set(repo.id, at);
+  return healed;
 }
 
 export interface ReadableRepo extends RepoView {

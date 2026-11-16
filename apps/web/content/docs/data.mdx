@@ -35,7 +35,7 @@ The GitHub App asks for **Contents: read** and **Metadata: read** only. With the
 
 ## Who can see it
 
-On a **public** repo, runs, attestations, verifications and mismatches are public and name the account, like the repo’s own history on GitHub. On a **private** repo, only people who can read the repo on GitHub can see them. Everything is deleted after 90 days, except mismatches, which are kept while the repo is installed.
+On a **public** repo, runs, attestations, verifications and mismatches are public and name the account, like the repo’s own history on GitHub. On a **private** repo, only people who can read the repo on GitHub can see them. A repo that goes private stops signed-out reads within a minute: the service asks GitHub again whether it is still public at most a minute after it last did, and shows nothing when GitHub can’t say. Everything is deleted after 90 days, except mismatches, which are kept while the repo is installed.
 
 The site sets only the cookies sign-in needs, loads nothing from another host and runs no analytics. The library and the action send no telemetry.
 
