@@ -1,0 +1,154 @@
+export const heading = "Set up Testnotary"
+
+<Lede>From a repo with nothing installed to its first skipped test job. About twenty minutes of setup, then a few pull requests in shadow mode.</Lede>
+
+<Before>
+- A GitHub repo whose tests run in GitHub Actions, and admin rights on it.
+- A Node project that uses npm, pnpm or Yarn. Bun and Deno aren’t supported yet.
+- Tests that run on macOS or Linux. WSL counts as Linux.
+</Before>
+
+<Part id="repo" title="Set up the repo" lede="One person with admin rights, one pull request.">
+
+<Step id="install-app" title="Install the GitHub App" who="Repo admin" where="github.com">
+
+Open [github.com/apps/testnotary](https://github.com/apps/testnotary), choose **Install**, pick the account that owns the repo and select the repo. Start with one.
+
+The App asks for two permissions, both read only: **Contents**, so the service can read the tree CI builds and the config on your base branch, and **Metadata**. It never writes to the repo.
+
+<Result>The repo appears on your dashboard in shadow mode. Nothing skips yet.</Result>
+
+</Step>
+
+<Step id="pin" title="Pin Node and the package manager" who="Developer" where="your editor">
+
+A run is checked against what the repo declares. Put the Node version in `.nvmrc` (or `.node-version`) and the package manager in `package.json`. CI reads the same files, so laptops, sandboxes and CI agree.
+
+Without them a run still attests, but every attestation shows *runtime not pinned*, and a mismatch in CI is harder to explain.
+
+```sh .nvmrc
+22.11.0
+```
+
+```json package.json
+{
+  "packageManager": "{{pin}}",
+  "scripts": { "test": "vitest run" }
+}
+```
+
+</Step>
+
+<Step id="library" title="Add the library and its config" who="Developer" where="terminal">
+
+Add `testnotary` as a dev dependency, then run `init`. It writes `testnotary.json` with one suite, `test`, which runs your `test` script through your package manager. A suite is a name and the exact command CI runs for it. The command is a list of arguments, run without a shell; for pipes or `&&`, point it at a `package.json` script. Rename the suite or add more by editing the file.
+
+The command must build whatever the tests import, because a run tests the files as they are. If the tests need a variable such as `DATABASE_URL`, list its name under `env.pass`. Everything else is left out of the test environment. See [testnotary.json](/docs/config).
+
+`init` also adds a short block to `AGENTS.md` (or `CLAUDE.md`), which tells agents to run the suite before they open a pull request, and prints the workflow snippet for the next step. It asks before it writes each of the two files; `init --yes` takes both without asking, which is what an agent should run.
+
+```sh terminal
+$ {{add}}
+$ {{x}} testnotary init
+```
+
+<Code snippet="config" suite="test" lang="json" file="testnotary.json" />
+
+<Code snippet="agents" suite="test" lang="md" file="AGENTS.md" />
+
+</Step>
+
+<Step id="action" title="Add the action to your workflow" who="Developer" where=".github/workflows/ci.yml">
+
+Replace your test step with the action. Keep checkout, Node setup and the install before it. The action asks Testnotary whether this tree has a passing run. If it does, the step ends at once. If not, it runs `testnotary exec test`, the same command in the same stripped environment as a laptop run.
+
+Keep the job’s name, so your required check stays the same. The job always runs and always reports; only the test step inside it is skipped.
+
+Set `node-version-file` to the file from the pin step. If you upload coverage or test reports after the tests, guard those steps with `if: ${{ !cancelled() && steps.testnotary.outputs.ran == 'true' }}`. A required coverage check never reports on a skipped commit.
+
+<Code snippet="workflow" suite="test" lang="yaml" file=".github/workflows/ci.yml" />
+
+<Aside>Expensive setup such as building containers or seeding a database? The [gate job recipe](/docs/gate) skips the whole job instead. [Matrix jobs](/docs/matrix) use the shape above in every leg.</Aside>
+
+</Step>
+
+<Step id="merge" title="Merge the setup pull request" who="Developer" where="GitHub">
+
+Open one pull request with everything so far. Its tests run in full: it changes guarded files (the workflow, `package.json`, the lockfile and `testnotary.json`), and those always run CI. The **CI / Testnotary / test (pull_request)** check reads *would have fallen back: guarded_file_changed*. That’s expected.
+
+Merge it. Laptop and sandbox runs read the config from the base branch, so until it lands there, `testnotary run` refuses with `no_config_on_base`.
+
+</Step>
+
+</Part>
+
+<Part id="who" title="Set up who attests" lede="Every laptop signs in once. Every agent gets a token.">
+
+<Step id="login" title="Sign in on your laptop" who="Every developer" where="terminal">
+
+Each developer signs in once per machine. `login` prints a code to enter on GitHub, then stores a laptop token in the system keychain. It’s good for every repo you can push to, lasts 90 days and renews each time you use it.
+
+macOS and Linux only; WSL counts as Linux.
+
+<Code snippet="login" lang="sh" file="terminal" />
+
+</Step>
+
+<Step id="agents" title="Give each agent a sandbox token" who="Anyone with write access" where="dashboard, then the agent’s settings">
+
+Agent sandboxes can’t open a browser to sign in, and a laptop token is refused inside one. On the dashboard, open the repo, then **Settings → Sandbox tokens → Create token**. Name it after the agent. It works for this repo only, uploads runs and nothing else, and lasts 90 days by default. Copy it: it’s shown once.
+
+Runs from a sandbox token name the token and you, its creator. They’re audited at twice the repo’s rate, 1 in 5 by default.
+
+Then store it where the agent runs, and let the sandbox reach `testnotary.dev`; most block unknown hosts by default.
+
+<VendorSteps />
+
+</Step>
+
+</Part>
+
+<Part id="skip" title="Get to the first skip" lede="Shadow mode first, then enforce.">
+
+<Step id="first-pr" title="Open a pull request in shadow mode" who="Developer or agent" where="terminal, then GitHub">
+
+Make a change on a branch and commit it. Bring the branch up to date with `main` first: CI tests the merge of your branch into `main`, and only a branch that already contains `main` produces the same tree on your machine.
+
+Run the suite. The tests run as usual; the last line says whether the run was attested. Push and open the pull request.
+
+In shadow mode the tests still run in CI. The **CI / Testnotary / test (pull_request)** check reads *would have skipped* and names your run. If it reads *would have fallen back*, its reason code says why; the table below covers the common ones.
+
+<Code snippet="first-run" suite="test" lang="sh" file="terminal" />
+
+```check test pull_request
+Would have skipped · test passed 14 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0 · shadow mode: the tests passed in 48 s
+```
+
+| Reason | What to do |
+|---|---|
+| `no_attestation` | No passing run for this tree. Run the suite after your last commit, and after updating from main. |
+| `attestation_expired` | The run is more than 24 hours old. Run it again. |
+| `guarded_file_changed` | The PR changes a guarded file, such as the lockfile. Expected: those always run CI. |
+| `command_changed` | The command you ran differs from testnotary.json on main. Update your branch. |
+| `no_oidc_token` | The workflow lacks id-token: write. Forks never get one, so they always run. |
+| `repo_not_installed` | The GitHub App isn’t installed on this repo. |
+
+</Step>
+
+<Step id="enforce" title="Switch the repo to enforce" who="Repo admin" where="dashboard">
+
+On the dashboard, open the repo, then **Settings → Mode**. The toggle shows the shadow record: how many pull requests would have skipped and whether CI agreed each time. It warns below 20 agreeing comparisons, but doesn’t stop you.
+
+Switch to enforce. From the next pull request on, a matching run skips the test step. One in ten skips is drawn for an audit and runs anyway; if CI fails where the run passed, the repo goes back to shadow mode until an admin explains it.
+
+To turn Testnotary off in a hurry, set the repo variable `TESTNOTARY_DISABLED` to `true`. Every job then runs its tests.
+
+```check test pull_request
+Skipped · test passed 9 min ago · attested by @maria-k · laptop token "macOS machine, 15 Nov 2026" · darwin/arm64 · Node 22.11.0
+```
+
+</Step>
+
+</Part>
+
+<Next pages="agents gate refusals limit" />

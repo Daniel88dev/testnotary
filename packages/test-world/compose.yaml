@@ -1,0 +1,32 @@
+# The test world's Postgres. Never started by hand: the harness runs it under a compose project
+# named after this worktree's path and the test runner (tnw-<hash>-<runner>), so worktrees never
+# share a container, the host port is ephemeral, and the data lives in tmpfs.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - max_connections=400
+    ports:
+      - "127.0.0.1::5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      # TCP only: during initdb the entrypoint's temporary server listens on the socket alone.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 30s
+      start_interval: 100ms

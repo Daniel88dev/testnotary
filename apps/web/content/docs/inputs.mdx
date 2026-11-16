@@ -1,0 +1,61 @@
+<Lede>One action, two modes: `run` replaces your test step, `verify` is a gate job’s question. Both take the same inputs and set the same outputs.</Lede>
+
+<Code snippet="step" lang="yaml" file=".github/workflows/ci.yml" />
+
+## Inputs
+
+| Input | Default | What it does |
+|---|---|---|
+| `suite` | none | The suite from `testnotary.json`. May be left out when the config declares exactly one. |
+| `mode` | `run` | `run` verifies, then skips the tests or runs them through the library. `verify` only verifies, on any runner, with no checkout needed: the [gate job](/docs/gate). Anything else is an error. |
+| `verification` | empty | A gate job’s `verification` output. The test step then reuses that answer instead of asking again. When it is empty, or doesn’t belong to this commit and this step’s suite, the step verifies on its own. |
+| `github-token` | `${{ github.token }}` | The token the `Testnotary / <suite>` check run is made with. It needs `checks: write`; without it the step writes only the job summary. |
+
+The action also reads the repo variable `TESTNOTARY_DISABLED`, passed in the job’s `env` as the workflow snippet does: `true` turns skipping off for every job, without calling anything. See [Shadow mode and enforce](/docs/shadow).
+
+## Outputs
+
+| Output | Value |
+|---|---|
+| `result` | `skip`, `audit`, `fallback`, `would_skip` or `would_fall_back`. |
+| `reason` | The [fallback reason code](/docs/reasons) for `fallback` and `would_fall_back`, `audit` for an audit, empty for a skip. |
+| `ran` | `true` when the tests ran in this step, `false` otherwise. Always `false` in `verify` mode. |
+| `skip` | `verify` mode only: `true` for a skip in enforce mode, else `false`. The test job’s condition reads it. |
+| `verification` | `verify` mode only: the verification’s id, for the test job’s `verification` input; empty when the job fell back before asking the service. |
+
+Read them as `steps.<id>.outputs.<name>`, such as `steps.testnotary.outputs.ran`, which guards a coverage upload. See [Coverage and test reports](/docs/coverage).
+
+## Results
+
+| Result | Mode | The tests | The check run’s conclusion |
+|---|---|---|---|
+| `skip` | enforce | Skipped. The step exits 0. | `success` |
+| `audit` | enforce | Run, although an attestation covers the tree. | `success` when they pass, `failure` when they fail (a mismatch), else `neutral` |
+| `fallback` | enforce | Run, with the reason. | `neutral` |
+| `would_skip` | shadow | Run. | `success`, or `failure` when they fail (a mismatch) |
+| `would_fall_back` | shadow | Run, with the reason. | `neutral` |
+
+Only a mismatch fails Testnotary’s check run, and the check run is never meant to be required: your test job’s own check is. See [Fallback reason codes](/docs/reasons) and [What the pull request shows](/docs/pr).
+
+## The step’s exit code
+
+In `run` mode the step exits with the tests’ exit code, and with 0 for a skip, so the job’s result means what it always meant. In `verify` mode it exits 0 whatever the answer.
+
+It fails with exit 1, an error annotation and a line in the job summary, without running anything, when it can’t do its job safely:
+
+- `mode` is neither `run` nor `verify`;
+- `run` mode on a Windows runner (use a gate job there, or a Linux or macOS runner);
+- no `suite` input, and the checked-out `testnotary.json` doesn’t declare exactly one;
+- the `testnotary` library isn’t installed in the workspace. The action never runs the suite’s command outside the library’s stripped environment.
+
+## How it runs the tests
+
+When it doesn’t skip, the step runs `testnotary exec <suite> --json` from the workspace through the package manager `package.json` pins: `pnpm exec testnotary`, `yarn testnotary`, otherwise `npx --no-install testnotary`. So install your dependencies before the step, as before. The tests get the same stripped environment as a laptop run; the step’s GitHub token and OIDC request variables never reach them.
+
+After the tests, the step reports their outcome and duration to the service, with a fresh OIDC token. A report that doesn’t arrive is a warning in the log, never a failed step.
+
+## Permissions
+
+The workflow grants the job `contents: read`, `id-token: write` (so the action can identify the workflow to Testnotary) and `checks: write` (for the check run). Without `id-token: write` every job falls back with `no_oidc_token`. See the [setup guide](/docs/setup#action).
+
+<Next pages="reasons pr gate coverage" />

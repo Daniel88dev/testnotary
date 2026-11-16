@@ -1,0 +1,111 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1794767168096,
+      "tag": "0000_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794768267335,
+      "tag": "0001_installations",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794768616033,
+      "tag": "0002_accounts_and_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794769822165,
+      "tag": "0003_runs_and_attestations",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794771223046,
+      "tag": "0004_verifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794772629807,
+      "tag": "0005_token_renames_and_session_ends",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794773549557,
+      "tag": "0006_job_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794776232630,
+      "tag": "0007_account_deletions_and_suspensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794777068427,
+      "tag": "0008_verification_detail",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794778281453,
+      "tag": "0009_audits_and_mismatches",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794780365812,
+      "tag": "0010_verification_ci_run",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794783381843,
+      "tag": "0011_attestation_signatures",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794783976685,
+      "tag": "0012_token_blocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794784978535,
+      "tag": "0013_mismatch_explanations",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794799568056,
+      "tag": "0014_job_report_results",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+<Lede>A passing run on a laptop or in an agent’s sandbox lets CI skip its test step, when CI builds the same tree that run tested.</Lede>
+
+Teams that write code with agents open many pull requests. The agent or the developer already runs the test suite before opening each one, and then CI runs the same suite again on the same files. Testnotary lets that earlier run stand in for CI’s test job, and ties it to a named GitHub account.
+
+## The three parts
+
+- **The library**, the npm package and CLI `testnotary`. `testnotary run` runs a suite your repo declares in `testnotary.json`, on a clean tree, in a stripped environment, and uploads the run. A passed run yields an attestation for the tree it tested, tied to the GitHub account behind the token that uploaded it.
+- **The action**, <Fact name="actionRef" code />. It replaces the test step in your workflow. It asks Testnotary whether a valid attestation names the tree CI is building. If one does, the step ends at once. If not, it runs the suite with `testnotary exec`: the same declared command in the same stripped environment. Either way it reports, and writes a line on the pull request.
+- **The service and web app** at `testnotary.dev`: the GitHub App, the API, these docs and a dashboard for each repo. The App asks for Contents read and Metadata read only.
+
+All three are open source under the MIT license. See [Licensing](/docs/licensing).
+
+## What a skip needs
+
+A skip happens only when every one of these holds; anything else runs the tests. [How a skip is decided](/docs/how) gives the full order.
+
+- The tree CI builds is the exact tree a passed run tested. Only the tree counts: the commit can differ, such as the merge commit GitHub makes for a pull request.
+- The run used the suite’s command from `testnotary.json` on the base branch, unchanged.
+- The pull request changes no guarded file: workflows, lockfiles, `package.json`, `testnotary.json` and the others in [Guarded files](/docs/guarded).
+- The run ended less than <Fact name="attestationAge" /> ago, and its token is still good.
+- The account that attested, or the creator of the sandbox token, can still write to the repo.
+- The skip isn’t drawn for an audit, and the repo is in enforce mode.
+
+## The limit, in plain words
+
+Testnotary can’t prove a test ran. It ties every skipped test job to a named GitHub account and re-runs a random share of them in CI.
+
+Everything else follows from that sentence. The library refuses honest mistakes and agent shortcuts: a dirty tree, a changed command, extra arguments, a history-filtered suite, the wrong Node, a stale install. A change to a guarded file always runs CI. Audits re-run a random share of skips, <Fact name="auditRate" /> by default, and a mismatch sends the repo back to shadow mode. New repos start in shadow mode, and every doubtful case runs the tests. [What Testnotary can’t prove](/docs/limit) says what that does and doesn’t protect you from.
+
+## Where to start
+
+The [setup guide](/docs/setup) takes a repo from nothing to its first skipped test job in nine steps: one pull request, a sign-in per laptop and a token per agent.
+
+<Next pages="setup how agents limit" />

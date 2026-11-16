@@ -1,0 +1,19 @@
+{
+  "name": "@testnotary/action",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Testnotary GitHub Action. Bundled at release onto the tagged commit; action.yml is at the repo root.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@testnotary/core": "workspace:*",
+    "@testnotary/protocol": "workspace:*",
+    "@testnotary/test-world": "workspace:*"
+  }
+}

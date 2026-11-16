@@ -1,0 +1,49 @@
+<Lede>An audit is a skip that runs its tests anyway, chosen at random, to compare CI’s result with the attestation. A failed audit is a mismatch.</Lede>
+
+## Audit rates
+
+When every check passes, the service makes one last draw. A drawn job falls back with the reason `audit`: its tests run, and the action reports whether they passed.
+
+- Laptop tokens: <Fact name="auditRate" /> skips by default.
+- Sandbox tokens: twice the repo’s rate, <Fact name="sandboxAuditRate" /> by default.
+
+A repo admin can raise both rates in **Settings → Audit rate**. They never go below the defaults, and nothing lowers them on its own, so a mistake in settings can’t switch auditing off.
+
+The draw is keyed to the repo, the tree and the suite, so it can’t be predicted from outside and re-running the same job doesn’t draw again. The key comes from a secret only the service holds, and the database stores none of it.
+
+## What a mismatch does
+
+A mismatch is CI’s test job failing on a tree an attestation says passed: in an audit, or on a shadow-mode job that would have skipped. When the job reports it, at once:
+
+- the repo goes back to [shadow mode](/docs/shadow), so the run stops earning skips straight away;
+- the mismatch is recorded against the account and the token that attested, with the token’s type, and kept for as long as the repo is installed;
+- the pull request gets its own mismatch line, and the check run fails.
+
+Nothing is revoked automatically, and other repos aren’t affected. A cancelled job counts as neither an agreement nor a mismatch, and nothing retries a flaky test for you.
+
+An audit that fails after a merge, on the push to `main`, leaves that run red and records the mismatch in the run’s summary. Testnotary doesn’t comment on the merged pull request and doesn’t revert anything: the signal is loud, but nothing is undone behind your back.
+
+A mismatch states a fact, not bad faith. Most are a flaky test or a difference between a laptop and the runner.
+
+## Explaining a mismatch
+
+The repo’s **Mismatches** page lists each one with an amber badge until it is explained. A repo admin explains it with one of four causes and a note:
+
+| Cause | When |
+|---|---|
+| *flaky test* | The test fails now and then on the same code. |
+| *environment difference* | Something differs between the run and the runner: the Node or package-manager version, the OS, a service, a time zone. |
+| *false attestation* | The run didn’t really pass. |
+| *other* | Anything else; say what in the note. |
+
+The explanation is kept beside the mismatch. Explaining doesn’t return the repo to enforce mode by itself: an admin switches it back when they’re ready.
+
+The commit page of an audit or a mismatch shows the run’s environment beside the CI runner’s, which is usually enough to tell an environment difference from a false pass.
+
+## Re-running the commits it casts doubt on
+
+If one skip was wrong, others on the same account’s attestations may be too. Each mismatch lists every commit that skipped on that account’s attestations since its last agreeing audit, as far back as the 90 days of history go. Re-run CI by hand on the ones you doubt; GitHub’s **Re-run jobs** runs them in full while the repo is in shadow mode.
+
+To stop a token you no longer trust, revoke the sandbox token or block the person’s laptop token on the repo (**Settings** and **People**). Either voids its unexpired attestations at once.
+
+<Next pages="shadow limit agents how" />

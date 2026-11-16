@@ -1,0 +1,39 @@
+<Lede>Some pull requests never skip. Testnotary notices them early and runs their tests normally, without failing anything.</Lede>
+
+## Forks
+
+A workflow run for a pull request from a fork gets a read-only `GITHUB_TOKEN`, no secrets and no OIDC token. Without the token the action can’t identify the workflow to Testnotary, so it doesn’t ask: it prints a plain notice, falls back with `no_oidc_token` and runs the tests. Nothing about the fork fails because of Testnotary.
+
+That is on purpose. A fork’s author usually can’t write to the repo, and only an attestation from someone who can write to it may let CI skip.
+
+If a maintainer brings a contributor’s branch into the repo itself, the usual rules apply from then on.
+
+## Dependabot
+
+Dependabot’s pull requests run with the same restrictions as forks, but a workflow’s `permissions` block raises `id-token: write` for them, so the action does get a token and asks. The answer is a fallback: Dependabot never runs `testnotary run`, so no attestation names its tree (`no_attestation`), and its updates change lockfiles and `package.json`, which are [guarded files](/docs/guarded) anyway. Its tests always run.
+
+The same goes for Renovate and any other bot that edits dependencies.
+
+## The Copilot coding agent
+
+Copilot’s cloud agent can attest with a sandbox token stored as an **Agents** secret; the [setup guide](/docs/setup#agents) has the steps. Two things differ from other agents:
+
+- **The approval wait.** GitHub doesn’t run workflows on the agent’s pull requests until someone with write access approves the run. Testnotary can’t change that. Once a person approves, the action runs as usual and a matching attestation skips.
+- **Who it names.** The skip names you, the token’s creator, with the token’s label and the agent’s session labels marked *unverified*. Copilot itself is never named as the attester.
+
+Inside the agent’s environment `GITHUB_ACTIONS=true` is set, which the library treats as a sandbox marker: a laptop token is refused there with `laptop_token_in_sandbox`.
+
+## First-time contributors and other approvals
+
+Wherever GitHub holds a workflow run for approval, Testnotary waits with it. Approving the run starts the job, and the verification happens then, against attestations less than <Fact name="attestationAge" /> old at that moment.
+
+## Who never skips
+
+| Who | Why | Reason |
+|---|---|---|
+| Fork pull requests | No OIDC token | `no_oidc_token` |
+| Dependabot and dependency bots | No attestation for their tree; lockfile changes | `no_attestation`, `guarded_file_changed` |
+| An author who lost write access | The attester must be able to write to the repo | `attester_no_write` |
+| Workflows on GitHub Enterprise Server or GHE.com | Not served in v1 | `host_not_supported` |
+
+<Next pages="agents how limits setup" />

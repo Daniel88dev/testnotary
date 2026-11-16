@@ -1,0 +1,91 @@
+<Lede>The suite’s own output passes through untouched. Everything Testnotary says goes to stderr, its last line is a fixed summary, and with `--json` stdout carries one object.</Lede>
+
+## Exit codes
+
+| Exit code | When |
+|---|---|
+| 0 | The tests passed. For `check`: nothing would refuse a run. For the other commands: they did their job. |
+| 1 | The tests failed. For the other commands: they couldn’t do their job, and say why. |
+| 2 | The run was refused, before or after the command ran. See [Refusal codes](/docs/refusals). |
+| 3 | The tests passed but nothing was attested, and you passed `--require-attestation`. |
+| 64 | A usage error: an unknown command or flag, a missing or extra argument. |
+| 130 | Interrupted: Ctrl-C reached the command while it ran (refusal `interrupted`). |
+
+`run` and `exec` exit 1 when the tests fail, whatever exit code the command itself returned; that code is in the `--json` object. `login`, `logout`, `whoami`, `sandbox-key` and `init` exit 1 when they can’t do their job, with an `error` code in their `--json` object (see [CLI commands](/docs/cli)). A usage error prints `usage: testnotary …` on stderr and nothing on stdout, with `--json` too.
+
+In CI, the action’s step exits with the tests’ exit code, and a skip exits 0. See [Action inputs and outputs](/docs/inputs).
+
+## What goes where
+
+- **stdout** is the suite’s, unchanged. With `--json`, the suite’s stdout moves to stderr, and stdout holds exactly one JSON object on one line.
+- **stderr** carries Testnotary’s own lines, each starting `testnotary: `: what runs (`run unit: pnpm run test`), every refusal and warning with what to do, whether the run was attested and the run page’s URL. The suite’s own stderr passes through between them.
+- **The last line** of `run` and `exec` on stderr is the summary line, with no prefix.
+
+## The summary line
+
+```sh terminal
+outcome=passed suite=unit attested=true tree=a91f3c2e8b0d4f17c6a95e3b2d7f0c4a8e1b6d93 commit=5d0e7b1f9a3c4e2d8b6f0a1c7e5d3b9f2a4c6e80 url=https://testnotary.dev/acme/shop/runs/0f8c2d1e-4b7a-4c39-9a52-6e1d3b8f7c20
+```
+
+The fields are always these six, in this order, separated by single spaces. A value that doesn’t exist is left empty (`url=` for a run that wasn’t attested, `tree=` and `commit=` outside a repo), so a script can split the line on spaces and `=`. Trees and commits are full SHAs.
+
+- `outcome` is `passed`, `failed` or `refused`.
+- `attested` is `true` only when the service stored an attestation for this run. `exec` never attests.
+- `url` is the attested run’s page on the dashboard.
+
+## The `--json` object
+
+`run --json` and `exec --json` print the same object:
+
+```json stdout
+{
+  "outcome": "passed",
+  "refusal": null,
+  "exitCode": 0,
+  "attested": true,
+  "attestationUrl": "https://testnotary.dev/acme/shop/runs/0f8c2d1e-4b7a-4c39-9a52-6e1d3b8f7c20",
+  "tree": "a91f3c2e8b0d4f17c6a95e3b2d7f0c4a8e1b6d93",
+  "commit": "5d0e7b1f9a3c4e2d8b6f0a1c7e5d3b9f2a4c6e80",
+  "durationMs": 48210,
+  "warnings": []
+}
+```
+
+It is printed on one line; it is spread out here to read.
+
+| Field | Value |
+|---|---|
+| `outcome` | `passed`, `failed` or `refused`. |
+| `refusal` | The [refusal code](/docs/refusals), or `null`. |
+| `exitCode` | The command’s own exit code; `null` when it never started. A command killed by a signal reports 128 plus the signal’s number. |
+| `attested` | Whether the service stored an attestation for this run. |
+| `attestationUrl` | The run page’s URL, or `null`. |
+| `tree` | The tree the run tested, or `null` outside a repo. |
+| `commit` | The commit it was run on, or `null`. |
+| `durationMs` | How long the command ran, in milliseconds; 0 when it never started. |
+| `warnings` | The warning codes the run raised, in order. |
+
+`check --json` prints what a run would meet, without an outcome, since nothing ran:
+
+```json stdout
+{"suite":"unit","refusal":null,"attestable":true,"tree":"a91f3c2e8b0d4f17c6a95e3b2d7f0c4a8e1b6d93","commit":"5d0e7b1f9a3c4e2d8b6f0a1c7e5d3b9f2a4c6e80","warnings":[]}
+```
+
+| Field | Value |
+|---|---|
+| `suite` | The suite a run would use; empty when the refusal came before one was chosen. |
+| `refusal` | The refusal code a run would meet, or `null`. |
+| `attestable` | Whether a passing run would be attested: no refusal, and the service said yes. |
+| `tree` | The tree a run would test, or `null`. |
+| `commit` | The commit, or `null`. |
+| `warnings` | The warning codes a run would raise. |
+
+The other commands’ objects are on [CLI commands](/docs/cli).
+
+## Warnings
+
+A warning never refuses: the run goes on, its code is in `warnings`, it is uploaded with the run, and a `testnotary:` line on stderr explains it. Warnings are checked only when no refusal fired. A pass with a warning that kept it from being attested still exits 0, unless you ask for `--require-attestation`.
+
+<CodeTable of="warnings" />
+
+<Next pages="refusals cli hook data" />

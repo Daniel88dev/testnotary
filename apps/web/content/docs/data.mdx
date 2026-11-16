@@ -1,0 +1,44 @@
+<Lede>A run sends Testnotary a record of what ran, where and with what result. It never sends your code, your test output or your secrets.</Lede>
+
+This page covers what the library and the action send. How Testnotary stores and handles it, who receives it and your rights are in the [privacy policy](/privacy).
+
+## What a run sends
+
+Every run uploads one record, whatever its outcome:
+
+- the suite, the outcome (*passed*, *failed* or *refused*), the refusal code if any, and the tree and commit hashes;
+- the exact command, its exit code, the start and end times and the duration;
+- the environment: OS, OS version, architecture, Node version, package manager and version, the time zone and locale the tests ran with;
+- the token’s id, and the agent session labels (vendor, session id, session URL) when there are any;
+- the **names** of the variables passed with `env.pass`, never their values;
+- the guarded globs the change matched, the warnings, the *not pinned* flags, and any `env.set` overrides of `CI`, `TZ` or `LANG`;
+- for a passed run, the attestation: a versioned record of the fields above that the service stores byte for byte, and in signature mode its signature and public key.
+
+A run refused before it started sends only the repo’s name, the refusal code, the tree and the commit. A run with no token asks the service once, naming only the repo, in case an agent sandbox’s proxy adds a token on the way; when the answer is no, it uploads nothing. With the service unreachable nothing arrives, and nothing is queued for later.
+
+## What a run never sends
+
+- your source code, the diff, file lists or file contents;
+- the test output or any log; your test runner’s output only goes to your terminal;
+- environment variable values, `.env` files or their names;
+- your hostname, username, machine id or any local path.
+
+A laptop token’s name defaults to the OS and the date, such as “macOS machine, 15 Nov 2026”, never your hostname. Session labels come from the agent’s environment and are shown as *unverified*.
+
+## What the action sends
+
+In CI, the action sends the GitHub Actions OIDC token (which names the repo, workflow, commit and the person or bot that triggered it), the suite, and the runner’s environment: OS, architecture, Node and package manager. It never sends a tree, a commit hash or file paths to verify by; the service reads the tree from GitHub itself. After the tests it sends the outcome, how long the test command took, and what the job did in the end: its result and reason code, with the detail its line shows (which can name a guarded file or a tree, for display only: the service never decides by it).
+
+## What the service reads from GitHub
+
+The GitHub App asks for **Contents: read** and **Metadata: read** only. With them the service reads the commit CI builds and its tree, the files changed against its first parent, and `testnotary.json` on the base branch. It reads file names to match guarded globs and the config’s content; it never stores your source.
+
+## Who can see it
+
+On a **public** repo, runs, attestations, verifications and mismatches are public and name the account, like the repo’s own history on GitHub. On a **private** repo, only people who can read the repo on GitHub can see them. A repo that goes private stops signed-out reads within a minute: the service asks GitHub again whether it is still public at most a minute after it last did, and shows nothing when GitHub can’t say. Everything is deleted after 90 days, except mismatches, which are kept while the repo is installed.
+
+The site sets only the cookies sign-in needs, loads nothing from another host and runs no analytics. The library and the action send no telemetry.
+
+Read the [privacy policy](/privacy) for the details: the operator, the legal bases, retention and how to ask for your data.
+
+<Next pages="limit security limits agents" />

@@ -1,0 +1,56 @@
+{
+  "name": "@testnotary/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Testnotary service and web app: API, landing page, docs and dashboard.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    "./config": "./src/server/config.ts",
+    "./db": "./src/db/client.ts",
+    "./tokens": "./src/server/tokens.ts",
+    "./revocations": "./src/server/revocations.ts",
+    "./settings": "./src/server/settings.ts",
+    "./accounts": "./src/server/accounts.ts",
+    "./retention": "./src/server/retention.ts",
+    "./migrate": "./src/db/migrate.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "next typegen && tsc -p . && tsc -p test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.ts",
+    "build:migrate": "esbuild scripts/migrate.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/scripts/migrate.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build:retention": "esbuild scripts/retention.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/scripts/retention.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1164.0",
+    "@mdx-js/mdx": "^3.1.1",
+    "@sentry/nextjs": "^11.11.0",
+    "@testnotary/core": "workspace:*",
+    "@testnotary/protocol": "workspace:*",
+    "better-auth": "~1.7.18",
+    "drizzle-orm": "^0.45.4",
+    "github-slugger": "^2.0.0",
+    "jose": "^6.2.16",
+    "next": "^16.4.5",
+    "postgres": "^4.1.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@testnotary/test-world": "workspace:*",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "^0.31.11",
+    "esbuild": "^0.28.2"
+  }
+}

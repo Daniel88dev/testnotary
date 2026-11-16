@@ -1,0 +1,33 @@
+import { execFile } from "node:child_process";
+
+/**
+ * Runs git and returns its trimmed stdout, or `undefined` when git fails, isn't installed or runs
+ * past `timeoutMs`. Git never prompts for credentials here.
+ */
+export function tryGit(cwd: string, args: string[], env: Readonly<Record<string, string | undefined>>, timeoutMs = 0): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    execFile(
+      "git",
+      args,
+      { cwd, env: { ...env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" }, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout) => {
+        resolve(error ? undefined : stdout.trim());
+      },
+    );
+  });
+}
+
+export interface Checkout {
+  /** The repo's top level, or the directory itself outside a git repo. */
+  root: string;
+  commit: string | null;
+  tree: string | null;
+}
+
+/** Where the checked-out tree is and which commit and tree `HEAD` names, as far as git can tell. */
+export async function readCheckout(cwd: string, env: Readonly<Record<string, string | undefined>>): Promise<Checkout> {
+  const root = (await tryGit(cwd, ["rev-parse", "--show-toplevel"], env)) ?? cwd;
+  const commit = (await tryGit(root, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], env)) ?? null;
+  const tree = commit ? ((await tryGit(root, ["rev-parse", "--verify", "--quiet", "HEAD^{tree}"], env)) ?? null) : null;
+  return { root, commit, tree };
+}

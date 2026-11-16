@@ -1,0 +1,34 @@
+# Version updates wait a week after a release (the cooldown), like pnpm's minimumReleaseAge in
+# pnpm-workspace.yaml. Security updates are not delayed.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: docker
+    directory: /apps/web
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: terraform
+    directory: /infra
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

@@ -1,0 +1,101 @@
+name: Deploy
+
+# Deploys the service from `main` only, through GitHub's OIDC into the `production` environment.
+# No AWS keys are stored: the job assumes the deploy role (infra/deploy-role.tf), which trusts only
+# this repository's main branch in that environment. The environment's variables come from the
+# Terraform outputs (docs/runbook/hosting.md).
+
+# Switched off for now: the push trigger is commented out, so a merge to main deploys nothing. The
+# workflow runs only when started by hand. Uncomment the two lines to deploy on every push to main.
+
+on:
+  # push:
+  #   branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: eu-central-1
+      IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Build and push the image
+        run: |
+          docker build -f apps/web/Dockerfile --build-arg SENTRY_RELEASE="$GITHUB_SHA" -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Register the jobs' task definitions with this image
+        run: |
+          for family in testnotary-migration testnotary-retention; do
+            aws ecs describe-task-definition --task-definition "$family" --query taskDefinition --output json \
+              | jq --arg image "$IMAGE" '.containerDefinitions[0].image = $image
+                  | {family, taskRoleArn, executionRoleArn, networkMode, containerDefinitions,
+                     requiresCompatibilities, cpu, memory, runtimePlatform}' > "$RUNNER_TEMP/$family.json"
+            aws ecs register-task-definition --cli-input-json "file://$RUNNER_TEMP/$family.json" \
+              --query taskDefinition.taskDefinitionArn --output text
+          done
+
+      # As the migration role, from inside the VPC; the running service never holds that role.
+      - name: Migrate the database
+        run: |
+          task=$(aws ecs run-task \
+            --cluster "${{ vars.JOBS_CLUSTER_ARN }}" \
+            --task-definition testnotary-migration \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ vars.JOB_SUBNET_IDS }}],securityGroups=[${{ vars.JOB_SECURITY_GROUP_ID }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migration task: $task"
+          aws ecs wait tasks-stopped --cluster "${{ vars.JOBS_CLUSTER_ARN }}" --tasks "$task"
+          exit_code=$(aws ecs describe-tasks --cluster "${{ vars.JOBS_CLUSTER_ARN }}" --tasks "$task" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          aws logs get-log-events --log-group-name /testnotary/jobs \
+            --log-stream-name "migration/migration/${task##*/}" --query 'events[].message' --output text || true
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::the migration exited with $exit_code; the service was not updated"
+            exit 1
+          fi
+
+      # App Runner replaces instances only once the new ones pass /api/v1/health, and rolls back
+      # otherwise; the job fails if it does.
+      - name: Deploy to App Runner
+        run: |
+          service="${{ vars.APPRUNNER_SERVICE_ARN }}"
+          aws apprunner describe-service --service-arn "$service" --query Service.SourceConfiguration --output json \
+            | jq --arg image "$IMAGE" '.ImageRepository.ImageIdentifier = $image' > "$RUNNER_TEMP/source.json"
+          aws apprunner update-service --service-arn "$service" \
+            --source-configuration "file://$RUNNER_TEMP/source.json" --query 'OperationId' --output text > "$RUNNER_TEMP/operation"
+          operation=$(cat "$RUNNER_TEMP/operation")
+          for _ in $(seq 1 90); do
+            status=$(aws apprunner list-operations --service-arn "$service" \
+              --query "OperationSummaryList[?Id=='$operation'].Status | [0]" --output text)
+            echo "operation $operation: $status"
+            case "$status" in
+              SUCCEEDED) exit 0 ;;
+              FAILED|ROLLBACK_SUCCEEDED|ROLLBACK_FAILED) echo "::error::deployment $status"; exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "::error::deployment did not finish in 30 minutes"
+          exit 1

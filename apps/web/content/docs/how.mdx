@@ -1,0 +1,58 @@
+<Lede>Each test job asks once. The answer is the first check that fails, in a fixed order; if none fails, the job skips its tests.</Lede>
+
+The action’s step is one verification: it asks whether a valid attestation names the tree of the commit CI is building, for this job’s suite. Every answer other than a skip runs the tests, and names a fallback reason code. The full list with causes and fixes is in [Fallback reason codes](/docs/reasons).
+
+## Before the action calls the service
+
+| Check | Reason when it fails |
+|---|---|
+| The repo variable <Fact name="killSwitch" code /> is not `true`. | `disabled` |
+| The workflow runs on github.com, not GitHub Enterprise Server or GHE.com. | `host_not_supported` |
+| The job can get an Actions OIDC token: the workflow grants `id-token: write`, and the run isn’t from a fork. | `no_oidc_token` |
+
+None of these calls Testnotary. A fork gets a plain notice; a same-repo run without the permission gets a warning telling you to add it.
+
+The action then sends its OIDC token, the suite and the runner’s environment. It never sends a commit, a tree or file paths. The whole exchange has a budget of 10 seconds: a connection error, a 5xx or a 429 gets one retry after a second, and anything else falls back at once with `service_unreachable`, `service_error` or `timeout`. A slow or absent service means CI runs its tests, never a skip on a guess. Which token a retry sends is in [Retries and the time budget](/docs/reasons#retries-and-the-time-budget).
+
+## What the service checks
+
+The service checks the token’s signature against GitHub’s keys, its issuer, audience and age, and that it hasn’t been used before; a failure is `token_rejected`, and the reason goes to the service’s log, not the pull request. It takes the commit from the token, asks GitHub for that commit’s tree, and never trusts the runner’s word for it. Then, in this order:
+
+| Check | Reason when it fails |
+|---|---|
+| The GitHub App is installed on the repo. | `repo_not_installed` |
+| The event is one whose commit is the code the job tests: `pull_request`, `merge_group`, or a `push` to the default branch. Anything else (`pull_request_target`, `workflow_run`, `issue_comment`, `schedule`, a push to another branch) never skips; the detail names the event. | `no_attestation` |
+| The suite exists in `testnotary.json` at the built commit’s first parent. | `unknown_suite` |
+| No changed path matches a guarded file: the product defaults plus the repo’s own globs. | `guarded_file_changed` |
+| Some attestation for the repo and suite names the same tree. | `no_attestation` |
+| Its command equals the suite’s command in that same config. | `command_changed` |
+| It is under <Fact name="attestationAge" /> old, counted from the end of the run (or from when the service received it, if the uploader's clock ran ahead). | `attestation_expired` |
+| No revocation, block or token expiry has voided it. | `attestation_revoked` |
+| The attester, or a sandbox token’s creator, has `admin` or `write` on the repo, asked live. | `attester_no_write` |
+| The audit draw doesn’t pick this skip. | `audit` |
+
+When several attestations name the tree, each is tried, newest first, until one clears every check. A GitHub refusal while checking (an IP allow list, for example) is `github_denied`, and GitHub failing is `github_unavailable`; both are recorded like any other answer.
+
+Everything is read from the config at the built commit’s **first parent**, the base side of a pull request’s merge commit. So a pull request can’t loosen its own rules: a changed command or a new guarded glob counts from the next pull request on, and the config file is itself guarded.
+
+The guarded files are these product defaults, which a repo can’t remove, plus the repo’s own `guarded` globs. A name without a `/` matches at any depth, the way a `.gitignore` line does, so `package.json` covers every package in a monorepo. A pull request that changes any of them names the first one it changed. See [Guarded files](/docs/guarded).
+
+<GuardedDefaults />
+
+## Last: the repo’s mode
+
+In enforce mode a clean answer skips the test step and the action outputs `result=skip`; anything else outputs `fallback` (or `audit`) with the reason. In [shadow mode](/docs/shadow) nothing skips: the answer is recorded as *would have skipped* (`would_skip`) or *would have fallen back* (`would_fall_back`) and the tests run.
+
+## In signature mode
+
+A repo whose base-branch config sets `"signatures": "required"` adds one more gate before a skip: the action itself checks the attester’s signature, with keys from GitHub or from the repo, without trusting the service. No signature is `signature_missing`; one that fails any of the seven conditions is `signature_invalid`; a GitHub call that fails or is rate-limited is `github_unavailable`. See [Security](/docs/security).
+
+## The checkout
+
+In run mode the action then compares its own checkout with the tree the service verified. A job that checked out something else (`actions/checkout` with `ref:`, say) doesn’t skip, isn’t audited and isn’t a shadow comparison: it falls back with `no_attestation`, detail `the checked-out tree is not the verified tree`, and runs its tests. A gate job has no checkout to compare, so give the test job no `ref:` of its own.
+
+## After the tests
+
+When the tests ran, the action reports the outcome and how long the test command took, with a fresh OIDC token. The report also says what the job did in the end, which differs from the service’s answer when the action fell back on its own (the signature check, say): the dashboard counts the job by what it did, so such a job is a fallback with its own reason, never a skip. A failed report only logs a warning. The step’s exit code is always the tests’ exit code, and a skip exits 0, so the job’s result means what it always meant. Only an audit can turn a skip into a failed build.
+
+<Next pages="reasons shadow audits gate" />

@@ -1,0 +1,43 @@
+<Lede>A run tests your working tree as it is, with no fresh checkout and no fresh install. So the suite’s command must build whatever the tests import.</Lede>
+
+## Why the command builds
+
+Testnotary attests a **tree**: the exact set of committed files. It doesn’t attest your `dist/` folder, your generated clients or anything else the build writes, because those files are ignored and aren’t part of the tree. If the tests import built output and the command doesn’t build it, a laptop run tests yesterday’s build, CI tests today’s, and the attestation says something it shouldn’t.
+
+So make the build part of the command. Since the command is a list of arguments run without a shell, put both steps in a `package.json` script and point the suite at it:
+
+```json package.json
+{
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "test:ci": "{{pm}} run build && vitest run"
+  }
+}
+```
+
+```json testnotary.json
+{
+  "suites": {
+    "unit": { "command": ["{{pm}}", "run", "test:ci"] }
+  }
+}
+```
+
+CI runs the same command through the action, so it builds there too.
+
+## What “as it is” means
+
+- **No fresh worktree.** The run uses your checkout. A dirty tree is refused before the start (`dirty_tree`), untracked files that aren’t ignored included, so what you tested is what you committed.
+- **No fresh install.** The library never runs your package manager. It checks that `node_modules` matches the lockfile from the package manager’s own install-state file, and refuses a stale one (`install_stale`). Run your install after pulling.
+- **Nothing written into tracked files.** The tree and `git status` are compared before and after the run. A build or test that writes into a tracked file, or creates a file that isn’t ignored, ends the run *refused* with `tree_changed_during_run`. Write build output and test artifacts into ignored directories.
+
+## Monorepos
+
+In a workspace, build the packages the tests import, not only the one under test: `pnpm -r build`, `npm run build --workspaces`, or your task runner’s build for the affected graph. Don’t use history-filtered commands such as `--changed`, `--since` or `nx affected` in the suite: they test less than the tree and are refused with `history_dependent_command`. A suite has to test the whole tree it attests.
+
+## Long builds
+
+The build counts against your local run, not CI’s: when the run skips CI, CI never builds. If the build is slow, keep it incremental (`tsc -b`, a build cache) so repeated runs on the same machine stay quick.
+
+<Next pages="shell services caches config" />

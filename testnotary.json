@@ -1,0 +1,9 @@
+{
+  "$schema": "https://testnotary.dev/schema/v1.json",
+  "nodeVersionFile": ".node-version",
+  "guarded": ["pnpm-lock.yaml", "pnpm-workspace.yaml"],
+  "suites": {
+    "world": { "command": ["pnpm", "test:world"] },
+    "browser": { "command": ["pnpm", "test:browser"] }
+  }
+}

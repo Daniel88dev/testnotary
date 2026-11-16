@@ -1,0 +1,36 @@
+name: Testnotary
+description: Skip the test step when a trusted local run already attested this tree; otherwise run it.
+author: Daniel88dev
+branding:
+  icon: check-circle
+  color: blue
+inputs:
+  suite:
+    description: The suite from testnotary.json. May be left out when the config declares exactly one.
+    required: false
+  mode:
+    description: "`run` (default) verifies, then skips or runs the suite; `verify` only verifies (gate job)."
+    required: false
+    default: run
+  verification:
+    description: A verification id from a gate job. When it is empty (the gate failed), or is not of this commit and suite, the step verifies on its own.
+    required: false
+  github-token:
+    description: The token the `Testnotary / <suite>` check run is made with. It needs `checks: write`; without it the step writes only the job summary.
+    required: false
+    default: ${{ github.token }}
+outputs:
+  result:
+    description: skip, audit, fallback, would_skip or would_fall_back.
+  reason:
+    description: The fallback reason code, when there is one.
+  ran:
+    description: "`true` when the tests ran in this step."
+  skip:
+    description: "`mode: verify` only: `true` for a skip, so the test job can be skipped; `false` otherwise."
+  verification:
+    description: "`mode: verify` only: the verification's id, for the test job's `verification` input. Empty when the job fell back before asking the service."
+runs:
+  using: node24
+  # Built from packages/action by the release job onto the tagged commit; never committed to main.
+  main: dist/action/index.js

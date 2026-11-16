@@ -1,0 +1,93 @@
+<Lede>`testnotary.json` at the top of the repo declares the suites and the rules every run of them follows. It is read from the base branch, so a pull request can’t change the rules it is checked against.</Lede>
+
+```json testnotary.json
+{
+  "$schema": "https://testnotary.dev/schema/v1.json",
+  "platforms": ["linux/x64", "darwin"],
+  "env": { "pass": ["DATABASE_URL"] },
+  "guarded": ["compose.yaml"],
+  "suites": {
+    "unit": { "command": ["pnpm", "run", "test"] },
+    "e2e": {
+      "command": ["pnpm", "run", "test:e2e"],
+      "env": { "pass": ["PLAYWRIGHT_BROWSERS_PATH"], "set": { "TZ": "Europe/Prague" } }
+    }
+  }
+}
+```
+
+The JSON schema is published at <Fact name="schemaUrl" code />; point `$schema` at it and your editor checks the file as you type. `testnotary init` writes a first one with a single suite, `test`. See [CLI commands](/docs/cli#testnotary-init).
+
+## Every key
+
+<ConfigKeys />
+
+Any other key, anywhere, is refused, so a typo such as `sutes` can’t silently do nothing.
+
+## Where it is read from
+
+| Who | Which copy |
+|---|---|
+| `testnotary run` and `testnotary check` | The base branch’s, fetched first: `origin/<base>`. Your working copy is ignored, with the warning `local_config_differs` when it differs. |
+| The action’s verification | The built commit’s first parent: the base side of a pull request’s merge. |
+| `testnotary exec` (and so the action’s test step) | The checked-out file, at the top of the repo. |
+
+So a change to `testnotary.json` counts from the next pull request on. The file is a [guarded file](/docs/guarded) itself: a pull request that changes it runs its tests.
+
+## Suites
+
+A suite is a name and a command. Names are 1 to 64 letters, digits, `.`, `_` or `-`, starting with a letter or digit, and there must be at least one. With several, name the one to run: `testnotary run e2e`; the action’s `suite` input names it in CI.
+
+`command` is a list of arguments, spawned **without a shell**, from the top of the repo. The first is the program, found on `PATH` or as a path; it can’t be empty. For pipes, `&&` or globbing, point the command at a `package.json` script, as in [Shell features and .env files](/docs/shell). The command must build whatever the tests import: see [Build before the tests](/docs/build).
+
+The command is compared as an exact list. An attestation made with another command never skips (`command_changed`), and a command that filters tests by history is refused (`history_dependent_command`).
+
+## The stripped environment
+
+The tests never see your shell’s environment. They get this, then what `env` adds:
+
+<BaselineEnvironment />
+
+`env.pass` lists names whose values come from your shell; a name that isn’t set there stays unset. `env.set` gives fixed values, which are part of the config and so public: never put a secret in `set`. A suite’s own `env` adds to the top-level one: `pass` lists are joined, and a suite’s `set` value wins over the top-level one.
+
+Refused as `config_invalid`:
+
+- any name starting with `TESTNOTARY_`: Testnotary’s own variables never reach the tests;
+- `pass` naming a variable of the stripped environment above;
+- `set` changing any of them except `CI`, `TZ` and `LANG` (a run records which of those three it overrode);
+- one name both passed and set for a suite, after joining the top-level and the suite’s `env`.
+
+## platforms
+
+Platforms a run may attest on, in Node’s spelling: `linux/x64`, `darwin/arm64`. A bare OS, such as `darwin`, allows any architecture. Leave it out to allow every platform Testnotary supports, macOS and Linux. A run elsewhere is refused with `platform_not_allowed`.
+
+## base
+
+The base branch runs read the config from and compare against. Leave it out to use the remote’s default branch. `--base <branch>` on the command line wins over it.
+
+## guarded
+
+Globs added to the product defaults. A pull request that changes a matching file always runs its tests. The defaults can’t be removed. See [Guarded files](/docs/guarded).
+
+## nodeVersionFile
+
+The file the Node version is read from, as CI’s `actions/setup-node` reads its `node-version-file`. Set it when the repo has several version files, so a run checks the one CI uses. With it set, only that file counts, and a missing file refuses with `runtime_mismatch`. Without it, a run reads `.node-version`, `.nvmrc`, `.tool-versions`, then `package.json`’s `volta.node`, `devEngines.runtime` and `engines.node`. The file is guarded too.
+
+## signatures
+
+`"required"` turns signature mode on: every attestation must carry its attester’s SSH signature, and the action checks it itself before it trusts a skip. See [Security](/docs/security).
+
+## What is refused
+
+The library parses the base branch’s copy before anything runs, and refuses `config_invalid` for anything the schema doesn’t allow, plus the `env` rules above. Each problem is printed on its own line with where it is:
+
+```sh terminal
+testnotary: testnotary.json on origin/main is not valid:
+testnotary:   env.set.TESTNOTARY_SANDBOX: "TESTNOTARY_SANDBOX" is reserved: TESTNOTARY_* variables never reach the tests
+testnotary:   suites.unit.command[0]: the program can't be empty
+testnotary:   testnotary.json: unknown key "sutes"
+```
+
+A missing file on the base branch is `no_config_on_base`, and a suite the file doesn’t declare is `config_invalid`. See [Refusal codes](/docs/refusals).
+
+<Next pages="cli guarded build services" />

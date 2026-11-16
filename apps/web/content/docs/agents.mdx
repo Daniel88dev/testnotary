@@ -1,0 +1,56 @@
+<Lede>An agent in a cloud sandbox attests with a sandbox token: one repo, uploads only, created by a person who can write to that repo.</Lede>
+
+## Sandbox tokens
+
+Anyone with write access to a repo can create one on the dashboard: open the repo, then **Settings → Sandbox tokens → Create token**. Name it after the agent.
+
+- It works for that one repo, and it can upload runs and do nothing else.
+- It lasts 90 days by default and a year at most. It is never renewed on its own.
+- Its value starts with `tns_` and is shown once. Testnotary keeps only a hash of it, so copy it straight into the agent’s settings.
+- It stops working for the repo the moment its creator loses write access, and a repo admin can revoke it at any time. Revoking it voids its unexpired attestations at once.
+
+An attestation made with a sandbox token names the token and its creator, never the agent: the pull request line reads “created by @you”. You answer for what your token attests, the same way you answer for your laptop runs.
+
+Runs from sandbox tokens are audited at twice the repo’s rate, <Fact name="sandboxAuditRate" /> by default. See [Audits and mismatches](/docs/audits).
+
+## Where each agent keeps it
+
+Store the token where the agent runs, and let the sandbox reach `testnotary.dev`; most sandboxes block unknown hosts by default.
+
+<VendorSteps />
+
+The vendors’ menus change; if a name above no longer matches what you see, the step still applies.
+
+## How the library finds a token
+
+1. `TESTNOTARY_TOKEN`, when it is set. Its value is sent as a `Bearer` token exactly as it is, so a vendor’s placeholder value still works.
+2. Outside a sandbox, the laptop token that `testnotary login` stored in the keychain, or in a file only you can read when there is no keychain.
+3. Otherwise no `Authorization` header at all, so a vendor’s proxy can attach one. That is how the Claude Code network secret works: the session never sees the token.
+
+The token never reaches the tests: it isn’t in the stripped environment the suite runs in.
+
+With no token and no proxy, `testnotary run` still runs the tests and warns that nothing was attested. Testnotary never blocks local testing.
+
+## Sandbox markers
+
+A laptop token belongs to a person and works for every repo they can write to; it must never end up in an agent’s sandbox. When the library sees any of these markers, it refuses a laptop token with `laptop_token_in_sandbox`, and `testnotary login` refuses to start. There is no override.
+
+<SandboxMarkers />
+
+`GITHUB_ACTIONS=true` covers the Copilot coding agent and every CI job. Codex cloud sets no marker the library can detect, so its setup step sets `TESTNOTARY_SANDBOX=1`; do the same in any sandbox not listed here. The list ships with the library and grows with its releases.
+
+## Session labels
+
+To help a reviewer find the session behind a run, the library fills in the agent’s vendor, its session id and a session URL from the environment, on every run, laptops included. The first agent in this table that matches names the session:
+
+<SessionAgents />
+
+`TESTNOTARY_SESSION_VENDOR`, `TESTNOTARY_SESSION_ID` and `TESTNOTARY_SESSION_URL` each override their own value. An id or URL with no vendor at all is uploaded with the vendor `unknown`.
+
+These labels always read *unverified*, on the pull request and the dashboard. Anything in the sandbox can set an environment variable, so a label is a pointer for the reviewer, not a fact Testnotary checked. What Testnotary does check is the token, and the token names its creator.
+
+## In a signature-mode repo
+
+When the repo requires signatures, a sandbox also needs its own signing key. Its creator runs `testnotary sandbox-key <token-name>` on their laptop, inside a clone of the token's repo: it makes an Ed25519 key pair, prints the private half to store as the sandbox secret `TESTNOTARY_SIGNING_KEY` beside `TESTNOTARY_TOKEN`, and adds the key's line to `.testnotary/allowed_signers` for a pull request. The line names the token and its creator by id, `sandbox:<token id>/github:<account id>`; the sandbox's runs skip once it is on the base branch. The service never sees the private half. A sandbox without a key uploads unsigned attestations, which never skip there. See [Security](/docs/security).
+
+<Next pages="setup forks audits security" />

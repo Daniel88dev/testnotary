@@ -1,0 +1,24 @@
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+/** The root of this checkout (or worktree). */
+export const repoRoot = fileURLToPath(new URL("../../../", import.meta.url)).replace(/\/$/, "");
+
+export const paths = {
+  composeFile: `${repoRoot}/packages/test-world/compose.yaml`,
+  rolesSql: `${repoRoot}/docker/postgres/init/01-roles.sql`,
+  webApp: `${repoRoot}/apps/web`,
+  migrations: `${repoRoot}/apps/web/drizzle`,
+  // The sources by default. The release job sets TESTNOTARY_WORLD_CLI and TESTNOTARY_WORLD_ACTION
+  // to the built files (`pnpm release:test`), so the same tests run against what ships.
+  cli: process.env.TESTNOTARY_WORLD_CLI || `${repoRoot}/packages/testnotary/src/cli.ts`,
+  keychainStub: `${repoRoot}/packages/test-world/src/keychain-stub.ts`,
+  rootFilesPreload: `${repoRoot}/packages/test-world/src/root-files-preload.ts`,
+  systemPreload: `${repoRoot}/packages/test-world/src/system-preload.ts`,
+  actionClockPreload: `${repoRoot}/packages/test-world/src/action-clock-preload.ts`,
+  packageManagerStub:`${repoRoot}/packages/test-world/src/package-manager-stub.ts`,
+  actionEntry: process.env.TESTNOTARY_WORLD_ACTION || `${repoRoot}/packages/action/src/main.ts`,
+};
+
+/** A short id for this checkout, so two worktrees never pick the same compose project. */
+export const checkoutId = createHash("sha256").update(repoRoot).digest("hex").slice(0, 10);
