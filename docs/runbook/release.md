@@ -73,8 +73,8 @@ node scripts/release/tag.ts     # tags on your clone only; delete with git tag -
 - [ ] A hardware second factor on the npm account, required for publishing and settings.
 - [ ] Dependabot alerts and security updates on (version updates come from `.github/dependabot.yml`,
       with a 7-day cooldown).
-- [ ] Workflow actions pinned to full commit SHAs with a `# vX.Y.Z` comment (they are pinned by tag
-      today; Dependabot keeps either form current).
+- [x] Workflow actions pinned to full commit SHAs with a `# vX.Y.Z` comment (a release test keeps
+      it so; Dependabot's `github-actions` updates move the SHA and the comment together).
 
 ## If a release half-fails
 
