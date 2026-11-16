@@ -131,13 +131,16 @@ export async function onTheVerifiedTree(workspace: string, verdict: Verdict): Pr
 
 /**
  * Reads back a gate job's verification by id, for the test step. Undefined when it can't be read,
- * or is not of the commit this job builds: the step then verifies on its own.
+ * is not of the commit this job builds, or is not of this step's suite (`suite`: the `suite` input,
+ * else the checked-out config's only suite; undefined when neither names one): the step then
+ * verifies on its own. A hand-written workflow can hand one gate's id to another suite's job.
  */
-export async function readVerification(env: RunnerEnv, id: string): Promise<Verdict | undefined> {
+export async function readVerification(env: RunnerEnv, id: string, suite: string | undefined): Promise<Verdict | undefined> {
   const answer = await callService(env, "GET", `/verifications/${encodeURIComponent(id)}`);
   if (answer.kind !== "answer" || answer.status !== 200) return undefined;
   const verdict = verdictFrom(answer);
   if (!verdict.record || (env.GITHUB_SHA && verdict.record.commit !== env.GITHUB_SHA)) return undefined;
+  if (suite === undefined || verdict.record.suite !== suite) return undefined;
   return verdict;
 }
 

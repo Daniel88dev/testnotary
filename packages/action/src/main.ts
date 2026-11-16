@@ -81,9 +81,9 @@ async function verdictForJob(env: RunnerEnv): Promise<Verdict> {
   if (early) return early;
   const id = input(env, "verification");
   if (id) {
-    const reused = await readVerification(env, id);
+    const reused = await readVerification(env, id, suiteToRun(env.GITHUB_WORKSPACE || process.cwd(), suite, undefined));
     if (reused) return reused;
-    process.stdout.write("Testnotary: the gate job's verification could not be read back for this commit; verifying on its own\n");
+    process.stdout.write("Testnotary: the gate job's verification could not be read back for this commit and suite; verifying on its own\n");
   }
   return verifyJob(env, suite);
 }

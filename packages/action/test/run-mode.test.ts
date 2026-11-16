@@ -206,6 +206,27 @@ describe("the gate recipe", () => {
     expect(callsSince(from).slice(0, 2)).toEqual([`GET /api/v1/verifications/${gate.outputs.verification}`, "POST /api/v1/verifications"]);
   });
 
+  test("a verification id of another suite is not reused: the step verifies its own suite", async () => {
+    const both = { suites: { test: MARKED().suites.test, e2e: MARKED().suites.test } };
+    const s = await story({ config: both });
+    await pullRequest(s);
+    // Only `test` is attested; the gate for it skips in enforce mode.
+    expect((await world.runCli(["run", "test"], { cwd: s.fixture.dir, machine: s.machine })).stderr).toMatch(/attested=true/);
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    const gate = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: s.fixture.dir, inputs: { suite: "test", mode: "verify" } });
+    expect(gate.outputs).toMatchObject({ result: "skip", skip: "true" });
+    const workspace = await ciWorkspace(s, merge.sha);
+    const from = world.service.requests.length;
+
+    // A hand-written workflow hands the `test` gate's id to the e2e job.
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace, inputs: { suite: "e2e", verification: gate.outputs.verification! } });
+
+    expect(callsSince(from).slice(0, 2)).toEqual([`GET /api/v1/verifications/${gate.outputs.verification}`, "POST /api/v1/verifications"]);
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "no_attestation", ran: "true" });
+    expect(existsSync(join(workspace, "ran.txt"))).toBe(true);
+  });
+
   test("a gate job that skips writes the PR line itself, since the test job won't run", async () => {
     const s = await story();
     await pullRequest(s);
