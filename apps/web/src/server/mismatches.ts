@@ -4,7 +4,7 @@ import type { Mismatch, SkippedCommit } from "@testnotary/protocol";
 import { attestations, jobReports, mismatches, repoSettingChanges, runs, tokens, verifications } from "../db/schema.ts";
 import { accountsAsOf, shownPayload, withheld } from "./accounts.ts";
 import { now } from "./config.ts";
-import type { Executor } from "./installations.ts";
+import { latestSettingChange, type Executor } from "./installations.ts";
 import { shownResult } from "./shown-results.ts";
 import { currentNames } from "./tokens.ts";
 
@@ -119,7 +119,7 @@ async function skippedSinceLastAgreeingAudit(tx: Executor, repoId: number, accou
 
 /** Sends the repo back to shadow mode, as Testnotary's own setting change, keeping its rates. Nothing to do when it is in shadow mode already. */
 async function returnToShadow(tx: Executor, repoId: number): Promise<void> {
-  const [current] = await tx.select().from(repoSettingChanges).where(eq(repoSettingChanges.repoId, repoId)).orderBy(desc(repoSettingChanges.id)).limit(1);
+  const current = await latestSettingChange(tx, repoId);
   if (!current || current.mode !== "enforce") return;
   await tx.insert(repoSettingChanges).values({
     repoId,

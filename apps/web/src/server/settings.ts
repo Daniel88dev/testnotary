@@ -18,7 +18,7 @@ import { accountsAsOf, type ShownAccount } from "./accounts.ts";
 import { now } from "./config.ts";
 import { fileAt, installationToken } from "./github.ts";
 import { retainedSince } from "./history.ts";
-import type { Executor, RepoView } from "./installations.ts";
+import { latestSettingChange, type Executor, type RepoView } from "./installations.ts";
 import { mismatchViews } from "./mismatches.ts";
 import { shownResult } from "./shown-results.ts";
 
@@ -72,7 +72,7 @@ export interface SettingsShown extends RepoSettings {
 
 /** The settings in effect and the evidence beside the toggle. */
 export async function settingsOf(db: Executor, repoId: number): Promise<SettingsShown> {
-  const latest = await latestChange(db, repoId);
+  const latest = await latestSettingChange(db, repoId);
   const settings = settingsFrom(latest);
   const since = retainedSince();
   const [record, [lastMismatch], open] = await Promise.all([
@@ -123,11 +123,6 @@ async function comparisons(db: Executor, repoId: number, since: Date): Promise<C
   return { compared: ran.length, agreed: ran.filter((report) => report.outcome === "passed").length };
 }
 
-async function latestChange(db: Executor, repoId: number) {
-  const [row] = await db.select().from(repoSettingChanges).where(eq(repoSettingChanges.repoId, repoId)).orderBy(desc(repoSettingChanges.id)).limit(1);
-  return row;
-}
-
 function settingsFrom(row: { mode: string; auditOneIn: number; sandboxAuditOneIn: number } | undefined): RepoSettings {
   if (!row) return { ...INITIAL_REPO_SETTINGS };
   return { mode: row.mode === "enforce" ? "enforce" : "shadow", auditOneIn: row.auditOneIn, sandboxAuditOneIn: row.sandboxAuditOneIn };
@@ -148,7 +143,7 @@ export type SettingsChange = { ok: true; settings: RepoSettings; warnings: strin
  * for a rate below the defaults. Switching to enforce answers its warnings and switches anyway.
  */
 export async function changeRepoSettings(db: Executor, input: { repoId: number; by: { id: number } } & SettingsRequest): Promise<SettingsChange> {
-  const current = settingsFrom(await latestChange(db, input.repoId));
+  const current = settingsFrom(await latestSettingChange(db, input.repoId));
   const auditOneIn = input.auditOneIn ?? current.auditOneIn;
   const followed = current.sandboxAuditOneIn === sandboxAuditDefault(current.auditOneIn);
   const sandboxAuditOneIn =

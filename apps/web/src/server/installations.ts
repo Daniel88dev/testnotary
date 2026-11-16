@@ -182,12 +182,7 @@ export async function recordRepoState(
   });
   if (!input.installed) await revokeSandboxTokens(db, input.repo.id);
   if (input.change !== "added") return;
-  const [current] = await db
-    .select()
-    .from(repoSettingChanges)
-    .where(eq(repoSettingChanges.repoId, input.repo.id))
-    .orderBy(desc(repoSettingChanges.id))
-    .limit(1);
+  const current = await latestSettingChange(db, input.repo.id);
   if (current?.mode === "shadow") return;
   await db.insert(repoSettingChanges).values({
     repoId: input.repo.id,
@@ -238,6 +233,12 @@ export async function healRepoState(db: Executor, repo: RepoView, live: { fullNa
     at: now(),
   });
   return { ...repo, fullName: live.fullName, visibility };
+}
+
+/** The repo's latest setting change (its mode and both rates now), or undefined before its first. */
+export async function latestSettingChange(db: Executor, repoId: number) {
+  const [row] = await db.select().from(repoSettingChanges).where(eq(repoSettingChanges.repoId, repoId)).orderBy(desc(repoSettingChanges.id)).limit(1);
+  return row;
 }
 
 /** The latest recorded state of a repo, whatever its installation. */
