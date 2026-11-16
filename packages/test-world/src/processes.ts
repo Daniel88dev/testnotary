@@ -42,6 +42,23 @@ export interface RunOptions {
   cancelSignal?: NodeJS.Signals;
   /** `runCli` only: the CLI entry point to run instead of the library's source, e.g. an installed package's `dist/cli.js`. */
   cli?: string;
+  /**
+   * The Node release and machine the process reports (system-preload.ts), instead of the ones it
+   * really runs on: nothing is installed, so a test can be "on Node 22" or "on Windows".
+   */
+  system?: SystemOptions;
+}
+
+/** What a CLI process reports about the Node and the machine it runs on. */
+export interface SystemOptions {
+  /** `process.version`, e.g. `v22.11.0`. */
+  node?: string;
+  /** `process.release.lts`: an LTS codename such as `Jod`, or false for a release outside LTS. */
+  lts?: string | false;
+  /** `process.platform`, e.g. `win32`. */
+  platform?: NodeJS.Platform;
+  /** `process.arch`, e.g. `arm64`. */
+  arch?: string;
 }
 
 /**
@@ -62,6 +79,10 @@ export function runNode(
   if (options.rootFiles?.length) {
     preload.push("--import", paths.rootFilesPreload);
     env.TESTNOTARY_WORLD_ROOT_FILES = JSON.stringify(options.rootFiles);
+  }
+  if (options.system) {
+    preload.push("--import", paths.systemPreload);
+    env.TESTNOTARY_WORLD_SYSTEM = JSON.stringify(options.system);
   }
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", ...preload, entry, ...args], {

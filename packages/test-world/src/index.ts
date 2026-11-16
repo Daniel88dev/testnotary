@@ -45,12 +45,20 @@ export { FakeSecretsManager, type SecretsManagerRequest } from "./aws/secrets-ma
 export { FakeSentry, type SentryEnvelope, type SentryEvent } from "./sentry.ts";
 export { OIDC_LIFETIME_SECONDS, type ActionsJob } from "./github/oidc.ts";
 export { fromJob, json, githubError, notFound, route, type Route, type RouteContext } from "./github/router.ts";
-export type { ActionResult, Env, ProcessResult, RunActionOptions, RunOptions } from "./processes.ts";
+export type { ActionResult, Env, ProcessResult, RunActionOptions, RunOptions, SystemOptions } from "./processes.ts";
 export type { PostgresServer, Role } from "./postgres-server.ts";
 export { startPostgresServer } from "./postgres-server.ts";
 export type { WorldDatabase } from "./database.ts";
 export type { WorldClock } from "./clock.ts";
-export { CREDENTIALS_FILE, type KeychainEntry, type Machine, type MachineOptions } from "./machine.ts";
+export {
+  CREDENTIALS_FILE,
+  DEFAULT_PACKAGE_MANAGERS,
+  type InstalledPackageManager,
+  type KeychainEntry,
+  type Machine,
+  type MachineOptions,
+} from "./machine.ts";
+export { installedProject, type InstalledProject, type InstallState } from "./install-state.ts";
 
 export interface WorldOptions {
   /** The Postgres server from a global setup. Without it the world starts (and stops) its own. */

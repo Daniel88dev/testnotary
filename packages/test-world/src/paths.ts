@@ -14,6 +14,7 @@ export const paths = {
   cli: process.env.TESTNOTARY_WORLD_CLI || `${repoRoot}/packages/testnotary/src/cli.ts`,
   keychainStub: `${repoRoot}/packages/test-world/src/keychain-stub.ts`,
   rootFilesPreload: `${repoRoot}/packages/test-world/src/root-files-preload.ts`,
+  systemPreload: `${repoRoot}/packages/test-world/src/system-preload.ts`,
   actionClockPreload: `${repoRoot}/packages/test-world/src/action-clock-preload.ts`,
   packageManagerStub:`${repoRoot}/packages/test-world/src/package-manager-stub.ts`,
   actionEntry: process.env.TESTNOTARY_WORLD_ACTION || `${repoRoot}/packages/action/src/main.ts`,

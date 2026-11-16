@@ -26,6 +26,13 @@ import { localConfigDiffers } from "./local-config-differs.ts";
 import { ignoredEnvFile } from "./ignored-env-file.ts";
 
 // Imports for the platform and environment floor checks (T-815).
+import { platformUnsupported } from "./platform-unsupported.ts";
+import { platformNotAllowed } from "./platform-not-allowed.ts";
+import { packageManagerUnsupported } from "./package-manager-unsupported.ts";
+import { runtimeMismatch } from "./runtime-mismatch.ts";
+import { packageManagerMismatch } from "./package-manager-mismatch.ts";
+import { installStale } from "./install-stale.ts";
+import { runtimeSourcesDisagree } from "./runtime-sources-disagree.ts";
 
 /** Before the preflight and the command, in this order. */
 export const BEFORE_START: readonly RunCheck[] = [
@@ -42,7 +49,14 @@ export const BEFORE_START: readonly RunCheck[] = [
 
   // 4. The platform and the environment floor (T-815: `platform_unsupported`, `platform_not_allowed`,
   //    `package_manager_unsupported`, `runtime_mismatch`, `package_manager_mismatch`, `install_stale`).
-
+  //    They read files and PATH only, never running a package manager; the runtime and package
+  //    manager checks fill `notes.notPinned` and `notes.packageManager` for the record.
+  platformUnsupported,
+  platformNotAllowed,
+  packageManagerUnsupported,
+  runtimeMismatch,
+  packageManagerMismatch,
+  installStale,
 ];
 
 /**
@@ -57,7 +71,7 @@ export const WARNINGS: readonly RunCheck[] = [
 
   // The environment (T-816: `ignored_env_file`; T-815: `runtime_sources_disagree`).
   ignoredEnvFile,
-
+  runtimeSourcesDisagree,
 ];
 
 /**

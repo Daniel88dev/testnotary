@@ -234,6 +234,8 @@ describe("laptop token renewal", () => {
     const { machine } = await signedInMachine("renewer");
     const signedIn = world.clock.now().getTime();
     try {
+      // Stop the clock where it was read, so the real time between the two reads can't add a millisecond.
+      world.clock.set(new Date(signedIn));
       world.clock.advance(60 * DAY_MS);
       const day60 = await whoami(machine);
       world.clock.advance(89 * DAY_MS);

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { REFUSAL_CODES, WARNING_CODES, type RefusalCode, type WarningCode } from "@testnotary/core";
-import type { FakeAccount, FakeRepo, FixtureRepo, Machine, ProcessResult } from "@testnotary/test-world";
+import { installedProject, type FakeAccount, type FakeRepo, type FixtureRepo, type Machine, type ProcessResult, type SystemOptions } from "@testnotary/test-world";
 import { useWorld } from "@testnotary/test-world/vitest";
 
 // Every refusal code and every warning, each through `testnotary run` as a process: the exit code,
@@ -95,6 +95,8 @@ interface Scene {
   args?: string[];
   env?: Record<string, string | undefined>;
   rootFiles?: string[];
+  /** The Node release and machine the CLI reports (the test world fakes them; nothing is installed). */
+  system?: SystemOptions;
   /** Sends this signal once the command has started (the suite's marker exists). */
   signal?: NodeJS.Signals;
   /** Run after the case, pass or fail. */
@@ -121,8 +123,6 @@ interface RefusalCase {
 /** Codes whose checks a later ticket builds: their cases are listed as todo until it lands. */
 type Gap = { gap: string };
 
-const ENVIRONMENT_FLOOR: Gap = { gap: "T-815: the platform and the environment floor" };
-
 const signedInRepo = async (s: Suite, options: Parameters<typeof developer>[0] = {}): Promise<Scene> => {
   const dev = await developer({ suite: s, ...options });
   return { dev, cwd: dev.fixture.dir, machine: dev.machine };
@@ -144,6 +144,9 @@ async function withSubmodule(s: Suite, options: { ignore?: "all" } = {}): Promis
  * one through, it ends `command_not_found` rather than reaching a registry.
  */
 const NO_TOOLS = { PATH: "/usr/bin:/bin" };
+
+/** A machine on Node 24's LTS line. */
+const NODE_24: SystemOptions = { node: "v24.11.0", lts: "Krypton" };
 
 const REFUSALS: Record<RefusalCode, RefusalCase[] | Gap> = {
   not_a_git_repo: [
@@ -352,8 +355,38 @@ const REFUSALS: Record<RefusalCode, RefusalCase[] | Gap> = {
       uploaded: true,
     },
   ],
-  platform_not_allowed: ENVIRONMENT_FLOOR,
-  platform_unsupported: ENVIRONMENT_FLOOR,
+  platform_not_allowed: [
+    {
+      name: "linux/x64 where the base config allows darwin/arm64 and linux/arm64",
+      async arrange(s) {
+        const scene = await signedInRepo(s, { config: { ...s.config, platforms: ["darwin/arm64", "linux/arm64"] } });
+        return { ...scene, system: { platform: "linux", arch: "x64" } };
+      },
+      says: /this machine is linux\/x64, and testnotary\.json on origin\/main allows attestations only from darwin\/arm64, linux\/arm64/,
+      uploaded: true,
+    },
+    {
+      name: "a bare OS in platforms that isn't this machine's",
+      async arrange(s) {
+        const scene = await signedInRepo(s, { config: { ...s.config, platforms: ["darwin"] } });
+        return { ...scene, system: { platform: "linux", arch: "arm64" } };
+      },
+      says: /this machine is linux\/arm64, .* only from darwin$/m,
+      uploaded: true,
+    },
+  ],
+  platform_unsupported: [
+    {
+      name: "Windows",
+      async arrange(s) {
+        const scene = await signedInRepo(s);
+        // No keychain on Windows: the laptop token comes from TESTNOTARY_TOKEN here.
+        return { ...scene, system: { platform: "win32", arch: "x64" }, env: { TESTNOTARY_TOKEN: await scene.dev!.token() } };
+      },
+      says: /Windows is not supported in v1: run testnotary inside WSL/,
+      uploaded: true,
+    },
+  ],
   repo_not_installed: [
     {
       name: "a repo the App is not installed on",
@@ -431,10 +464,123 @@ const REFUSALS: Record<RefusalCode, RefusalCase[] | Gap> = {
       },
     },
   ],
-  runtime_mismatch: ENVIRONMENT_FLOOR,
-  package_manager_mismatch: ENVIRONMENT_FLOOR,
-  install_stale: ENVIRONMENT_FLOOR,
-  package_manager_unsupported: ENVIRONMENT_FLOOR,
+  runtime_mismatch: [
+    {
+      name: ".nvmrc asks for 22 on Node 24",
+      async arrange(s) {
+        return { ...(await signedInRepo(s, { files: { ".nvmrc": "22\n" } })), system: NODE_24 };
+      },
+      says: /this is Node v24\.11\.0 \(LTS Krypton\), but \.nvmrc asks for 22/,
+      uploaded: true,
+    },
+    {
+      name: "lts/jod in .node-version on another LTS line",
+      async arrange(s) {
+        return { ...(await signedInRepo(s, { files: { ".node-version": "lts/jod\n" } })), system: NODE_24 };
+      },
+      says: /\.node-version asks for lts\/jod/,
+      uploaded: true,
+    },
+    {
+      name: "nodeVersionFile names package.json, whose engines.node this Node doesn't satisfy (.nvmrc no longer counts)",
+      async arrange(s) {
+        const scene = await signedInRepo(s, {
+          config: { ...s.config, nodeVersionFile: "package.json" },
+          files: { ".nvmrc": "24\n", "package.json": `${JSON.stringify({ name: "widgets", engines: { node: ">=26" } })}\n` },
+        });
+        return { ...scene, system: NODE_24 };
+      },
+      says: /but package\.json asks for >=26/,
+      uploaded: true,
+    },
+    {
+      name: "nodeVersionFile names a file that doesn't exist",
+      async arrange(s) {
+        return { ...(await signedInRepo(s, { config: { ...s.config, nodeVersionFile: ".node-version-ci" } })), system: NODE_24 };
+      },
+      says: /\.node-version-ci \(nodeVersionFile in testnotary\.json on origin\/main\) doesn't exist/,
+      uploaded: true,
+    },
+  ],
+  package_manager_mismatch: [
+    {
+      name: "packageManager pins pnpm 10.34.9 (with its hash), the machine has pnpm 9.15.0",
+      async arrange(s) {
+        const scene = await signedInRepo(s, { files: { "package.json": `${JSON.stringify({ name: "widgets", packageManager: "pnpm@10.34.9+sha512.0123abcd" })}\n` } });
+        await scene.machine.setPackageManager("pnpm", "9.15.0");
+        return scene;
+      },
+      says: /packageManager in package\.json pins pnpm@10\.34\.9, but this run would use pnpm 9\.15\.0[\s\S]*npm install --global pnpm@10\.34\.9[\s\S]*Corepack/,
+      uploaded: true,
+    },
+    {
+      name: "devEngines.packageManager asks for Yarn ^4, the machine has Yarn classic",
+      async arrange(s) {
+        const manifest = { name: "widgets", devEngines: { packageManager: { name: "yarn", version: "^4" } } };
+        return signedInRepo(s, { files: { "package.json": `${JSON.stringify(manifest)}\n` } });
+      },
+      says: /devEngines\.packageManager in package\.json asks for yarn \^4, but this run would use yarn 1\.22\.22[\s\S]*npm install --global yarn@"\^4"/,
+      uploaded: true,
+    },
+    {
+      name: "packageManager pins npm, and npm isn't installed",
+      async arrange(s) {
+        const scene = await signedInRepo(s, { files: { "package.json": `${JSON.stringify({ name: "widgets", packageManager: "npm@11.6.0" })}\n` } });
+        await scene.machine.setPackageManager("npm", null);
+        return { ...scene, env: NO_TOOLS };
+      },
+      says: /pins npm@11\.6\.0, but npm is not on PATH/,
+      uploaded: true,
+    },
+  ],
+  install_stale: [
+    {
+      name: "pnpm-lock.yaml changed since the last pnpm install",
+      async arrange(s) {
+        const project = installedProject("pnpm", { packageManager: "pnpm@10.34.9" });
+        const scene = await signedInRepo(s, { files: project.files });
+        await scene.dev!.fixture.write(project.installed(scene.dev!.fixture.dir));
+        await scene.dev!.fixture.commit("Bump left-pad", project.bumped);
+        return scene;
+      },
+      says: /the installed dependencies don't match pnpm-lock\.yaml[\s\S]*run `pnpm install`, then run again/,
+      uploaded: true,
+    },
+    {
+      name: "package-lock.json and no install at all",
+      async arrange(s) {
+        return signedInRepo(s, { files: installedProject("npm").files });
+      },
+      says: /node_modules\/\.package-lock\.json is missing[\s\S]*run `npm ci`/,
+      uploaded: true,
+    },
+  ],
+  package_manager_unsupported: [
+    {
+      name: "packageManager names Bun",
+      async arrange(s) {
+        return signedInRepo(s, { files: { "package.json": `${JSON.stringify({ name: "widgets", packageManager: "bun@1.2.21" })}\n` } });
+      },
+      says: /packageManager in package\.json names bun, and Bun is not supported in v1/,
+      uploaded: true,
+    },
+    {
+      name: "a Bun lockfile and nothing pinned",
+      async arrange(s) {
+        return signedInRepo(s, { files: { "package.json": '{ "name": "widgets" }\n', "bun.lock": "{}\n" } });
+      },
+      says: /the repo has bun\.lock, bun's lockfile, and Bun is not supported/,
+      uploaded: true,
+    },
+    {
+      name: "a suite whose command is deno",
+      async arrange(s) {
+        return { ...(await signedInRepo(s, { config: { suites: { test: { command: ["deno", "test"] } } } })), env: NO_TOOLS };
+      },
+      says: /the suite's command runs deno, and Deno is not supported in v1/,
+      uploaded: true,
+    },
+  ],
   laptop_token_in_sandbox: [
     {
       name: "a laptop token in TESTNOTARY_TOKEN inside a sandbox",
@@ -472,6 +618,7 @@ describe("each refusal code through testnotary run", () => {
         machine: scene.machine,
         env: scene.env,
         rootFiles: scene.rootFiles,
+        system: scene.system,
         ...(scene.signal ? { cancelOnceExists: s.marker, cancelSignal: scene.signal } : {}),
       });
     } finally {
@@ -492,6 +639,9 @@ describe("each refusal code through testnotary run", () => {
     } else {
       expect(uploads).toEqual([]);
     }
+    // Whatever the check, testnotary itself never starts a package manager (the machine's npm, pnpm
+    // and yarn record every start).
+    expect(await scene.machine.packageManagerCalls()).toEqual([]);
     scenario.also?.(result, s);
   });
 
@@ -605,7 +755,17 @@ const WARNINGS: Record<WarningCode, WarningCase[] | Gap> = {
       attested: true,
     },
   ],
-  runtime_sources_disagree: ENVIRONMENT_FLOOR,
+  runtime_sources_disagree: [
+    {
+      name: ".nvmrc asks for 24, package.json's engines.node for 22, on Node 24",
+      async arrange(s) {
+        const scene = await signedInRepo(s, { files: { ".nvmrc": "24\n", "package.json": `${JSON.stringify({ name: "widgets", engines: { node: "22" } })}\n` } });
+        return { ...scene, system: NODE_24 };
+      },
+      says: /^package\.json's engines\.node \(22\) disagrees with \.nvmrc \(24\), which is the one used/,
+      attested: true,
+    },
+  ],
   no_signing_key: [
     {
       name: "signature mode with no signing key set up",
@@ -633,7 +793,7 @@ describe("each warning through testnotary run: a line on stderr, a code in warni
 
     let result: ProcessResult;
     try {
-      result = await world.runCli(["run", "--json"], { cwd: scene.cwd, machine: scene.machine, env: scene.env });
+      result = await world.runCli(["run", "--json"], { cwd: scene.cwd, machine: scene.machine, env: scene.env, system: scene.system });
     } finally {
       scene.cleanup?.();
     }
