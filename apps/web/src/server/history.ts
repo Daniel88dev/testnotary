@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, count, desc, eq, gte, inArray, sql, type SQL } from "drizzle-orm";
-import type { FallbackReason, Outcome, RepoMode, TokenKind, VerificationResult } from "@testnotary/core";
+import { SHADOW_RESULTS, type FallbackReason, type Outcome, type RepoMode, type TokenKind, type VerificationResult } from "@testnotary/core";
 import type { CiEnvironment, RunEnvironment, SessionLabels } from "@testnotary/protocol";
 import { attestations, jobReports, mismatches, runs, tokens, verifications } from "../db/schema.ts";
 import { accountsAsOf, shownPayload, type ShownAccount } from "./accounts.ts";
@@ -89,17 +89,11 @@ export interface VerificationShown {
 export const RESULT_FILTERS = ["skip", "audit", "ran", "shadow"] as const;
 export type ResultFilter = (typeof RESULT_FILTERS)[number];
 
+/** The results each segment shows. */
+const FILTER_RESULTS: Record<ResultFilter, readonly VerificationResult[]> = { skip: ["skip"], audit: ["audit"], ran: ["fallback"], shadow: SHADOW_RESULTS };
+
 function resultCondition(filter: ResultFilter): SQL {
-  switch (filter) {
-    case "skip":
-      return eq(shownResult, "skip");
-    case "audit":
-      return eq(shownResult, "audit");
-    case "ran":
-      return eq(shownResult, "fallback");
-    case "shadow":
-      return inArray(shownResult, ["would_skip", "would_fall_back"]);
-  }
+  return inArray(shownResult, [...FILTER_RESULTS[filter]]);
 }
 
 /** Verifications matching `where`, newest first, as the dashboard shows them. */
@@ -210,13 +204,13 @@ export async function listVerifications(
       .where(and(...base))
       .orderBy(verifications.suite),
   ]);
-  const of = (results: string[]) => byResult.filter((row) => results.includes(row.result)).reduce((sum, row) => sum + row.n, 0);
+  const of = (results: readonly string[]) => byResult.filter((row) => results.includes(row.result)).reduce((sum, row) => sum + row.n, 0);
   const segments = {
     all: of(byResult.map((row) => row.result)),
-    skip: of(["skip"]),
-    audit: of(["audit"]),
-    ran: of(["fallback"]),
-    shadow: of(["would_skip", "would_fall_back"]),
+    skip: of(FILTER_RESULTS.skip),
+    audit: of(FILTER_RESULTS.audit),
+    ran: of(FILTER_RESULTS.ran),
+    shadow: of(FILTER_RESULTS.shadow),
   };
   return { rows, total: filter.result ? segments[filter.result] : segments.all, segments, suites: suites.flatMap((row) => (row.suite ? [row.suite] : [])) };
 }

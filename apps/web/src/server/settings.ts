@@ -1,6 +1,7 @@
 import { and, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import {
   AUDIT_RATE_DEFAULTS,
+  COMPARED_RESULTS,
   CONFIG_FILE,
   GUARDED_DEFAULTS,
   INITIAL_REPO_SETTINGS,
@@ -42,11 +43,6 @@ export const NOTE_MAX = 2000;
 
 export const OPEN_MISMATCH_PROBLEM = "Explain the open mismatch before switching to enforce.";
 
-/**
- * Verifications CI compares with the attestation when its tests run: an audit, and a shadow *would
- * skip*, by what the job did (a would-skip whose signature would fail is no comparison).
- */
-const COMPARED = ["audit", "would_skip"];
 
 export interface Comparisons {
   /** Comparisons whose CI test job reported passed or failed (a cancelled job sent nothing; a refused one ran no tests). */
@@ -106,12 +102,12 @@ function enforceWarnings(evidence: Comparisons, sinceMismatch: boolean): string[
   return [`Fewer than ${ENFORCE_AGREEMENTS} agreeing comparisons${sinceMismatch ? " since the last mismatch" : ""}: ${evidence.agreed} so far.`];
 }
 
-/** Comparisons since `since`, each counted by its CI job's latest report. */
+/** Comparisons since `since` (by what the job did: a would-skip whose signature would fail is none), each counted by its CI job's latest report. */
 async function comparisons(db: Executor, repoId: number, since: Date): Promise<Comparisons> {
   const compared = await db
     .select({ id: verifications.id })
     .from(verifications)
-    .where(and(eq(verifications.repoId, repoId), inArray(shownResult, COMPARED), gte(verifications.createdAt, since)));
+    .where(and(eq(verifications.repoId, repoId), inArray(shownResult, [...COMPARED_RESULTS]), gte(verifications.createdAt, since)));
   if (compared.length === 0) return { compared: 0, agreed: 0 };
   const reports = await db
     .selectDistinctOn([jobReports.verificationId], { outcome: jobReports.outcome })

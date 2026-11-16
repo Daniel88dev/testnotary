@@ -41,3 +41,9 @@ export type FallbackReason = (typeof FALLBACK_REASONS)[number];
 export const VERIFICATION_RESULTS = ["skip", "audit", "fallback", "would_skip", "would_fall_back"] as const;
 
 export type VerificationResult = (typeof VERIFICATION_RESULTS)[number];
+
+/** Shadow mode's results: what would have happened. */
+export const SHADOW_RESULTS: readonly VerificationResult[] = ["would_skip", "would_fall_back"];
+
+/** The results CI compares with the attestation when its tests run: an audit, and a shadow *would skip*. */
+export const COMPARED_RESULTS: readonly VerificationResult[] = ["audit", "would_skip"];

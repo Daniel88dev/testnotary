@@ -1,4 +1,5 @@
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
+import { COMPARED_RESULTS } from "@testnotary/core";
 import type { Mismatch, SkippedCommit } from "@testnotary/protocol";
 import { attestations, jobReports, mismatches, repoSettingChanges, runs, tokens, verifications } from "../db/schema.ts";
 import { accountsAsOf, shownPayload, withheld } from "./accounts.ts";
@@ -17,8 +18,6 @@ type VerificationRow = typeof verifications.$inferSelect;
 type JobReportRow = typeof jobReports.$inferSelect;
 type MismatchRow = typeof mismatches.$inferSelect;
 
-/** The verification results a failing report turns into a mismatch. */
-const COMPARED = ["audit", "would_skip"] as const;
 
 /**
  * Records the mismatch a job report makes, if it makes one, and returns the repo to shadow mode.
@@ -26,7 +25,7 @@ const COMPARED = ["audit", "would_skip"] as const;
  * that fails again adds a report, not a second mismatch, and one that passes takes nothing back.
  */
 export async function recordMismatch(tx: Executor, verification: VerificationRow, report: JobReportRow): Promise<MismatchRow | undefined> {
-  if (report.outcome !== "failed" || !(COMPARED as readonly string[]).includes(verification.result) || !verification.attestationId) return undefined;
+  if (report.outcome !== "failed" || !(COMPARED_RESULTS as readonly string[]).includes(verification.result) || !verification.attestationId) return undefined;
   // The job fell back because its checkout was not the verified tree: its tests ran on something
   // the attestation never named, so their failure contradicts nothing.
   if (report.result !== null && report.reason === "no_attestation") return undefined;
