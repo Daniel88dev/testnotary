@@ -175,6 +175,26 @@ describe("spent Actions OIDC tokens", () => {
   });
 });
 
+describe("webhook deliveries and ended sessions", () => {
+  test("a delivery goes 30 days after it arrived, and an ended session once it could no longer be valid", async () => {
+    const h = await history();
+    // The installation's webhook (its id stays on the repo's recorded states), and a session
+    // ended by Delete account.
+    await world.deleteAccount(h.user);
+    const session = /world-[0-9a-f]{16}/.exec(await world.db.dump())![0];
+
+    // A session lasts 8 hours; its end is kept a day beyond that. Deliveries stay longer.
+    const soon = await world.runRetentionJob({ at: daysOn(2) });
+    expect(soon.sessionEnds).toBeGreaterThanOrEqual(1);
+    expect(soon.webhookDeliveries).toBe(0);
+    expect(await world.db.dump()).not.toContain(session);
+
+    // GitHub redelivers for 3 days at most; 30 days on, the delivery ids are no longer needed.
+    const later = await world.runRetentionJob({ at: daysOn(31) });
+    expect(later.webhookDeliveries).toBeGreaterThanOrEqual(1);
+  });
+});
+
 describe("the scheduled job's entry point", () => {
   function job(databaseUrl: string | undefined): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
