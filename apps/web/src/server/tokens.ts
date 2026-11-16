@@ -147,13 +147,13 @@ export async function revokeToken(db: Executor, tokenId: string, reason: string,
 }
 
 /** When the token expires as of now: a sandbox token's fixed expiry, a laptop token's 90 days from its latest use. */
-export async function tokenExpiry(db: Executor, token: { id: string; kind: string; expiresAt: Date | null; createdAt: Date }): Promise<Date> {
+export async function tokenExpiry(db: Executor, token: { id: string; expiresAt: Date | null; createdAt: Date }): Promise<Date> {
   if (token.expiresAt) return token.expiresAt;
   const [lastUse] = await db.select({ at: tokenUses.at }).from(tokenUses).where(eq(tokenUses.tokenId, token.id)).orderBy(desc(tokenUses.id)).limit(1);
   return expiry(token, lastUse?.at ?? token.createdAt);
 }
 
-function expiry(token: { kind: string; expiresAt: Date | null }, lastSeen: Date): Date {
+function expiry(token: { expiresAt: Date | null }, lastSeen: Date): Date {
   if (token.expiresAt) return token.expiresAt;
   return new Date(lastSeen.getTime() + LAPTOP_TOKEN_LIFETIME_DAYS * DAY_MS);
 }
