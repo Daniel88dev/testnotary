@@ -381,6 +381,33 @@ describe("when the service can't say", () => {
   });
 });
 
+describe("--require-attestation", () => {
+  test("a pass that nothing attested exits 3 instead of 0, still with the warning that says why", async () => {
+    const dev = await developer({ signedIn: false });
+
+    const plain = await dev.run(["--json"]);
+    const required = await dev.run(["--require-attestation", "--json"]);
+
+    expect(plain.exitCode).toBe(0);
+    expect(required.exitCode).toBe(3);
+    expect(JSON.parse(required.stdout)).toMatchObject({ outcome: "passed", attested: false, warnings: ["not_signed_in"] });
+    expect(summary(required)).toMatchObject({ outcome: "passed", attested: "false" });
+    expect(required.stderr).toMatch(/^testnotary: the tests passed, but nothing was attested, and --require-attestation asks for an attestation$/m);
+  });
+
+  test("an attested pass still exits 0, and a failure 1", async () => {
+    const passing = await developer();
+    const failing = await developer({ config: FAILING });
+
+    const attested = await passing.run(["--require-attestation"]);
+    const failed = await failing.run(["--require-attestation"]);
+
+    expect(attested.exitCode).toBe(0);
+    expect(summary(attested).attested).toBe("true");
+    expect(failed.exitCode).toBe(1);
+  });
+});
+
 describe("the base and its config", () => {
   test("run fetches the base and reads testnotary.json from origin's tip, not a stale local ref", async () => {
     const dev = await developer();
