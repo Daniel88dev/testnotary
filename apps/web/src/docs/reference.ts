@@ -187,8 +187,8 @@ export const REASON_HELP: Record<FallbackReason, CodeHelp> = {
   },
   signature_invalid: {
     cause:
-      "In signature mode, the action’s own check of the attestation failed. The detail starts with the check: `signature:`, `tree:`, `repository:`, `suite:`, `command:`, `age:`, `guarded file:`, `permission:`, or `checkout:` when the job’s checkout has no first parent to read the config from.",
-    fix: "Follow the detail. For `checkout:`, give `actions/checkout` `fetch-depth: 2`. For an untrusted key, add it to GitHub as a signing key or to `.testnotary/allowed_signers` on the base branch.",
+      "In signature mode, the action’s own check of the attestation failed. The detail starts with the check: `signature:`, `tree:`, `repository:`, `suite:`, `command:`, `age:`, `guarded file:`, `permission:`, `checkout:` when the repo requires signatures and the job has no checkout, or no first parent in it, or `config:` when the base’s `testnotary.json` isn’t JSON, or requires signatures in a form this release of the action can’t read.",
+    fix: "Follow the detail. For `checkout:`, give `actions/checkout` `fetch-depth: 2`. For `config:`, fix the base’s config, or update the action’s pinned SHA to a release that reads it. For an untrusted key, add it to GitHub as a signing key or to `.testnotary/allowed_signers` on the base branch.",
   },
   github_unavailable: {
     cause:

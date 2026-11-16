@@ -6,7 +6,7 @@ The [inline shape](/docs/setup#action) skips only the test step: checkout, Node 
 
 ## How it works
 
-- **The gate job** runs only the action, in `mode: verify`. It needs no checkout and no install, and verify mode works on any runner. It outputs `skip` (`true` only for a skip) and `verification` (the id of the verification it made).
+- **The gate job** runs only the action, in `mode: verify`. It needs no install, and no checkout unless the repo requires signatures (see below); verify mode works on any runner. It outputs `skip` (`true` only for a skip) and `verification` (the id of the verification it made).
 - **The test job** keeps its name, so the required check stays the same. When `skip` is `true`, the job is skipped, and GitHub counts a skipped required check as passing.
 - **When the tests do run,** the test step passes the gate’s `verification` id, so there is still exactly one verification for the job, and the step reports the outcome against it. An audit drawn by the gate runs here too.
 - **If the gate failed** and its `verification` is empty, the test step verifies on its own. Either way the tests run whenever the answer wasn’t a skip.
@@ -24,6 +24,6 @@ Leave out `!cancelled()` and the condition quietly gains GitHub’s default `suc
 - **No matrix.** A job-level skip on a matrix job breaks its check names; use the inline shape in every leg instead. See [Matrix jobs](/docs/matrix).
 - **Less time saved on the dashboard.** “Test time saved” counts the test command’s duration from job reports, not the setup the gate spared you, so it reads low for this recipe.
 - **Coverage and reports** still need their guard, on `steps.testnotary.outputs.ran` inside the test job. See [Coverage and test reports](/docs/coverage).
-- **No signature check without a checkout.** In a repo that requires signatures, give the gate job `actions/checkout` with `fetch-depth: 2` before the action: the signature check reads the base branch’s config, `.testnotary/allowed_signers` and the diff from it. A gate with no checkout can’t see that the repo requires signatures, and trusts the service’s answer. See [Security](/docs/security).
+- **No signature check without a checkout.** In a repo that requires signatures, give the gate job `actions/checkout` with `fetch-depth: 2` before the action: the signature check reads the base branch’s config, `.testnotary/allowed_signers` and the diff from it. A gate with no checkout still reads the base’s config, through GitHub with the job’s token, and when it requires signatures the gate falls back with `signature_invalid` instead of trusting the service, so the tests run. See [Security](/docs/security).
 
 <Next pages="matrix coverage how inputs" />

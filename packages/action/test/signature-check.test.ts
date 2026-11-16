@@ -25,8 +25,13 @@ interface Scene {
   /** The attestation the developer's run really made, as the service stored it. */
   attestation: Attestation;
   payload: AttestationPayload;
-  /** The gate job on the pull request's test merge commit, against `service` (default: the honest one). */
-  gate(options?: { service?: string; fetchDepth?: number }): ReturnType<typeof world.runAction>;
+  /**
+   * The gate job on the pull request's test merge commit, against `service` (default: the honest
+   * one), on a `fetchDepth` checkout, or with no checkout at all.
+   */
+  gate(options?: { service?: string; fetchDepth?: number; checkout?: boolean }): ReturnType<typeof world.runAction>;
+  /** The base branch moves on with this config; the gate then runs on the new merge commit against `service`. */
+  gateAfterBaseConfig(config: string, service: string): ReturnType<typeof world.runAction>;
 }
 
 let repos = 0;
@@ -63,8 +68,16 @@ async function scene(options: { files?: Record<string, string> } = {}): Promise<
     key,
     attestation,
     payload: decodeAttestationPayload(attestation.payload!)!,
-    async gate({ service, fetchDepth = 2 } = {}) {
-      const workspace = await fixture.ciCheckout(merge.sha, { fetchDepth });
+    async gateAfterBaseConfig(config, service) {
+      await fixture.checkout("main");
+      await fixture.commit("Change the config", { "testnotary.json": config });
+      await fixture.push();
+      const moved = await fixture.testMerge({ base: "main", head: "feature" });
+      const workspace = await fixture.ciCheckout(moved.sha, { fetchDepth: 2 });
+      return world.runAction({ repo, sha: moved.sha, workspace, inputs: { suite: "test", mode: "verify" }, env: { TESTNOTARY_URL: service } });
+    },
+    async gate({ service, fetchDepth = 2, checkout = true } = {}) {
+      const workspace = checkout ? await fixture.ciCheckout(merge.sha, { fetchDepth }) : (await world.machine()).home;
       return world.runAction({
         repo,
         sha: merge.sha,
@@ -287,5 +300,62 @@ describe("the checkout", () => {
 
     expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_invalid", skip: "false" });
     expect(line(result.summary)).toContain("(checkout: the repo requires signatures and HEAD^1 is missing; check out with fetch-depth: 2)");
+  });
+
+  // Whether the repo requires signatures is read from the base, never from the checkout or the
+  // service: a lying service's skip must not stand just because the job can't read the base itself.
+  test("a gate job with no checkout reads the base config through GitHub, and a lying skip falls back", async () => {
+    const s = await scene();
+    const service = await lyingService(s.attestation);
+
+    const result = await s.gate({ service, checkout: false });
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_invalid", skip: "false" });
+    expect(line(result.summary)).toContain("(checkout: the repo requires signatures and the job has no checkout; check out with fetch-depth: 2)");
+    const byJob = world.github.requestsTo("GET", `/repos/${s.repo.fullName}/contents/testnotary.json`).filter((r) => r.headers.authorization?.startsWith("Bearer ghs_job_"));
+    expect(byJob).toHaveLength(1);
+  });
+
+  test("a pull request that deletes the requirement from its own config still gets the base's check on a fetch-depth: 1 checkout", async () => {
+    const unsigned = { suites: SIGNED.suites };
+    const s = await scene({ files: { "testnotary.json": `${JSON.stringify(unsigned)}\n` } });
+    const service = await lyingService(s.attestation);
+
+    const result = await s.gate({ service, fetchDepth: 1 });
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_invalid", skip: "false" });
+    expect(line(result.summary)).toContain("(checkout: the repo requires signatures and HEAD^1 is missing; check out with fetch-depth: 2)");
+  });
+
+  test("a base config this action's parser rejects (a key from a later release) still requires signatures", async () => {
+    const s = await scene();
+    const service = await lyingService(s.attestation);
+
+    const result = await s.gateAfterBaseConfig(`${JSON.stringify({ ...SIGNED, someLaterKey: true })}\n`, service);
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_invalid", skip: "false" });
+    expect(line(result.summary)).toMatch(/\(config: testnotary\.json at HEAD\^1 requires signatures, but this action can't read it: .+\)/);
+  });
+
+  test("a base config that isn't JSON falls back: whether it requires signatures can't be told", async () => {
+    const s = await scene();
+    const service = await lyingService(s.attestation);
+
+    const result = await s.gateAfterBaseConfig("{ not json", service);
+
+    expect(result.outputs).toMatchObject({ result: "fallback", reason: "signature_invalid", skip: "false" });
+    expect(line(result.summary)).toContain("(config: testnotary.json at HEAD^1 is unreadable)");
+  });
+
+  test("with no checkout, a GitHub call that fails while reading the base config is github_unavailable", async () => {
+    const s = await scene();
+    const restore = world.github.override("GET", "/repos/:owner/:repo/contents/:path", () => githubError(502, "Server Error"), { when: fromJob });
+    try {
+      const result = await s.gate({ checkout: false });
+
+      expect(result.outputs).toMatchObject({ result: "fallback", reason: "github_unavailable", skip: "false" });
+    } finally {
+      restore();
+    }
   });
 });

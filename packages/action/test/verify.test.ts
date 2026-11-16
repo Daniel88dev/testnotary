@@ -249,6 +249,19 @@ describe("the verification output", () => {
     expect(result.outputs).toMatchObject({ result: "would_skip", skip: "false" });
   });
 
+  test("skips in enforce mode on a runner with no checkout, the base config read through GitHub", async () => {
+    const s = await story();
+    await featureBranch(s);
+    await s.attest();
+    const merge = await s.fixture.testMerge({ base: "main", head: "feature" });
+    await enforce(s.repo);
+    const empty = await world.machine();
+
+    const result = await world.runAction({ repo: s.repo, sha: merge.sha, workspace: empty.home, inputs: { suite: "test", mode: "verify" } });
+
+    expect(result.outputs).toMatchObject({ result: "skip", skip: "true" });
+  });
+
   test("names the config's only suite when the job leaves suite out", async () => {
     const s = await story();
     await featureBranch(s);

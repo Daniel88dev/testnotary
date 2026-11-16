@@ -5,12 +5,16 @@ import { installationFor } from "./installation.ts";
 
 // Git database and contents endpoints, answered from the fixture repo's bare origin. The service
 // calls them with an installation token (`contents: read`), which reaches only its installation's
-// repos. Without a token a public repo still answers, as GitHub's does; a private one is a 404.
+// repos; the action's signature check with the job's `GITHUB_TOKEN` (`contents: read` in the
+// snippet), which reaches only its own repo. Without a token a public repo still answers, as
+// GitHub's does; a private one is a 404.
 
 /** The repo the request may read, or GitHub's answer when it may not. */
 function readableRepo(context: RouteContext): FakeRepo | Response {
   const repo = context.github.state.repo(context.params.owner!, context.params.repo!);
   if (!context.request.headers.has("authorization")) return repo && repo.visibility === "public" ? repo : notFound();
+  const job = context.github.state.jobTokens.get(/^(?:Bearer|token) (\S+)$/i.exec(context.request.headers.get("authorization") ?? "")?.[1] ?? "");
+  if (job) return repo && repo.id === job.repoId ? repo : notFound();
   const installation = installationFor(context);
   if (installation instanceof Response) return installation;
   if (!repo || !installation.repoIds.has(repo.id)) return notFound();
