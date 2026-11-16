@@ -14,7 +14,7 @@ export {
   type Suite,
   type TestnotaryConfig,
 } from "./config.ts";
-export { REFUSAL_CODES, type Outcome, type RefusalCode } from "./outcome.ts";
+export { REFUSAL_CODES, WARNING_CODES, type Outcome, type RefusalCode, type WarningCode } from "./outcome.ts";
 export {
   AUDIT_RATE_DEFAULTS,
   auditDrawn,

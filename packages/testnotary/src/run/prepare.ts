@@ -1,9 +1,8 @@
 // Everything before a run starts its command: find the repo, base config and suite, choose the
-// token, run the refusal checks, then ask the service. `run` calls this and then starts the
-// command; `check` (T-816) calls it and stops.
+// token, run the refusal checks and the warnings, then ask the service. `run` calls this and then
+// starts the command; `check` calls it and stops.
 import { LINKS, type RefusalCode } from "../shared.ts";
-import { say } from "../report.ts";
-import { BEFORE_START } from "./checks/index.ts";
+import { BEFORE_START, WARNINGS } from "./checks/index.ts";
 import { laptopTokenMarker } from "./checks/laptop-token-in-sandbox.ts";
 import { emptyNotes, warn, type Env, type RunContext, type RunNotes, type RunToken } from "./context.ts";
 import { guardedGlobsMatched } from "./guarded.ts";
@@ -80,6 +79,7 @@ export async function prepareRun(input: PrepareInput): Promise<Ready | RefusedBe
     const found = await check.check(context);
     if (found) return refused(found.refusal, found.lines, found.upload ?? true);
   }
+  for (const check of WARNINGS) await check.check(context);
   notes.guardedMatched = await guardedGlobsMatched(context);
 
   const repository = context.origin.repository;
@@ -92,11 +92,8 @@ export async function prepareRun(input: PrepareInput): Promise<Ready | RefusedBe
   }
   const answer = await preflight(input.serviceUrl, token, repository);
   switch (answer.kind) {
-    case "ok": {
-      const { account, token: seen } = answer.answer;
-      say(`attesting as @${account.login} with ${seen.kind} token "${seen.name}"`);
+    case "ok":
       return { kind: "ready", context, preflight: answer };
-    }
     case "refused":
       return refused(answer.refusal, preflightRefusalLines(answer.refusal, repository, token), false);
     case "not_signed_in":

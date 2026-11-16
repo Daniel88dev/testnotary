@@ -34,3 +34,26 @@ export const REFUSAL_CODES = [
 ] as const;
 
 export type RefusalCode = (typeof REFUSAL_CODES)[number];
+
+/**
+ * What a run can warn about. A warning never refuses: the run goes on, the code is in the run's
+ * `warnings[]` (and its upload), and a `testnotary:` line on stderr explains it. Stable snake_case,
+ * like the refusal codes.
+ */
+export const WARNING_CODES = [
+  // the service
+  "not_signed_in",
+  "service_unreachable",
+  "upload_failed",
+  // the base and its config
+  "base_fetch_skipped",
+  "branch_behind_base",
+  "local_config_differs",
+  // the environment
+  "ignored_env_file",
+  "runtime_sources_disagree",
+  // signature mode
+  "no_signing_key",
+] as const;
+
+export type WarningCode = (typeof WARNING_CODES)[number];

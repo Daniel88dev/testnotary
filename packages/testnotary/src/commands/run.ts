@@ -19,17 +19,17 @@ import {
   type RefusalCode,
 } from "../shared.ts";
 import { signAttestation } from "../run/sign.ts";
-import { displayArgv, runSuiteCommand } from "../suite-command.ts";
+import { commandNotFoundLine, displayArgv, runSuiteCommand } from "../suite-command.ts";
 
 export const run: Command = {
   name: "run",
-  usage: "run [suite] [--base <branch>] [--json]",
+  usage: "run [suite] [--base <branch>] [--require-attestation] [--json]",
   summary: "Run a suite from the base branch's testnotary.json and attest the tree when it passes.",
   async run(args, context) {
-    const { flags, options, positionals, afterTerminator } = parseCommandArgs(args, [], ["base"]);
+    const { flags, options, positionals, afterTerminator } = parseCommandArgs(args, ["require-attestation"], ["base"]);
     if (positionals.length > 1) throw new UsageError(`unexpected argument ${JSON.stringify(positionals[1])}`);
     const serviceUrl = resolveServiceUrl(context.env);
-    const json = flags.json;
+    const output: Output = { json: flags.json, requireAttestation: flags["require-attestation"] };
 
     const prepared = await prepareRun({
       cwd: context.cwd,
@@ -39,8 +39,12 @@ export const run: Command = {
       base: options.base,
       extraArguments: afterTerminator,
     });
-    if (prepared.kind === "refused") return refuseBeforeStart(prepared, serviceUrl, json);
-    return runSuite(prepared, json);
+    if (prepared.kind === "refused") return refuseBeforeStart(prepared, serviceUrl, output);
+    if (prepared.preflight.kind === "ok") {
+      const { account, token } = prepared.preflight.answer;
+      say(`attesting as @${account.login} with ${token.kind} token "${token.name}"`);
+    }
+    return runSuite(prepared, output);
   },
 };
 
@@ -48,7 +52,13 @@ function report(fields: Partial<RunReport> & Pick<RunReport, "outcome" | "suite"
   return { refusal: null, exitCode: null, attested: false, attestationUrl: null, tree: null, commit: null, durationMs: 0, warnings: [], ...fields };
 }
 
-async function refuseBeforeStart(refused: RefusedBeforeStart, serviceUrl: string, json: boolean): Promise<number> {
+/** How the run ends on the command line: `--json`, and `--require-attestation` (exit 3 for an unattested pass). */
+interface Output {
+  json: boolean;
+  requireAttestation: boolean;
+}
+
+async function refuseBeforeStart(refused: RefusedBeforeStart, serviceUrl: string, output: Output): Promise<number> {
   for (const line of refused.lines) say(line);
   if (refused.upload && refused.repository) {
     // Only the code, the tree and the commit: nothing else about a refused run leaves the machine.
@@ -69,16 +79,16 @@ async function refuseBeforeStart(refused: RefusedBeforeStart, serviceUrl: string
       commit: refused.checkout?.commit ?? null,
       warnings: refused.notes.warnings,
     }),
-    { json },
+    output,
   );
 }
 
-async function runSuite(ready: Ready, json: boolean): Promise<number> {
+async function runSuite(ready: Ready, output: Output): Promise<number> {
   const { context } = ready;
   const { suite, checkout } = context;
   say(`run ${suite.name}: ${displayArgv(suite.command)}`);
   const startedAt = new Date();
-  const result = await runSuiteCommand({ suite, cwd: context.root, shell: context.env, stdoutToStderr: json });
+  const result = await runSuiteCommand({ suite, cwd: context.root, shell: context.env, stdoutToStderr: output.json });
   const endedAt = new Date();
 
   const refuseAfterStart = async (refusal: RefusalCode, lines: string[], exitCode: number | null, durationMs: number): Promise<number> => {
@@ -94,16 +104,24 @@ async function runSuite(ready: Ready, json: boolean): Promise<number> {
     }
     return finish(
       report({ outcome: "refused", suite: suite.name, refusal, exitCode, tree: checkout.tree, commit: checkout.commit, durationMs, warnings: context.notes.warnings }),
-      { json },
+      output,
     );
   };
 
   if (result.kind === "command_not_found") {
     return refuseAfterStart(
       "command_not_found",
-      [`${result.program} was not found${result.program.includes("/") ? "" : " on PATH"}; install it, or point the command at a package.json script`],
+      [commandNotFoundLine(result.program)],
       null,
       0,
+    );
+  }
+  if (result.interrupted) {
+    return refuseAfterStart(
+      "interrupted",
+      [`interrupted (Ctrl-C was passed to the command, which exited with ${result.exitCode}), so nothing is attested`],
+      result.exitCode,
+      result.durationMs,
     );
   }
   for (const check of AFTER_RUN) {
@@ -138,6 +156,7 @@ async function runSuite(ready: Ready, json: boolean): Promise<number> {
       say(`the run could not be uploaded (${stored.reason}), so nothing was attested`);
     }
   }
+  if (passed && !attested && output.requireAttestation) say("the tests passed, but nothing was attested, and --require-attestation asks for an attestation");
   return finish(
     report({
       outcome: passed ? "passed" : "failed",
@@ -150,7 +169,7 @@ async function runSuite(ready: Ready, json: boolean): Promise<number> {
       durationMs: result.durationMs,
       warnings: context.notes.warnings,
     }),
-    { json },
+    output,
   );
 }
 
