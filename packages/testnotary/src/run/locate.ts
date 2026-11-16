@@ -15,6 +15,12 @@ export interface LocateInput {
   suite: string | undefined;
   /** `--base`, which wins over the config's `base`. */
   base: string | undefined;
+  /**
+   * Asked once `origin` names the repo, before the base is fetched: whether to fetch it. False
+   * when the service can't be reached, so an offline run doesn't wait on origin as well; the last
+   * fetched base is then used (`base_fetch_skipped`). Without it, the base is always fetched.
+   */
+  beforeFetch?: (repository: string | undefined) => Promise<boolean>;
 }
 
 export type Located = Pick<RunContext, "root" | "checkout" | "statusBefore" | "origin" | "base" | "config" | "suite">;
@@ -63,12 +69,13 @@ export async function locate(input: LocateInput): Promise<{ located: Located } |
       partial,
     );
   }
-  let fetched = await fetchBase(root, branch, env);
+  const fetch = input.beforeFetch ? await input.beforeFetch(repository) : true;
+  let fetched = fetch && (await fetchBase(root, branch, env));
   let read = await readBaseConfig(root, branch, env);
   if (read.kind === "config" && input.base === undefined && read.config.base && read.config.base !== branch) {
     // The default branch's config names another base: that branch's config is the one that counts.
     branch = read.config.base;
-    fetched = await fetchBase(root, branch, env);
+    fetched = fetch && (await fetchBase(root, branch, env));
     read = await readBaseConfig(root, branch, env);
   }
   if (read.kind === "missing") {

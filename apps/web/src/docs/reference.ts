@@ -215,7 +215,7 @@ export const WARNING_HELP: Record<WarningCode, CodeHelp> = {
     fix: "Run the suite again.",
   },
   base_fetch_skipped: {
-    cause: "The base branch couldn’t be fetched (offline, or 20 seconds passed). The last fetched copy is used, so its config and the branch-behind check may be out of date.",
+    cause: "The base branch couldn’t be fetched (offline, or 20 seconds passed), or wasn’t tried because the service couldn’t be reached first and nothing will be attested anyway. The last fetched copy is used, so its config and the branch-behind check may be out of date.",
     fix: "Fetch when you’re back online and run again.",
   },
   branch_behind_base: {

@@ -16,8 +16,11 @@ export type Preflight =
   | { kind: "refused"; refusal: ServiceRefusal }
   /** No token was sent and the service wants one: the tests run, nothing is attested. */
   | { kind: "not_signed_in" }
-  /** No answer in time, or not one the library understands: the tests run, nothing is attested. */
-  | { kind: "unreachable"; reason: string };
+  /**
+   * No answer in time, or not one the library understands: the tests run, nothing is attested.
+   * `answered`: the service did answer (an error), as against no answer at all.
+   */
+  | { kind: "unreachable"; reason: string; answered: boolean };
 
 function serviceRefusal(status: number, raw: unknown): ServiceRefusal | undefined {
   const error = raw && typeof raw === "object" ? (raw as { error?: unknown }).error : undefined;
@@ -41,9 +44,9 @@ export async function preflight(serviceUrl: string, token: RunToken | undefined,
     const refusal = serviceRefusal(answer.status, answer.raw);
     if (refusal === "token_rejected" && !token) return { kind: "not_signed_in" };
     if (refusal) return { kind: "refused", refusal };
-    return { kind: "unreachable", reason: `the service answered ${answer.status}${describe(answer.raw)}` };
+    return { kind: "unreachable", reason: `the service answered ${answer.status}${describe(answer.raw)}`, answered: true };
   } catch (error) {
-    if (error instanceof ServiceUnreachable) return { kind: "unreachable", reason: error.message };
+    if (error instanceof ServiceUnreachable) return { kind: "unreachable", reason: error.message, answered: false };
     throw error;
   }
 }
