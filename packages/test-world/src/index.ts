@@ -389,7 +389,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
         baseEnv.PATH = `${machine.bin}:${baseEnv.PATH}`;
         const env = { ...runOptions.env };
         if (env.PATH !== undefined) env.PATH = `${machine.bin}:${env.PATH}`;
-        return runNode(paths.cli, args, { ...runOptions, env, baseEnv });
+        return runNode(runOptions.cli ?? paths.cli, args, { ...runOptions, env, baseEnv });
       },
       runAction(actionOptions) {
         return runAction(actionOptions, { github, serviceUrl: service.url, tmp, clockFile });

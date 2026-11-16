@@ -1,0 +1,32 @@
+{
+  "$comment": "Licenses any dependency may carry: OSI-approved only (SPDX ids). An exception names one package and the exact license it was reviewed under; a change of license fails the check again.",
+  "licenses": [
+    "0BSD",
+    "Apache-2.0",
+    "BlueOak-1.0.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "LGPL-3.0-or-later",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Python-2.0",
+    "Unlicense",
+    "Zlib"
+  ],
+  "exceptions": {
+    "@sentry/cli": {
+      "license": "FSL-1.1-MIT",
+      "reason": "Sentry's CLI, used at build time by @sentry/nextjs for the web app only; never shipped in the library, the action or the service image."
+    },
+    "sentry": {
+      "license": "FSL-1.1-Apache-2.0",
+      "reason": "Sentry's CLI under its current package name (getsentry/cli), pulled in by @sentry/nextjs's bundler plugins in the same build-time role as @sentry/cli; never shipped."
+    },
+    "caniuse-lite": {
+      "license": "CC-BY-4.0",
+      "reason": "Browser-support data Next.js reads at build time for the web app; a data license, not code. Pending the maintainer's confirmation (T-825)."
+    }
+  }
+}
