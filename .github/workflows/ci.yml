@@ -37,6 +37,46 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
 
+  # Every installed package carries an OSI-approved license or is a named exception
+  # (scripts/release/license-allowlist.json).
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm licenses:check
+
+  # The library's floor: the packed package installs and its bin runs on Node 20, the oldest
+  # release its `engines` allows.
+  library-node-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter testnotary pack --pack-destination "$RUNNER_TEMP/npm"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      - name: Install the tarball and run its bin on Node 20
+        run: |
+          mkdir "$RUNNER_TEMP/project"
+          cd "$RUNNER_TEMP/project"
+          npm init --yes > /dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/npm/testnotary-*.tgz
+          node --version
+          npx --no-install testnotary --version
+          npx --no-install testnotary --help
+
   # Formats and validates the production Terraform without a backend or AWS credentials.
   terraform:
     runs-on: ubuntu-latest

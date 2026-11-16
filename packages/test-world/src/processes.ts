@@ -40,6 +40,8 @@ export interface RunOptions {
   cancelOnceExists?: string;
   /** The signal `cancelOnceExists` sends: `SIGTERM` (a runner cancelling) unless set, e.g. `SIGINT` for Ctrl-C. */
   cancelSignal?: NodeJS.Signals;
+  /** `runCli` only: the CLI entry point to run instead of the library's source, e.g. an installed package's `dist/cli.js`. */
+  cli?: string;
   /**
    * The Node release and machine the process reports (system-preload.ts), instead of the ones it
    * really runs on: nothing is installed, so a test can be "on Node 22" or "on Windows".
@@ -186,14 +188,15 @@ export interface ActionResult extends ProcessResult {
 
 /**
  * Installs the library in a workspace the way `pnpm install` / `npm ci` would leave it for the
- * action to find: `node_modules/.bin/testnotary` (here a script running the library's source).
- * List `node_modules` in the fixture's `.gitignore` when the tree must stay clean.
+ * action to find: `node_modules/.bin/testnotary` (here a script running the library's source, or
+ * the `cli` entry point given). List `node_modules` in the fixture's `.gitignore` when the tree
+ * must stay clean.
  */
-export async function installLibrary(workspace: string): Promise<void> {
+export async function installLibrary(workspace: string, options: { cli?: string } = {}): Promise<void> {
   const bin = join(workspace, "node_modules", ".bin");
   await mkdir(bin, { recursive: true });
   const script = join(bin, "testnotary");
-  await writeFile(script, `#!/bin/sh\nexec ${quote(process.execPath)} --disable-warning=ExperimentalWarning ${quote(paths.cli)} "$@"\n`);
+  await writeFile(script, `#!/bin/sh\nexec ${quote(process.execPath)} --disable-warning=ExperimentalWarning ${quote(options.cli ?? paths.cli)} "$@"\n`);
   await chmod(script, 0o755);
 }
 
