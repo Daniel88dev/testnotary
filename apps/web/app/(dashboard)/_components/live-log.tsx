@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { LogLine } from "../../../src/server/overview.ts";
-import { clock } from "../_lib/format.ts";
+import { clock, date } from "../_lib/format.ts";
 import { repoHref } from "../_lib/sections.ts";
 
 // The Overview's "Live verifications" (prototype `eventLog`): the newest verifications in Plex Mono,
@@ -33,9 +33,9 @@ export function LiveLog({ fullName, initial }: { fullName: string; initial: LogL
           if (!stopped) setPaused(true);
         }
       }
-      if (!stopped) timer = setTimeout(poll, POLL_MS);
+      if (!stopped) timer = setTimeout(() => void poll(), POLL_MS);
     };
-    timer = setTimeout(poll, POLL_MS);
+    timer = setTimeout(() => void poll(), POLL_MS);
     return () => {
       stopped = true;
       clearTimeout(timer);
@@ -55,7 +55,7 @@ export function LiveLog({ fullName, initial }: { fullName: string; initial: LogL
           <ul className="log">
             {lines.map((line) => (
               <li key={line.id}>
-                <span>{clock(new Date(line.at))}</span>
+                <span title={`${date(new Date(line.at))} ${clock(new Date(line.at))} UTC`}>{clock(new Date(line.at))}</span>
                 <span className={line.kind.includes("skip") ? "c-skip" : "c-run"}>{line.kind}</span>
                 <span>
                   <Link href={repoHref(fullName, `commit/${line.commit}`)}>{line.commit.slice(0, 7)}</Link> {line.suite ?? "—"}

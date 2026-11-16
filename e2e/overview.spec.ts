@@ -263,7 +263,7 @@ test("the live log shows new verifications without a reload", async ({ page, wor
   await expect(log.getByRole("listitem")).toHaveCount(1);
   await expect(log.getByRole("listitem").nth(0)).toContainText(new RegExp(`would_run\\s*${first.slice(0, 7)} unit · no_attestation`));
   await expect(log.getByRole("link", { name: first.slice(0, 7) })).toHaveAttribute("href", `/pavel-live/signal/commit/${first}`);
-  await page.evaluate(() => ((window as unknown as { stayed: boolean }).stayed = true));
+  await page.evaluate(() => ((globalThis as unknown as { stayed: boolean }).stayed = true));
 
   // The developer attests the next pull request and CI asks: the row arrives on the open page.
   const machine = await world.machine();
@@ -275,7 +275,7 @@ test("the live log shows new verifications without a reload", async ({ page, wor
 
   await expect(log.getByRole("listitem")).toHaveCount(2, { timeout: 20_000 });
   await expect(log.getByRole("listitem").nth(0)).toContainText(new RegExp(`would_skip\\s*${second.slice(0, 7)} unit · @pavel-live laptop`));
-  expect(await page.evaluate(() => (window as unknown as { stayed?: boolean }).stayed)).toBe(true);
+  expect(await page.evaluate(() => (globalThis as unknown as { stayed?: boolean }).stayed)).toBe(true);
 
   // The log of a private repo is not found for someone GitHub does not let read it.
   const owner = world.github.addUser({ login: "pavel-private" });

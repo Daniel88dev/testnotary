@@ -131,7 +131,8 @@ export function OverviewChart({ overview, metric }: { overview: Overview; metric
   });
 
   const labels = days.map((day, index) =>
-    index % labelEvery === 0 || index === days.length - 1 ? (
+    // Counted back from today, so "Today" never collides with the label before it.
+    (days.length - 1 - index) % labelEvery === 0 ? (
       <text key={`l${index}`} className="tick" x={L + index * slot + slot / 2} y={H - 6} textAnchor="middle">
         {dayLabel(day.day, index, days.length)}
       </text>
