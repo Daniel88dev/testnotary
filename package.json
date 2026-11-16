@@ -8,7 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "lint": "eslint --max-warnings=0 .",
+    "lint": "eslint --max-warnings=0 . && pnpm schema:check",
     "typecheck": "pnpm -r --parallel typecheck && tsc -p .",
     "test": "pnpm test:world && pnpm test:browser",
     "test:world": "vitest run",
@@ -18,6 +18,7 @@
     "db:migrate": "pnpm --filter @testnotary/web db:migrate",
     "db:generate": "pnpm --filter @testnotary/web db:generate",
     "schema:write": "node packages/core/scripts/write-config-schema.ts",
+    "schema:check": "node packages/core/scripts/write-config-schema.ts --check",
     "changeset": "changeset",
     "licenses:check": "node scripts/release/check-licenses.ts",
     "release:build": "node scripts/release/build.ts",
