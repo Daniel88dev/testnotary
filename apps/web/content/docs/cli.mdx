@@ -1,0 +1,154 @@
+<Lede>The `testnotary` library is a dev dependency with one binary. Run it through your package manager, from anywhere inside the repo.</Lede>
+
+```sh terminal
+$ {{x}} testnotary run unit
+```
+
+Every command takes `--json`: stdout then holds exactly one JSON object, and Testnotary’s own lines stay on stderr. Exit codes, the summary line and the run object are on [Exit codes and output](/docs/output). Flags are booleans unless they take a value, such as `--base <branch>`. An unknown command or flag, or a missing or extra argument, is a usage error: exit 64, `usage: testnotary …` on stderr, nothing on stdout.
+
+## testnotary init
+
+```sh usage
+testnotary init [--yes] [--json]
+```
+
+Sets a repo up from what it already runs. It reads `package.json` and the lockfiles the way a run does, without starting the package manager, then:
+
+1. **`testnotary.json`.** It writes one suite, `test`, whose command runs your `scripts.test` through your package manager: `pnpm run test`, `npm test` or `yarn test`. It asks first. A `testnotary.json` that already exists is kept as it is, and its first suite is the one the rest names.
+2. **The agent block.** It adds a short block telling agents to run the suite before they open a pull request, to `CLAUDE.md` when the repo has one, else to `AGENTS.md` (created if missing). It asks first, and skips a file that already has it. A declined block is printed for you to paste.
+3. **The workflow.** It prints the workflow snippet for your package manager and Node version file, and the next steps. It never edits a workflow.
+
+It asks only those two questions, on stderr, one line each from stdin: an empty line or `y` is yes, `n` is no, and stdin closing is no. `--yes` takes both defaults without reading stdin, which is what an agent should use.
+
+It writes nothing and exits 1 when the repo uses a package manager other than npm, pnpm or Yarn, when an existing `testnotary.json` is invalid, or when there is no `package.json` or no `scripts.test` (write `testnotary.json` by hand then; see [testnotary.json](/docs/config)).
+
+With `--json`, stdout is one object instead of the snippet and the steps:
+
+```json stdout
+{
+  "root": "/home/maria/shop",
+  "packageManager": "{{pm}}",
+  "config": { "path": "testnotary.json", "status": "written" },
+  "suite": { "name": "test", "command": {{test}} },
+  "agentFile": { "path": "AGENTS.md", "status": "added", "block": "…" },
+  "workflowSnippet": "name: CI\n…",
+  "nextSteps": ["…"]
+}
+```
+
+`config.status` is `written`, `existed` or `declined`; `agentFile.status` is `added`, `present` or `declined`. Paths are relative to `root`. On failure: `{"error": …}` with one of `package_manager_unsupported` (and `packageManager`), `config_invalid` (and `problems`), `no_package_json` or `no_test_script`.
+
+## testnotary login
+
+```sh usage
+testnotary login [--json]
+```
+
+Signs this machine in with GitHub’s device flow: it prints a code to enter at `github.com/login/device`, then stores a **laptop token** in the system keychain (macOS Keychain, or the Secret Service through `secret-tool` on Linux). With no keychain it falls back to `~/.config/testnotary/credentials.json` (under `XDG_CONFIG_HOME` when set), readable only by you.
+
+A laptop token is named after the machine and the day, such as `macOS machine, 15 Nov 2026`. It works for every repo you can push to, lasts <Fact name="laptopTokenLifetime" /> from its last use and renews each time you use it. Signing in again on the same machine replaces the old token, which is revoked.
+
+`login` refuses to start inside an agent sandbox (`login_in_sandbox`, with the marker it found); sandboxes use sandbox tokens. See [Agents and sandbox tokens](/docs/agents).
+
+`--json` prints `{account, token, storage}`, where `storage` is `keychain` or `file`. On failure it exits 1 with `{"error": …}`: `login_in_sandbox`, `expired_token` (the code wasn’t entered in time), `access_denied`, `github_denied` (with `cause`: `ip_allow_list`, `conditional_access` or `unknown`, and GitHub’s `message`; see [Limits in v1](/docs/limits#github-enterprise)), `github_unavailable`, `account_suspended` or `service_unreachable`.
+
+## testnotary logout
+
+```sh usage
+testnotary logout [--json]
+```
+
+Revokes this machine’s laptop token on the service and forgets it here. A token that was already revoked or expired is just forgotten. Attestations made with a revoked token stop letting CI skip at once.
+
+If the service can’t be reached, the token is kept so that a second try can still revoke it: exit 1 with `service_unreachable`. `--json` prints `{signedOut, revoked}`, where `revoked` is the token revoked, or `null`.
+
+## testnotary whoami
+
+```sh usage
+testnotary whoami [--json]
+```
+
+Prints the account and the token this machine uses: `TESTNOTARY_TOKEN` when it is set, else the stored laptop token.
+
+```sh terminal
+$ {{x}} testnotary whoami
+@maria-k · laptop token "macOS machine, 15 Nov 2026" · expires 13 Feb 2027
+```
+
+`--json` prints `{account, token}`. Exit 1 with `not_signed_in`, `token_rejected` or `service_unreachable`.
+
+## testnotary run
+
+```sh usage
+testnotary run [suite] [--base <branch>] [--require-attestation] [--json]
+```
+
+Runs a suite and, when it passes, attests the tree. The suite and its command come from `testnotary.json` **on the base branch**, fetched first; your local copy is ignored. Name the suite when the config declares more than one.
+
+- `--base <branch>`: the base branch. Default: the config’s `base`, else the remote’s default branch.
+- `--require-attestation`: a pass that nothing attested exits 3 instead of 0. For a [pre-push hook](/docs/hook).
+- Anything after `--` is refused with `extra_arguments`.
+
+In order, it checks the repo, the config, the token, the command, the tree, the platform and the environment, then asks the service whether it would accept an upload. Any failed check refuses the run before the command starts. Then it runs the command in the [stripped environment](/docs/config#the-stripped-environment), with no shell, from the repo’s top level. If the tests pass and nothing changed while they ran, it uploads the run and prints the run page’s URL. See [Refusal codes](/docs/refusals).
+
+Without a token, or with the service unreachable, the tests still run and the summary says `attested=false`, with a warning that says why.
+
+## testnotary check
+
+```sh usage
+testnotary check [suite] [--base <branch>] [--json]
+```
+
+Everything `run` does before the command starts: every refusal check, the warnings and the service’s answer, and it looks the command’s program up. It never starts the command and uploads nothing. Exit 0 when nothing would refuse a run, 2 when something would. The last line says which:
+
+```sh terminal
+$ {{x}} testnotary check unit
+testnotary: check unit: no refusal; a run would attest as @maria-k with laptop token "macOS machine, 15 Nov 2026"
+```
+
+Or `… a run would not be attested (not_signed_in)`, or `… a run would be refused (dirty_tree)`. The `--json` object is on [Exit codes and output](/docs/output#the---json-object).
+
+## testnotary exec
+
+```sh usage
+testnotary exec <suite> [--json]
+```
+
+Runs a suite in the stripped environment and never attests. It reads the **checked-out** `testnotary.json`, not the base branch’s, and doesn’t check the tree. This is what the action runs in CI when it doesn’t skip, so a test step runs the same command in the same environment as a laptop.
+
+It refuses only `config_invalid` and `command_not_found`. Exit codes 0, 1, 2 and 64; the summary line and the `--json` object are a run’s, with `attested=false`.
+
+## testnotary sandbox-key
+
+```sh usage
+testnotary sandbox-key <token-name> [--json]
+```
+
+For a repo in signature mode: makes an Ed25519 signing key for one of your sandbox tokens. Run it on your laptop, signed in, ideally inside a clone of the token’s repo.
+
+- **stdout** is the private key, base64 on one line, to store as the sandbox’s secret `TESTNOTARY_SIGNING_KEY` beside its `TESTNOTARY_TOKEN`. It is shown once and kept nowhere else; the service never sees it.
+- **The public key’s line** for `.testnotary/allowed_signers`, naming the token and you by id (`sandbox:<token id>/github:<account id>`), is appended to that file in a clone of the token’s repo, or printed elsewhere. Merge it in a pull request; the sandbox’s runs skip once it is on the base branch.
+
+The token is found by its exact name among your live sandbox tokens. Exit 1 with `token_not_found` (listing yours), `token_ambiguous` (several of that name: run it inside the right clone), `not_signed_in`, `token_rejected`, `ssh_keygen_failed` or `service_unreachable`. `--json` prints `{token, signingKey, allowedSignersLine, file}`. See [Security](/docs/security).
+
+## Version and help
+
+```sh usage
+testnotary --version
+```
+
+Prints `testnotary <version>`. `testnotary --help` lists the commands.
+
+## Environment variables
+
+| Variable | What it does |
+|---|---|
+| `TESTNOTARY_TOKEN` | The token to use, sent as it is. In a sandbox, a sandbox token. Never passed to the tests. |
+| `TESTNOTARY_SANDBOX` | Set to `1` to mark a sandbox the library can’t detect on its own. See [Sandbox markers](/docs/agents#sandbox-markers). |
+| `TESTNOTARY_SIGNING_KEY` | A sandbox’s signing key from `sandbox-key`, in a signature-mode repo. |
+| `TESTNOTARY_SESSION_VENDOR`, `TESTNOTARY_SESSION_ID`, `TESTNOTARY_SESSION_URL` | Override the agent session labels a run uploads. See [Session labels](/docs/agents#session-labels). |
+| `TESTNOTARY_URL` | Another service URL than `https://testnotary.dev`, for development. |
+
+No `TESTNOTARY_*` variable ever reaches the tests, and `testnotary.json` can’t pass one.
+
+<Next pages="output refusals config hook" />

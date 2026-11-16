@@ -47,6 +47,39 @@ async function firstColumns(page: Page, header: string): Promise<string[][]> {
   return lists;
 }
 
+test("/docs/cli documents exactly the commands and flags `testnotary --help` lists, one section each", async ({ page, world }) => {
+  const repo = await world.fixtureRepo();
+  const help = await world.runCli(["--help"], { cwd: repo.dir });
+  expect(help.exitCode).toBe(0);
+  // `  testnotary run [suite] [--base <branch>] …  Run a suite …`: the usage is everything before the two-space gap.
+  const usages = help.stdout
+    .split("\n")
+    .filter((line) => line.startsWith("  testnotary "))
+    .map((line) => line.trim().split(/\s{2,}/)[0]!);
+  expect(usages.length).toBeGreaterThanOrEqual(9);
+
+  await page.goto("/docs/cli");
+  const main = page.getByRole("main");
+  const documented = (await main.locator("figure.code").filter({ has: page.locator(".code-head .name", { hasText: /^usage$/ }) }).locator("pre").allInnerTexts()).map((text) => text.trim());
+  expect(documented.sort()).toEqual([...usages].sort());
+
+  // Each command has its own section, headed by its name (`/docs/cli#testnotary-run`).
+  for (const usage of usages.filter((u) => u !== "testnotary --version")) {
+    const name = usage.split(" ")[1]!;
+    await expect(main.locator(`h2#testnotary-${name}`)).toHaveText(`testnotary ${name}`);
+  }
+
+  // `init --json`'s object, as the page shows it, has the fields init really prints.
+  const fresh = await world.fixtureRepo({ config: null, files: { "package.json": '{ "scripts": { "test": "node -e \\"\\"" } }\n' } });
+  const init = await world.runCli(["init", "--yes", "--json"], { cwd: fresh.dir });
+  expect(init.exitCode).toBe(0);
+  const printed = JSON.parse(init.stdout) as Record<string, unknown>;
+  const shown = JSON.parse(await main.locator("h2#testnotary-init ~ figure.code").filter({ has: page.locator(".code-head .name", { hasText: /^stdout$/ }) }).first().locator("pre").innerText()) as Record<string, unknown>;
+  const shape = (object: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(object).map(([key, value]) => [key, value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : typeof value]));
+  expect(shape(shown)).toEqual(shape(printed));
+});
+
 test("/docs/output lists the CLI's exit codes and the fields its --json objects really have", async ({ page, world }) => {
   await page.goto("/docs/output");
   expect(await firstColumns(page, "Exit code")).toEqual([Object.values(EXIT).sort((a, b) => a - b).map(String)]);
