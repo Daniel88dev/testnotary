@@ -151,6 +151,8 @@ export function parseSshSignature(armored: string): SshSignature | undefined {
     if (!reader.done()) return undefined;
     const signatureType = signature.text();
     const signatureBlob = signature.string();
+    // Nothing may follow the signature blob, as in `sshsig_peek_hashalg`/`sshkey_sig_from_blob`.
+    if (!signature.done()) return undefined;
     const keyType = new WireReader(keyBlob).text();
     return { publicKey: { type: keyType, blob: keyBlob }, namespace, hashAlgorithm, signatureType, signatureBlob, reserved };
   } catch {
@@ -193,6 +195,15 @@ export async function verifySshSignature(armored: string, message: Uint8Array, n
   return { ok: true, signature, publicKey: publicKeyText(signature.publicKey), fingerprint: await keyFingerprint(signature.publicKey) };
 }
 
+/** The smallest RSA modulus `ssh-keygen -Y verify` accepts. */
+const RSA_MINIMUM_BITS = 1024;
+
+/** The bit length of an mpint modulus. */
+function modulusBits(n: Uint8Array): number {
+  const bytes = stripZeros(n);
+  return bytes.length === 0 ? 0 : (bytes.length - 1) * 8 + (32 - Math.clz32(bytes[0]!));
+}
+
 const CURVES: Record<string, { name: string; size: number; hash: string }> = {
   nistp256: { name: "P-256", size: 32, hash: "SHA-256" },
   nistp384: { name: "P-384", size: 48, hash: "SHA-384" },
@@ -204,19 +215,28 @@ async function verifierFor(signature: SshSignature): Promise<((data: Uint8Array)
   const key = new WireReader(signature.publicKey.blob);
   const type = key.text();
   const subtle = crypto.subtle;
+  // Like `sshkey_from_blob`, a key blob holds its fields and nothing after them.
+  const trailing = "the key blob has trailing bytes";
   if (type === "ssh-ed25519") {
     if (signature.signatureType !== type) return "the signature type does not match the key";
     const raw = key.string();
+    if (!key.done()) return trailing;
     const imported = await subtle.importKey("raw", raw as Uint8Array<ArrayBuffer>, { name: "Ed25519" }, false, ["verify"]);
     return (data) => subtle.verify({ name: "Ed25519" }, imported, signature.signatureBlob as Uint8Array<ArrayBuffer>, data as Uint8Array<ArrayBuffer>);
   }
   if (type.startsWith("ecdsa-sha2-")) {
-    const curve = CURVES[key.text()];
-    if (!curve || signature.signatureType !== type) return "the signature type does not match the key";
+    const curveId = key.text();
+    const curve = CURVES[curveId];
+    // The key type names its curve, and the curve field must be that curve (OpenSSH checks the
+    // nid of both): `ecdsa-sha2-nistp256` carrying a P-521 point is no key at all.
+    if (!curve || type !== `ecdsa-sha2-${curveId}`) return "the key type does not match its curve";
+    if (signature.signatureType !== type) return "the signature type does not match the key";
     const point = key.string();
+    if (!key.done()) return trailing;
     const imported = await subtle.importKey("raw", point as Uint8Array<ArrayBuffer>, { name: "ECDSA", namedCurve: curve.name }, false, ["verify"]);
     const parts = new WireReader(signature.signatureBlob);
     const p1363 = concat(fixedWidth(parts.string(), curve.size), fixedWidth(parts.string(), curve.size));
+    if (!parts.done()) return "the ECDSA signature has trailing bytes";
     return (data) => subtle.verify({ name: "ECDSA", hash: curve.hash }, imported, p1363 as Uint8Array<ArrayBuffer>, data as Uint8Array<ArrayBuffer>);
   }
   if (type === "ssh-rsa") {
@@ -224,6 +244,10 @@ async function verifierFor(signature: SshSignature): Promise<((data: Uint8Array)
     if (!hash) return `signature type ${JSON.stringify(signature.signatureType)} is not supported`;
     const e = key.string();
     const n = key.string();
+    if (!key.done()) return trailing;
+    // OpenSSH refuses RSA keys under 1024 bits (SSH_RSA_MINIMUM_MODULUS_SIZE).
+    const bits = modulusBits(n);
+    if (bits < RSA_MINIMUM_BITS) return `the RSA key has ${bits} bits, under ${RSA_MINIMUM_BITS}`;
     const jwk = { kty: "RSA", e: toBase64Url(stripZeros(e)), n: toBase64Url(stripZeros(n)), ext: true };
     const imported = await subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash }, false, ["verify"]);
     return (data) => subtle.verify({ name: "RSASSA-PKCS1-v1_5" }, imported, signature.signatureBlob as Uint8Array<ArrayBuffer>, data as Uint8Array<ArrayBuffer>);

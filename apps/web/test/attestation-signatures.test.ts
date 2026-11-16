@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { sshSign, type FakeAccount, type FakeRepo, type SshKeyPair } from "@testnotary/test-world";
@@ -63,6 +64,67 @@ async function signer(): Promise<Signer> {
 async function fingerprintOf(key: SshKeyPair): Promise<string> {
   const { stdout } = await promisify(execFile)("ssh-keygen", ["-l", "-f", `${key.privateKeyPath}.pub`]);
   return stdout.split(" ")[1]!;
+}
+
+/** An armored SSH signature's fields (PROTOCOL.sshsig), as wire-format byte strings. */
+interface SshsigParts {
+  publicKey: Uint8Array;
+  namespace: Uint8Array;
+  reserved: Uint8Array;
+  hashAlgorithm: Uint8Array;
+  signature: Uint8Array;
+}
+
+const ascii = (text: string) => new TextEncoder().encode(text);
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  return new Uint8Array(Buffer.concat(parts));
+}
+
+/** SSH wire strings: each a 4-byte big-endian length and the bytes. */
+function writeStrings(strings: Uint8Array[]): Uint8Array {
+  return concatBytes(
+    ...strings.flatMap((bytes) => {
+      const length = Buffer.alloc(4);
+      length.writeUInt32BE(bytes.length);
+      return [length, bytes];
+    }),
+  );
+}
+
+/** Every SSH wire string in `bytes`, in order. */
+function readStrings(bytes: Uint8Array): Uint8Array[] {
+  const strings: Uint8Array[] = [];
+  for (let at = 0; at < bytes.length; ) {
+    const length = Buffer.from(bytes.subarray(at, at + 4)).readUInt32BE();
+    strings.push(bytes.subarray(at + 4, at + 4 + length));
+    at += 4 + length;
+  }
+  return strings;
+}
+
+/** An RSA JWK number as an SSH mpint: unsigned, big-endian, with a leading zero when the top bit is set. */
+function mpint(base64url: string): Uint8Array {
+  const bytes = Buffer.from(base64url, "base64url");
+  return bytes[0]! & 0x80 ? concatBytes(new Uint8Array([0]), bytes) : new Uint8Array(bytes);
+}
+
+function sshsigParts(armored: string): SshsigParts {
+  const bytes = Buffer.from(armored.replace(/-----[A-Z ]+-----/g, "").replace(/\s+/g, ""), "base64");
+  // "SSHSIG", then the version as a uint32, then five strings.
+  const [publicKey, namespace, reserved, hashAlgorithm, signature] = readStrings(bytes.subarray(10));
+  return { publicKey: publicKey!, namespace: namespace!, reserved: reserved!, hashAlgorithm: hashAlgorithm!, signature: signature! };
+}
+
+function armor(parts: SshsigParts): string {
+  const body = concatBytes(ascii("SSHSIG"), new Uint8Array([0, 0, 0, 1]), writeStrings([parts.publicKey, parts.namespace, parts.reserved, parts.hashAlgorithm, parts.signature]));
+  const lines = Buffer.from(body).toString("base64").match(/.{1,70}/g)!;
+  return `-----BEGIN SSH SIGNATURE-----\n${lines.join("\n")}\n-----END SSH SIGNATURE-----\n`;
+}
+
+/** `SHA256:<base64 without padding>` of a key blob, as `ssh-keygen -l` prints it. */
+function fingerprintOfBlob(blob: Uint8Array): string {
+  return `SHA256:${createHash("sha256").update(blob).digest("base64").replace(/=+$/, "")}`;
 }
 
 /** The canonical v1 payload, written out here in its key order. */
@@ -190,6 +252,77 @@ describe("a signed attestation's upload", () => {
     const s = await signer();
 
     const stored = await s.post(await signedRun(s, (fields, payload) => change(fields, payload, s)));
+
+    expect(stored).toMatchObject({ status: 400, body: { error: "attestation_invalid" } });
+  });
+
+  // What `ssh-keygen -Y verify` refuses although the signature checks out over the bytes: the
+  // verifier must refuse them too. Each case rewrites a real signature's wire format and names the
+  // rewritten key, so only the rule under test can refuse it.
+  test.each([
+    {
+      name: "an ECDSA key whose type names another curve than its curve field",
+      type: "ecdsa" as const,
+      change: (parts: SshsigParts) => {
+        const key = readStrings(parts.publicKey);
+        const renamed = ascii("ecdsa-sha2-nistp384");
+        const signature = readStrings(parts.signature);
+        return { ...parts, publicKey: writeStrings([renamed, ...key.slice(1)]), signature: writeStrings([renamed, ...signature.slice(1)]) };
+      },
+    },
+    {
+      name: "a key blob with trailing bytes",
+      type: "ed25519" as const,
+      change: (parts: SshsigParts) => ({ ...parts, publicKey: concatBytes(parts.publicKey, new Uint8Array([0, 0, 0, 0])) }),
+    },
+    {
+      name: "a signature blob with trailing bytes",
+      type: "ed25519" as const,
+      change: (parts: SshsigParts) => ({ ...parts, signature: concatBytes(parts.signature, new Uint8Array([0, 0, 0, 0])) }),
+    },
+    {
+      name: "an ECDSA signature whose r and s blob has trailing bytes",
+      type: "ecdsa" as const,
+      change: (parts: SshsigParts) => {
+        const [type, blob] = readStrings(parts.signature);
+        return { ...parts, signature: writeStrings([type!, concatBytes(blob!, new Uint8Array([0, 0, 0, 0]))]) };
+      },
+    },
+  ])("refuses $name with attestation_invalid", async ({ type, change }) => {
+    const s = await signer();
+    s.key = await world.sshKey({ type });
+
+    const stored = await s.post(
+      await signedRun(s, async (fields) => {
+        const parts = change(sshsigParts(fields.sshsig as string));
+        const key = `${new TextDecoder().decode(readStrings(parts.publicKey)[0])} ${Buffer.from(parts.publicKey).toString("base64")}`;
+        return { ...fields, sshsig: armor(parts), publicKey: key, fingerprint: fingerprintOfBlob(parts.publicKey) };
+      }),
+    );
+
+    expect(stored).toMatchObject({ status: 400, body: { error: "attestation_invalid" } });
+  });
+
+  test("refuses an RSA key under 1024 bits, as ssh-keygen does", async () => {
+    const s = await signer();
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 768 });
+    const jwk = publicKey.export({ format: "jwk" });
+    const blob = writeStrings([ascii("ssh-rsa"), mpint(jwk.e!), mpint(jwk.n!)]);
+
+    const stored = await s.post(
+      await signedRun(s, (fields, payload) => {
+        const hashed = createHash("sha512").update(payload).digest();
+        const signed = concatBytes(ascii("SSHSIG"), writeStrings([ascii(NAMESPACE), new Uint8Array(), ascii("sha512"), hashed]));
+        const parts: SshsigParts = {
+          publicKey: blob,
+          namespace: ascii(NAMESPACE),
+          reserved: new Uint8Array(),
+          hashAlgorithm: ascii("sha512"),
+          signature: writeStrings([ascii("rsa-sha2-512"), sign("sha512", signed, privateKey)]),
+        };
+        return { ...fields, sshsig: armor(parts), publicKey: `ssh-rsa ${Buffer.from(blob).toString("base64")}`, fingerprint: fingerprintOfBlob(blob) };
+      }),
+    );
 
     expect(stored).toMatchObject({ status: 400, body: { error: "attestation_invalid" } });
   });
