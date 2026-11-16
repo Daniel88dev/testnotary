@@ -215,6 +215,8 @@
   .checklist .box { width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; border: 1.5px solid var(--control); display: grid; place-items: center; }
   .checklist li.done .box { background: var(--skip); border-color: var(--skip); }
   .checklist li.done .box::after { content: ''; width: 8px; height: 4px; border-left: 2px solid var(--skip-ink); border-bottom: 2px solid var(--skip-ink); transform: rotate(-45deg) translate(1px, -1px); }
+  .checklist li.missing .box { border-color: var(--run); }
+  .checklist li .chip { margin-left: 6px; vertical-align: 1px; }
   .checklist p { color: var(--muted); margin-top: 2px; }
   .code-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 6px 0 14px; height: 40px; border-radius: 6px; background: var(--ground); border: 1px solid var(--border); font: 13px var(--mono); }
   .empty-line { padding: 12px 14px; border: 1px dashed var(--control); border-radius: 8px; color: var(--muted); }
