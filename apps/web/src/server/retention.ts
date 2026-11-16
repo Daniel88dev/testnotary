@@ -1,12 +1,18 @@
-import { and, eq, inArray, lt, notExists, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, lte, max, ne, notExists, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type postgres from "postgres";
 import type { Database } from "../db/client.ts";
 import * as schema from "../db/schema.ts";
 import {
+  accountDeletions,
+  accountLogins,
+  accountSuspensions,
+  accounts,
   attestations,
   jobReports,
+  mismatchExplanations,
   mismatches,
+  repoSettingChanges,
   runs,
   tokenBlocks,
   tokenRenames,
@@ -42,6 +48,10 @@ export interface RetentionSummary {
   tokenHashes: number;
   /** Tokens deleted 90 days after their revocation or expiry. */
   tokens: number;
+  /** Cached logins of deleted accounts. */
+  logins: number;
+  /** Rows of deleted accounts that nothing names any more. */
+  accounts: number;
 }
 
 /** The database through a connection as the retention role (the job never uses the app's pool). */
@@ -56,8 +66,79 @@ export async function runRetention(retention: Database, at: Date): Promise<Reten
     const pruned = await pruneHistory(tx, cutoff);
     const tokenHashes = await clearSpentTokenHashes(tx, at);
     const spentTokens = await deleteSpentTokens(tx, cutoff);
-    return { ...pruned, tokenHashes, tokens: spentTokens };
+    const deleted = await forgetDeletedAccounts(tx);
+    return { ...pruned, tokenHashes, tokens: spentTokens, ...deleted };
   });
+}
+
+/**
+ * *Delete account* is an append-only row that takes effect at once (open decision 3); here the
+ * account's login goes, and its row goes once nothing names it any more. The retention role can
+ * only delete, so references are never repointed at a tombstone: records name the account by id,
+ * and `accountsAsOf` shows *deleted account* for any record made before the deletion row. That row
+ * therefore stays as long as the account's row does, and both go together once no run,
+ * attestation, token, revocation, block, mismatch, explanation or setting change names the id
+ * (runs and attestations at 90 days, tokens 90 days after the deletion revoked them).
+ *
+ * Someone who signed in again since (a token created after the deletion) keeps the login they
+ * signed in with; only older ones go.
+ */
+async function forgetDeletedAccounts(tx: Tx): Promise<{ logins: number; accounts: number }> {
+  const deletions = await tx
+    .select({ accountId: accountDeletions.accountId, at: max(accountDeletions.at) })
+    .from(accountDeletions)
+    .groupBy(accountDeletions.accountId);
+  let logins = 0;
+  let accountsDeleted = 0;
+  for (const { accountId, at: deletedAt } of deletions) {
+    if (!deletedAt) continue;
+    const [since] = await tx
+      .select({ id: tokens.id })
+      .from(tokens)
+      .where(and(eq(tokens.accountId, accountId), gt(tokens.createdAt, deletedAt)))
+      .limit(1);
+    if (since) {
+      const [latest] = await tx
+        .select({ id: accountLogins.id })
+        .from(accountLogins)
+        .where(eq(accountLogins.accountId, accountId))
+        .orderBy(desc(accountLogins.id))
+        .limit(1);
+      const older = await tx
+        .delete(accountLogins)
+        .where(and(eq(accountLogins.accountId, accountId), lte(accountLogins.at, deletedAt), ne(accountLogins.id, latest?.id ?? 0)))
+        .returning({ id: accountLogins.id });
+      logins += older.length;
+      continue;
+    }
+    const before = await tx
+      .delete(accountLogins)
+      .where(and(eq(accountLogins.accountId, accountId), lte(accountLogins.at, deletedAt)))
+      .returning({ id: accountLogins.id });
+    logins += before.length;
+    if (await accountNamed(tx, accountId)) continue;
+    logins += (await tx.delete(accountLogins).where(eq(accountLogins.accountId, accountId)).returning({ id: accountLogins.id })).length;
+    await tx.delete(accountSuspensions).where(eq(accountSuspensions.accountId, accountId));
+    await tx.delete(accountDeletions).where(eq(accountDeletions.accountId, accountId));
+    accountsDeleted += (await tx.delete(accounts).where(eq(accounts.githubId, accountId)).returning({ id: accounts.githubId })).length;
+  }
+  return { logins, accounts: accountsDeleted };
+}
+
+/** Whether any kept record names the account, by foreign key or by a plain id column. */
+async function accountNamed(tx: Tx, accountId: number): Promise<boolean> {
+  const one = { one: sql`1` };
+  const [named] = await tx.execute<{ named: boolean }>(sql`select exists (
+      ${tx.select(one).from(tokens).where(eq(tokens.accountId, accountId))}
+      union all ${tx.select(one).from(runs).where(eq(runs.accountId, accountId))}
+      union all ${tx.select(one).from(attestations).where(eq(attestations.accountId, accountId))}
+      union all ${tx.select(one).from(tokenRevocations).where(eq(tokenRevocations.revokedBy, accountId))}
+      union all ${tx.select(one).from(tokenBlocks).where(eq(tokenBlocks.blockedBy, accountId))}
+      union all ${tx.select(one).from(mismatches).where(eq(mismatches.accountId, accountId))}
+      union all ${tx.select(one).from(mismatchExplanations).where(eq(mismatchExplanations.explainedBy, accountId))}
+      union all ${tx.select(one).from(repoSettingChanges).where(eq(repoSettingChanges.changedBy, accountId))}
+    ) as named`);
+  return Boolean(named?.named);
 }
 
 /**

@@ -37,7 +37,7 @@ export async function rememberAccount(db: Executor, account: Account): Promise<v
     .where(eq(accountLogins.accountId, account.id))
     .orderBy(desc(accountLogins.id))
     .limit(1);
-  if (latest?.login !== account.login) await db.insert(accountLogins).values({ accountId: account.id, login: account.login });
+  if (latest?.login !== account.login) await db.insert(accountLogins).values({ accountId: account.id, login: account.login, at: now() });
 }
 
 /** The account's cached login. */

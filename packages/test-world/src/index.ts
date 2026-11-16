@@ -23,6 +23,7 @@ import { blockLaptopToken, revokeRepoSandboxToken, tokenIdOf } from "@testnotary
 import { changeRepoSettings, explainMismatch, mismatchIdOfVerification, type SettingsChange, type SettingsRequest } from "@testnotary/web/settings";
 import { issueSandboxToken, rememberAccount } from "@testnotary/web/tokens";
 import { retentionDatabase, runRetention, type RetentionSummary } from "@testnotary/web/retention";
+import { deleteAccount } from "@testnotary/web/accounts";
 import type { FakeAccount } from "./github/app.ts";
 import { WORLD_AUDIT_MASTER_KEY, worldAudits, type WorldAudits } from "./audits.ts";
 import { makeSshKey, type SshKeyPair, type SshKeyType } from "./ssh-keys.ts";
@@ -175,6 +176,11 @@ export interface World {
    * world, whose service keeps real time). Answers how many rows of each kind it deleted.
    */
   runRetentionJob(options?: { at?: Date }): Promise<RetentionSummary>;
+  /**
+   * *Delete account*, as the dashboard writes it once the person confirms (the browser tests click
+   * it): the account's tokens are revoked and its records read *deleted account* from now on.
+   */
+  deleteAccount(account: FakeAccount): Promise<void>;
   /** Runs `testnotary <args>` as a process, pointed at this world's service. */
   runCli(args: string[], options: RunOptions): Promise<ProcessResult>;
   /** Runs the action's entry point as a process in a simulated runner. */
@@ -370,6 +376,10 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
       },
       async runRetentionJob(jobOptions = {}) {
         return runRetention(retentionDatabase(db.connect("retention")), jobOptions.at ?? clock.now());
+      },
+      async deleteAccount(account) {
+        ownConnection();
+        await withServiceConfig(config, () => deleteAccount(database(), account.id, `world-${randomBytes(8).toString("hex")}`));
       },
       async runCli(args, runOptions) {
         const machine = runOptions.machine ?? (await createMachine(tmp));
