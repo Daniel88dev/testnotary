@@ -80,6 +80,34 @@ test("/docs/cli documents exactly the commands and flags `testnotary --help` lis
   expect(shape(shown)).toEqual(shape(printed));
 });
 
+interface SchemaNode {
+  properties?: Record<string, SchemaNode>;
+  additionalProperties?: SchemaNode | boolean;
+  $id?: string;
+}
+
+/** Every key path the schema allows: `env.pass`, and `suites.<name>.command` for a map's entries. */
+function keyPaths(node: SchemaNode, prefix = ""): string[] {
+  const paths: string[] = [];
+  for (const [key, child] of Object.entries(node.properties ?? {})) paths.push(`${prefix}${key}`, ...keyPaths(child, `${prefix}${key}.`));
+  // A map whose entries are objects (`suites`): its entries' keys, under `<name>`. A map of strings (`env.set`) has none.
+  const entry = node.additionalProperties;
+  if (entry && typeof entry === "object" && entry.properties) paths.push(...keyPaths(entry, `${prefix}<name>.`));
+  return paths;
+}
+
+test("/docs/config documents every key the published schema has, and no other", async ({ page, request }) => {
+  const schema = (await (await request.get("/schema/v1.json")).json()) as SchemaNode;
+  const keys = keyPaths(schema);
+  expect(keys).toContain("suites.<name>.env.pass");
+
+  await page.goto("/docs/config");
+  expect(await firstColumns(page, "Key")).toEqual([keys]);
+  // Every key has words, and the page links the schema it describes.
+  for (const [key, , meaning = ""] of await tableRows(page, "testnotary.json keys")) expect(meaning.length, key).toBeGreaterThan(15);
+  await expect(page.getByRole("main")).toContainText(`"$schema": "${schema.$id}"`);
+});
+
 test("/docs/output lists the CLI's exit codes and the fields its --json objects really have", async ({ page, world }) => {
   await page.goto("/docs/output");
   expect(await firstColumns(page, "Exit code")).toEqual([Object.values(EXIT).sort((a, b) => a - b).map(String)]);

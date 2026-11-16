@@ -4,6 +4,7 @@ import {
   BASELINE_FIXED,
   BASELINE_OVERRIDABLE,
   CONFIG_SCHEMA_URL,
+  configJsonSchema,
   FALLBACK_REASONS,
   GUARDED_DEFAULTS,
   INITIAL_REPO_SETTINGS,
@@ -240,6 +241,80 @@ function CodeTable({ of }: { of: string }) {
   );
 }
 
+interface SchemaNode {
+  type?: string;
+  const?: unknown;
+  description?: string;
+  properties?: Record<string, SchemaNode>;
+  additionalProperties?: SchemaNode | boolean;
+  items?: SchemaNode;
+  required?: string[];
+}
+
+interface ConfigKey {
+  path: string;
+  type: string;
+  required: boolean;
+  description: string;
+}
+
+function schemaType(node: SchemaNode): string {
+  if (node.const !== undefined) return JSON.stringify(node.const);
+  if (node.type === "array") return `array of ${node.items?.type ?? "values"}s`;
+  if (node.type === "object" && !node.properties && typeof node.additionalProperties === "object") {
+    const entry = node.additionalProperties;
+    return entry.properties ? "object of named entries" : `object of ${entry.type ?? "value"}s`;
+  }
+  return node.type ?? "any";
+}
+
+/** Every key the schema allows, depth first: `env`, `env.pass`, and `suites.<name>.command` for a map's entries. */
+function configKeys(node: SchemaNode, prefix = ""): ConfigKey[] {
+  const keys: ConfigKey[] = [];
+  for (const [name, child] of Object.entries(node.properties ?? {})) {
+    keys.push({ path: `${prefix}${name}`, type: schemaType(child), required: node.required?.includes(name) ?? false, description: child.description ?? "" });
+    keys.push(...configKeys(child, `${prefix}${name}.`));
+  }
+  const entry = node.additionalProperties;
+  if (entry && typeof entry === "object" && entry.properties) keys.push(...configKeys(entry, `${prefix}<name>.`));
+  return keys;
+}
+
+/** The keys of `testnotary.json`, read from the schema the library parses with (and publishes). */
+function ConfigKeys() {
+  const keys = configKeys(configJsonSchema() as SchemaNode);
+  return (
+    <div className="table-wrap">
+      <table className="codes" aria-label="testnotary.json keys">
+        <thead>
+          <tr>
+            <th scope="col">Key</th>
+            <th scope="col">Type</th>
+            <th scope="col">Meaning</th>
+          </tr>
+        </thead>
+        <tbody>
+          {keys.map((key) => {
+            if (!key.description) throw new Error(`testnotary.json key ${key.path} has no description in the schema`);
+            return (
+              <tr key={key.path}>
+                <td>
+                  <code>{key.path}</code>
+                </td>
+                <td>{key.type}</td>
+                <td>
+                  {key.description}
+                  {key.required ? " Required." : ""}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** The product-default guarded globs, from the core package: the list verification uses. */
 function GuardedDefaults() {
   return (
@@ -321,6 +396,7 @@ export const MDX_COMPONENTS = {
   Fact,
   CodeList,
   CodeTable,
+  ConfigKeys,
   GuardedDefaults,
   SandboxMarkers,
   BaselineEnvironment,
