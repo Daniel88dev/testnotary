@@ -298,18 +298,20 @@ describe("a mismatch is self-contained", () => {
     expect(mismatch.skippedCommits.map((skipped) => skipped.commit)).toEqual([later.sha]);
     expect(mismatch.skippedCommits[0]).toMatchObject({ tree: later.tree, suite: SUITE, event: "pull_request" });
 
-    // Retention prunes the rows the mismatch came from (at 90 days); nothing in the mismatch row
+    // The retention job prunes the rows the mismatch came from at 90 days; nothing in the mismatch
     // points at them, so it stays, with its copies.
-    const retention = world.db.connect("retention");
-    await retention`delete from job_reports where verification_id in (select id from verifications where repo_id = ${s.repo.id})`;
-    await retention`delete from verifications where repo_id = ${s.repo.id}`;
-    await retention`delete from attestations where repo_id = ${s.repo.id}`;
-    await retention`delete from runs where repo_id = ${s.repo.id}`;
-    const [kept] = await retention<{ payload: Buffer; ciEnvironment: unknown; skippedCommits: unknown[]; accountId: number; tokenKind: string }[]>`
-      select attestation_payload as payload, ci_environment as "ciEnvironment", skipped_commits as "skippedCommits", account_id::int as "accountId", token_kind as "tokenKind"
-      from mismatches where id = ${mismatch.id}`;
-    expect(kept!.payload.toString("utf8")).toBe(mismatch.attestation.payload);
-    expect(kept).toMatchObject({ ciEnvironment: mismatch.environments.ci, skippedCommits: mismatch.skippedCommits, accountId: s.user.id, tokenKind: "laptop" });
+    await world.runRetentionJob({ at: new Date(Date.now() + 91 * 86_400_000) });
+    const gone = await fetch(`${world.service.url}/api/v1/verifications/${verificationId}`, {
+      headers: { authorization: `Bearer ${await world.github.oidc.tokenFor({ repo: s.repo, sha: failing.sha, ref: "refs/pull/1/merge", eventName: "pull_request" }, "https://testnotary.dev")}` },
+    });
+    expect(gone.status).toBe(404);
+    const dump = await world.db.dump();
+    // The mismatch's own copies, wherever they are kept: the exact payload bytes, CI's environment
+    // and the skipped commits.
+    expect(dump).toContain(mismatch.id);
+    expect(dump).toContain(JSON.stringify(Buffer.from(mismatch.attestation.payload!, "utf8")));
+    expect(dump).toContain(JSON.stringify(mismatch.environments.ci));
+    expect(dump).toContain(JSON.stringify(mismatch.skippedCommits));
   });
 });
 
