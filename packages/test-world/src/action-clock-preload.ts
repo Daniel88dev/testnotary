@@ -8,11 +8,14 @@
 //   world clock forward by `ms` and resolves at once. When a deadline signal passed to it would
 //   fire first, the clock moves only to that deadline, and the pause rejects as aborted.
 //
+// - Each moment its deadlines were checked against is acknowledged beside the clock's file
+//   (ClockAck), so a stalled service moves the clock on only after the action has looked.
+//
 // So a test of the budget and the retry runs in milliseconds, and the action itself has no hook
 // for any of this.
 import { syncBuiltinESMExports } from "node:module";
 import timersPromises from "node:timers/promises";
-import { readClockFile, writeClockFile } from "./clock-file.ts";
+import { readClockFile, writeClockAck, writeClockFile } from "./clock-file.ts";
 
 const file = process.env.TESTNOTARY_WORLD_CLOCK;
 
@@ -26,12 +29,23 @@ if (file) {
   const moments = new WeakMap<AbortSignal, number>();
   let poller: NodeJS.Timeout | undefined;
 
+  /** The moment last acknowledged, and the latest at which a deadline fired (see ClockAck). */
+  let seen: number | undefined;
+  let firedAt: number | undefined;
+
   const fire = () => {
-    const now = fixed() ?? Date.now();
+    const moment = fixed();
+    const now = moment ?? Date.now();
     for (const [controller, at] of deadlines) {
       if (now < at) continue;
       deadlines.delete(controller);
       controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      firedAt = moment ?? firedAt;
+    }
+    // After the aborts: whoever moved the clock here may now count on them having been made.
+    if (moment !== undefined && moment !== seen) {
+      seen = moment;
+      writeClockAck(file, firedAt === undefined ? { seen } : { seen, firedAt });
     }
     if (deadlines.size === 0 && poller) {
       clearInterval(poller);

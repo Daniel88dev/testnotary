@@ -17,6 +17,7 @@ import type { AddRepoOptions } from "./github/server.ts";
 import type { FakeRepo } from "./github/state.ts";
 import { createMachine, type Machine, type MachineOptions } from "./machine.ts";
 import { createClock, type WorldClock } from "./clock.ts";
+import { stall } from "./stall.ts";
 import { configToEnv, withServiceConfig, type LogEntry, type ServiceConfig } from "@testnotary/web/config";
 import { closeDatabase, database } from "@testnotary/web/db";
 import { blockLaptopToken, revokeRepoSandboxToken, tokenIdOf } from "@testnotary/web/revocations";
@@ -110,7 +111,8 @@ export interface World {
     /**
      * For an override: the service never answers, while the world clock moves on in `stepMs` steps
      * until the client hangs up. Resolves with the world clock's time then. Needs nothing else to
-     * move the clock, and gives up after `limitMs` of world time.
+     * move the clock, and gives up after `limitMs` of world time. The action is waited for at each
+     * step (stall.ts), so its hang-up is seen at the moment its deadline fired.
      */
     stall(request: Request, options?: { stepMs?: number; limitMs?: number }): Promise<Date>;
   };
@@ -327,13 +329,8 @@ export async function createWorld(options: WorldOptions = {}): Promise<World> {
           if (options.service === "next") throw new Error("service overrides need the in-process service");
           return overrides.add(method, path, handle);
         },
-        async stall(request, { stepMs = 1_000, limitMs = 120_000 } = {}) {
-          const start = clock.now().getTime();
-          while (!request.signal.aborted && clock.now().getTime() - start < limitMs) {
-            clock.advance(stepMs);
-            await new Promise((resolve) => setTimeout(resolve, 5));
-          }
-          return clock.now();
+        stall(request, stallOptions) {
+          return stall(clock, clockFile, request, stallOptions);
         },
       },
       github,
