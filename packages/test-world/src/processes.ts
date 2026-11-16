@@ -38,6 +38,8 @@ export interface RunOptions {
    * a file the test command writes when it starts.
    */
   cancelOnceExists?: string;
+  /** The signal `cancelOnceExists` sends: `SIGTERM` (a runner cancelling) unless set, e.g. `SIGINT` for Ctrl-C. */
+  cancelSignal?: NodeJS.Signals;
 }
 
 /**
@@ -75,7 +77,7 @@ export function runNode(
       ? setInterval(() => {
           if (existsSync(cancelPath)) {
             clearInterval(cancel);
-            child.kill("SIGTERM");
+            child.kill(options.cancelSignal ?? "SIGTERM");
           }
         }, 20)
       : undefined;

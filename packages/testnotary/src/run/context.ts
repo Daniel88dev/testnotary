@@ -2,7 +2,7 @@
 // every refusal check has. Checks live one per file under `checks/` and are listed, in order, in
 // `checks/index.ts`.
 import { say } from "../report.ts";
-import type { RefusalCode, Suite, TestnotaryConfig } from "../shared.ts";
+import type { RefusalCode, Suite, TestnotaryConfig, WarningCode } from "../shared.ts";
 
 export type Env = Readonly<Record<string, string | undefined>>;
 
@@ -78,7 +78,7 @@ export interface RunCheck {
 }
 
 /** Raises a warning: the code goes into `warnings[]`, the line to stderr with the `testnotary:` prefix. */
-export function warn(context: { notes: RunNotes }, code: string, line: string): void {
+export function warn(context: { notes: RunNotes }, code: WarningCode, line: string): void {
   if (!context.notes.warnings.includes(code)) context.notes.warnings.push(code);
   say(line);
 }
