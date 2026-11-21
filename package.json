@@ -27,16 +27,16 @@
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.65.0",
+    "@playwright/test": "^1.65.1",
     "@testnotary/core": "workspace:*",
     "@testnotary/protocol": "workspace:*",
     "@testnotary/test-world": "workspace:*",
     "@types/node": "^24.19.2",
     "acorn": "^8.19.0",
     "esbuild": "^0.28.2",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.72.1",
+    "typescript-eslint": "^8.72.2",
     "vitest": "^5.1.0"
   }
 }
